@@ -74,3 +74,40 @@ class PKSampler(Sampler):
                 # Don't sample from group if it has less than k samples remaining
                 if group_samples_remaining[group_id] < self.k:
                     group_samples_remaining.pop(group_id)
+
+class HardMiningSampler(Sampler):
+    """
+    Sampler that prioritizes hard samples (e.g., those with highest loss or lowest confidence).
+    Optionally combines with PK sampling for class balance.
+    Args:
+        dataset (torch.utils.data.Dataset): The dataset to sample from.
+        hardness_scores (list[float]): List of hardness scores for each sample (higher = harder).
+        num_hard (int): Number of hard samples to sample per epoch.
+        base_sampler (Sampler, optional): Fallback/base sampler (e.g., PKSampler) for the rest of the batch.
+        batch_size (int): Total batch size.
+    """
+    def __init__(self, dataset, hardness_scores, num_hard, base_sampler=None, batch_size=32):
+        self.dataset = dataset
+        self.hardness_scores = hardness_scores
+        self.num_hard = num_hard
+        self.base_sampler = base_sampler
+        self.batch_size = batch_size
+        assert len(hardness_scores) == len(dataset)
+
+    def __iter__(self):
+        # Get indices of hardest samples
+        hard_indices = sorted(range(len(self.hardness_scores)), key=lambda i: self.hardness_scores[i], reverse=True)[:self.num_hard]
+        # Optionally, get the rest from base_sampler or randomly
+        if self.base_sampler is not None:
+            base_indices = [i for i in self.base_sampler if i not in hard_indices]
+        else:
+            base_indices = [i for i in range(len(self.dataset)) if i not in hard_indices]
+            random.shuffle(base_indices)
+        # Yield batches: each batch contains num_hard hard samples + the rest from base_sampler/random
+        total_indices = hard_indices + base_indices
+        for i in range(0, len(total_indices), self.batch_size):
+            batch = total_indices[i:i+self.batch_size]
+            yield from batch
+
+    def __len__(self):
+        return len(self.dataset)
