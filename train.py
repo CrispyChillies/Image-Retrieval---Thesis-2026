@@ -4,10 +4,8 @@ import random
 import torch
 from torch.optim import Adam
 from torch.utils.data import DataLoader
-
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet
-
 from loss import TripletMarginLoss
 from sampler import PKSampler
 from model import ResNet50, DenseNet121
