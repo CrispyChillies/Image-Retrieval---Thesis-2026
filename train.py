@@ -130,19 +130,28 @@ def main(args):
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
 
-    train_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-                                          transforms.Resize(256),
-                                          transforms.RandomResizedCrop(
-                                              224) if args.rand_resize else transforms.CenterCrop(224),
-                                          transforms.RandomHorizontalFlip(),
-                                          transforms.ToTensor(),
-                                          normalize])
+    # train_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
+    #                                       transforms.Resize(256),
+    #                                       transforms.RandomResizedCrop(
+    #                                           224) if args.rand_resize else transforms.CenterCrop(224),
+    #                                       transforms.RandomHorizontalFlip(),
+    #                                       transforms.ToTensor(),
+    #                                       normalize])
 
-    test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-                                         transforms.Resize(256),
-                                         transforms.CenterCrop(224),
-                                         transforms.ToTensor(),
-                                         normalize])
+    train_transform = transforms.Compose([
+        transforms.Lambda(lambda img: img.convert("RGB")),
+        transforms.Resize((224, 224)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ToTensor(),
+        normalize
+    ])
+
+    test_transform = transforms.Compose([
+        transforms.Lambda(lambda img: img.convert("RGB")),
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        normalize
+    ])
 
     # Set up dataset and dataloader for embedding learning using triplet loss
     if args.dataset == 'covid':
