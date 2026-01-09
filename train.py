@@ -8,6 +8,8 @@ import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet
 from loss import TripletMarginLoss
 from sampler import PKSampler
+
+from sampler import HardMiningSampler
 from model import ResNet50, DenseNet121
 
 
@@ -187,9 +189,22 @@ def main(args):
     # targets attribute with the same format.
     targets = train_dataset.labels
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size,
-                              sampler=PKSampler(targets, p, k),
-                              num_workers=args.workers)
+    # Initialize hardness scores (all zeros at first)
+    hardness_scores = [0.0] * len(train_dataset)
+    num_hard = batch_size // 2  # e.g., half batch from hard samples
+    base_sampler = PKSampler(targets, p, k)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        sampler=HardMiningSampler(
+            train_dataset,
+            hardness_scores,
+            num_hard=num_hard,
+            base_sampler=base_sampler,
+            batch_size=batch_size
+        ),
+        num_workers=args.workers
+    )
     test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
                              shuffle=False,
                              num_workers=args.workers)

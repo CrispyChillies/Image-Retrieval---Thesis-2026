@@ -7,7 +7,7 @@ from scipy import ndimage
 from scipy.ndimage import label, generate_binary_structure
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["SM_FRAMEWORK"] = "tf.keras"
 
 import efficientnet.tfkeras as efn
@@ -142,25 +142,25 @@ def segment_and_mask(img):
     masked_img = cv2.bitwise_and(img, img, mask=mask_resized)
     return masked_img
 
-def main():
-    import sys
-    # Example: test on all images in path_base_input
-    for path_ in sorted(glob.glob(path_base_input + '*.*')):
-        print('file:', path_.split('/')[-1])
-        img = cv2.imread(path_)
-        masked_img = segment_and_mask(img)
-        # Show original and masked image side by side
-        plt.figure(figsize=(10, 5))
-        plt.subplot(1, 2, 1)
-        plt.title('Original')
-        plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        plt.axis('off')
-        plt.subplot(1, 2, 2)
-        plt.title('Masked (Lung Only)')
-        plt.imshow(cv2.cvtColor(masked_img, cv2.COLOR_BGR2RGB))
-        plt.axis('off')
-        plt.show()
-    print("Hello")
+# def main():
+#     import sys
+#     # Example: test on all images in path_base_input
+#     for path_ in sorted(glob.glob(path_base_input + '*.*')):
+#         print('file:', path_.split('/')[-1])
+#         img = cv2.imread(path_)
+#         masked_img = segment_and_mask(img)
+#         # Show original and masked image side by side
+#         plt.figure(figsize=(10, 5))
+#         plt.subplot(1, 2, 1)
+#         plt.title('Original')
+#         plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+#         plt.axis('off')
+#         plt.subplot(1, 2, 2)
+#         plt.title('Masked (Lung Only)')
+#         plt.imshow(cv2.cvtColor(masked_img, cv2.COLOR_BGR2RGB))
+#         plt.axis('off')
+#         plt.show()
+#     print("Hello")
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
