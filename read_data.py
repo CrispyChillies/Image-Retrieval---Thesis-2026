@@ -87,9 +87,11 @@ class ChestXrayDataSet(Dataset):
             transform: optional transform to be applied on a sample.
         """
         mapping = {
-            'normal': 0,
-            'pneumonia': 1,
-            'COVID-19': 2
+            "normal": 0,
+            "pneumonia": 1,
+            "COVID-19": 2,
+            "negative": 1,
+            "positive": 2,
         }
 
         image_names = []
