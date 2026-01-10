@@ -62,3 +62,35 @@ class DenseNet121(nn.Module):
         # normalize features
         x = F.normalize(x, dim=1)
         return x
+
+
+class ConvNeXtV2(nn.Module):
+    """ConvNeXtV2 model for feature extraction.
+
+    Uses ConvNeXt Base architecture with optional embedding layer.
+    """
+
+    def __init__(self, pretrained=True, embedding_dim=None):
+        super(ConvNeXtV2, self).__init__()
+        # load pretrained model (using convnext_base)
+        self.convnext = models.convnext_base(pretrained=pretrained)
+        
+        # get the number of input features from the classifier
+        in_features = self.convnext.classifier[2].in_features
+        
+        # remove classifier - keep only features
+        self.convnext.classifier = nn.Identity()
+        
+        # optional embedding layer
+        self.fc = nn.Linear(
+            in_features, embedding_dim) if embedding_dim else None
+
+    def forward(self, x):
+        # extract features
+        x = self.convnext(x)
+        x = torch.flatten(x, 1)
+        if self.fc:
+            x = self.fc(x)
+        # normalize features
+        x = F.normalize(x, dim=1)
+        return x

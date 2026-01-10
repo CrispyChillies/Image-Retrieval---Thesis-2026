@@ -10,7 +10,7 @@ from loss import TripletMarginLoss
 from sampler import PKSampler
 
 from sampler import HardMiningSampler
-from model import ResNet50, DenseNet121
+from model import ResNet50, DenseNet121, ConvNeXtV2
 
 
 def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_freq):
@@ -111,6 +111,8 @@ def main(args):
         model = DenseNet121(embedding_dim=args.embedding_dim)
     elif args.model == 'resnet50':
         model = ResNet50(embedding_dim=args.embedding_dim)
+    elif args.model == 'convnextv2':
+        model = ConvNeXtV2(embedding_dim=args.embedding_dim)
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -239,7 +241,7 @@ def parse_args():
     parser.add_argument('--anomaly', action='store_true',
                         help='Train without anomaly class')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121 or resnet50)')
+                        help='Model to use (densenet121, resnet50, or convnextv2)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
     parser.add_argument('-p', '--labels-per-batch', default=3, type=int,
