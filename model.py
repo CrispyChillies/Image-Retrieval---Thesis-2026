@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 import torch.nn.functional as F
+import timm
 
 
 class ResNet50(nn.Module):
@@ -67,19 +68,20 @@ class DenseNet121(nn.Module):
 class ConvNeXtV2(nn.Module):
     """ConvNeXtV2 model for feature extraction.
 
-    Uses ConvNeXt Base architecture with optional embedding layer.
+    Uses ConvNeXtV2 Base from timm with optional embedding layer.
     """
 
     def __init__(self, pretrained=True, embedding_dim=None):
         super(ConvNeXtV2, self).__init__()
-        # load pretrained model (using convnext_base)
-        self.convnext = models.convnext_base(pretrained=pretrained)
+        # load pretrained model from timm
+        self.convnext = timm.create_model(
+            'convnextv2_base.fcmae_ft_in22k_in1k_384',
+            pretrained=pretrained,
+            num_classes=0  # removes classifier, returns features directly
+        )
         
-        # get the number of input features from the classifier
-        in_features = self.convnext.classifier[2].in_features
-        
-        # remove classifier - keep only features
-        self.convnext.classifier = nn.Identity()
+        # get the number of input features
+        in_features = self.convnext.num_features
         
         # optional embedding layer
         self.fc = nn.Linear(

@@ -134,6 +134,9 @@ def main(args):
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
 
+    # Use 384x384 for ConvNeXtV2, 224x224 for other models
+    img_size = 384 if args.model == 'convnextv2' else 224
+
     # train_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
     #                                       transforms.Resize(256),
     #                                       transforms.RandomResizedCrop(
@@ -144,7 +147,7 @@ def main(args):
 
     train_transform = transforms.Compose([
         transforms.Lambda(lambda img: img.convert("RGB")),
-        transforms.Resize((224, 224)),
+        transforms.Resize((img_size, img_size)),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.ToTensor(),
         normalize
@@ -152,7 +155,7 @@ def main(args):
 
     test_transform = transforms.Compose([
         transforms.Lambda(lambda img: img.convert("RGB")),
-        transforms.Resize((224, 224)),
+        transforms.Resize((img_size, img_size)),
         transforms.ToTensor(),
         normalize
     ])
