@@ -24,14 +24,14 @@ path_base_input = './samples/'
 BACKBONE = 'efficientnetb0'
 
 # Khởi tạo các model B0
-model1 = sm.Unet(BACKBONE, input_shape=IMAGE_SIZE, classes=1, activation='sigmoid', encoder_weights=None)
-model2 = sm.Unet(BACKBONE, input_shape=IMAGE_SIZE, classes=1, activation='sigmoid', encoder_weights=None)
-model3 = sm.Unet(BACKBONE, input_shape=IMAGE_SIZE, classes=1, activation='sigmoid', encoder_weights=None)
+model1 = sm.Unet(BACKBONE, input_shape=IMAGE_SIZE, classes=1, activation='sigmoid', encoder_weights='./models/temp_b0.weights.h5')
+model2 = sm.Unet(BACKBONE, input_shape=IMAGE_SIZE, classes=1, activation='sigmoid', encoder_weights='./models/temp_b0.weights.h5')
+model3 = sm.Unet(BACKBONE, input_shape=IMAGE_SIZE, classes=1, activation='sigmoid', encoder_weights='./models/temp_b0.weights.h5')
 
 BACKBONE = 'efficientnetb7'
 # Khởi tạo các model B7
-model4 = sm.Unet(BACKBONE, input_shape=IMAGE_SIZE, classes=1, activation='sigmoid', encoder_weights=None)
-model5 = sm.Unet(BACKBONE, input_shape=IMAGE_SIZE, classes=1, activation='sigmoid', encoder_weights=None)
+model4 = sm.Unet(BACKBONE, input_shape=IMAGE_SIZE, classes=1, activation='sigmoid', encoder_weights='./models/temp_b7.weights.h5')
+model5 = sm.Unet(BACKBONE, input_shape=IMAGE_SIZE, classes=1, activation='sigmoid', encoder_weights='./models/temp_b7.weights.h5')
 
 preprocess_input = sm.get_preprocessing(BACKBONE)
 

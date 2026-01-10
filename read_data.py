@@ -9,7 +9,7 @@ import csv
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
-from segmentation import segment_and_mask
+# from segmentation import segment_and_mask
 import numpy as np
 import cv2
 
@@ -121,15 +121,16 @@ class ChestXrayDataSet(Dataset):
         image_name = self.image_names[index]
         image = Image.open(image_name).convert('RGB')
         label = self.labels[index]
-        # Convert PIL image to numpy array (BGR for OpenCV)
-        image_np = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-        # Apply lung segmentation
-        masked_np = segment_and_mask(image_np)
-        # Convert back to PIL Image (RGB)
-        masked_image = Image.fromarray(cv2.cvtColor(masked_np, cv2.COLOR_BGR2RGB))
+        # Segmentation disabled for training
+        # # Convert PIL image to numpy array (BGR for OpenCV)
+        # image_np = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        # # Apply lung segmentation
+        # masked_np = segment_and_mask(image_np)
+        # # Convert back to PIL Image (RGB)
+        # masked_image = Image.fromarray(cv2.cvtColor(masked_np, cv2.COLOR_BGR2RGB))
         if self.transform is not None:
-            masked_image = self.transform(masked_image)
-        return masked_image, torch.tensor(label, dtype=torch.long)
+            image = self.transform(image)
+        return image, torch.tensor(label, dtype=torch.long)
 
     def __len__(self):
         return len(self.image_names)
