@@ -5,6 +5,9 @@ import torch
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
 from read_data import ISICDataSet, ChestXrayDataSet
 from loss import TripletMarginLoss
 from sampler import PKSampler
@@ -13,7 +16,7 @@ from sampler import HardMiningSampler
 from model import ResNet50, DenseNet121, ConvNeXtV2
 
 
-def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_freq):
+def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_freq, rank=0):
     model.train()
     running_loss = 0
     running_frac_pos_triplets = 0
@@ -34,8 +37,9 @@ def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_f
             i += 1
             avg_loss = running_loss / print_freq
             avg_trip = 100.0 * running_frac_pos_triplets / print_freq
-            print('[{:d}, {:d}] | loss: {:.4f} | % avg hard triplets: {:.2f}%'.format(
-                epoch, i, avg_loss, avg_trip))
+            if rank == 0:
+                print('[{:d}, {:d}] | loss: {:.4f} | % avg hard triplets: {:.2f}%'.format(
+                    epoch, i, avg_loss, avg_trip))
             running_loss = 0
             running_frac_pos_triplets = 0
 
@@ -58,18 +62,27 @@ def retrieval_accuracy(output, target, topk=(1,)):
 
 
 @torch.no_grad()
-def evaluate(model, loader, device):
+def evaluate(model, loader, device, rank=0, world_size=1):
     model.eval()
     embeds, labels = [], []
 
     for data in loader:
         samples, _labels = data[0].to(device), data[1]
         out = model(samples)
-        embeds.append(out)
+        embeds.append(out.cpu())
         labels.append(_labels)
 
     embeds = torch.cat(embeds, dim=0)
     labels = torch.cat(labels, dim=0)
+
+    # Gather embeddings and labels from all processes if using DDP
+    if world_size > 1:
+        embeds_list = [torch.zeros_like(embeds) for _ in range(world_size)]
+        labels_list = [torch.zeros_like(labels) for _ in range(world_size)]
+        dist.all_gather(embeds_list, embeds)
+        dist.all_gather(labels_list, labels)
+        embeds = torch.cat(embeds_list, dim=0)
+        labels = torch.cat(labels_list, dim=0)
 
     dists = -torch.cdist(embeds, embeds)
     dists.fill_diagonal_(torch.tensor(float('-inf')))
@@ -77,7 +90,8 @@ def evaluate(model, loader, device):
     # top-k accuracy (i.e. R@K)
     accuracy = retrieval_accuracy(dists, labels)[0].item()
 
-    print('accuracy: {:.3f}%'.format(accuracy))
+    if rank == 0:
+        print('accuracy: {:.3f}%'.format(accuracy))
 
 
 def save(model, epoch, save_dir, args):
@@ -97,11 +111,24 @@ def save(model, epoch, save_dir, args):
 
 
 def main(args):
-    # Set random seed for reproducibility
-    random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    # Setup DDP if enabled
+    rank = 0
+    world_size = 1
+    if args.use_ddp:
+        dist.init_process_group(backend='nccl')
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        torch.cuda.set_device(rank)
+        device = torch.device(f'cuda:{rank}')
+        if rank == 0:
+            print(f"Using DDP with {world_size} GPUs")
+    else:
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    # Set random seed for reproducibility
+    random.seed(args.seed + rank)
+    torch.manual_seed(args.seed + rank)
+
     p = args.labels_per_batch if not args.anomaly else args.labels_per_batch - 1
     k = args.samples_per_label
     batch_size = p * k
@@ -117,16 +144,23 @@ def main(args):
         raise NotImplementedError('Model not supported!')
 
     if os.path.isfile(args.resume):
-        print("=> loading checkpoint")
-        checkpoint = torch.load(args.resume)
+        if rank == 0:
+            print("=> loading checkpoint")
+        checkpoint = torch.load(args.resume, map_location=device)
         if 'state_dict' in checkpoint:
             checkpoint = checkpoint['state_dict']
         model.load_state_dict(checkpoint, strict=False)
-        print("=> loaded checkpoint")
+        if rank == 0:
+            print("=> loaded checkpoint")
     else:
-        print("=> no checkpoint found")
+        if rank == 0:
+            print("=> no checkpoint found")
 
     model.to(device)
+    
+    # Wrap model with DDP if enabled
+    if args.use_ddp:
+        model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
 
     criterion = TripletMarginLoss(margin=args.margin)
     optimizer = Adam(model.parameters(), lr=args.lr)
@@ -194,35 +228,72 @@ def main(args):
     # targets attribute with the same format.
     targets = train_dataset.labels
 
-    # Initialize hardness scores (all zeros at first)
-    hardness_scores = [0.0] * len(train_dataset)
-    num_hard = batch_size // 2  # e.g., half batch from hard samples
-    base_sampler = PKSampler(targets, p, k)
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        sampler=HardMiningSampler(
+    # Setup samplers and dataloaders
+    if args.use_ddp:
+        # Use DistributedSampler for DDP
+        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+        test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank, shuffle=False)
+        train_loader = DataLoader(
             train_dataset,
-            hardness_scores,
-            num_hard=num_hard,
-            base_sampler=base_sampler,
-            batch_size=batch_size
-        ),
-        num_workers=args.workers
-    )
-    test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
-                             shuffle=False,
-                             num_workers=args.workers)
+            batch_size=batch_size,
+            sampler=train_sampler,
+            num_workers=args.workers,
+            pin_memory=True
+        )
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=args.eval_batch_size,
+            sampler=test_sampler,
+            num_workers=args.workers,
+            pin_memory=True
+        )
+    else:
+        # Initialize hardness scores (all zeros at first)
+        hardness_scores = [0.0] * len(train_dataset)
+        num_hard = batch_size // 2  # e.g., half batch from hard samples
+        base_sampler = PKSampler(targets, p, k)
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            sampler=HardMiningSampler(
+                train_dataset,
+                hardness_scores,
+                num_hard=num_hard,
+                base_sampler=base_sampler,
+                batch_size=batch_size
+            ),
+            num_workers=args.workers
+        )
+        test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
+                                 shuffle=False,
+                                 num_workers=args.workers)
 
     for epoch in range(1, args.epochs + 1):
-        print('Training...')
+        if args.use_ddp:
+            train_loader.sampler.set_epoch(epoch)
+        if rank == 0:
+            print('Training...')
         train_epoch(model, optimizer, criterion, train_loader,
-                    device, epoch, args.print_freq)
+                    device, epoch, args.print_freq, rank=rank)
 
-    print('Saving...')
-    save(model, epoch, args.save_dir, args)
-    print('Evaluating...')
-    evaluate(model, test_loader, device)
+    # Save only from rank 0
+    if rank == 0:
+        print('Saving...')
+        # Unwrap DDP model before saving
+        model_to_save = model.module if args.use_ddp else model
+        save(model_to_save, epoch, args.save_dir, args)
+    
+    # Synchronize all processes before evaluation
+    if args.use_ddp:
+        dist.barrier()
+    
+    if rank == 0:
+        print('Evaluating...')
+    evaluate(model, test_loader, device, rank=rank, world_size=world_size)
+    
+    # Cleanup DDP
+    if args.use_ddp:
+        dist.destroy_process_group()
 
 
 def parse_args():
@@ -268,6 +339,8 @@ def parse_args():
                         help='Model save directory')
     parser.add_argument('--resume', default='',
                         help='Resume from checkpoint')
+    parser.add_argument('--use-ddp', action='store_true',
+                        help='Use Distributed Data Parallel training')
 
     return parser.parse_args()
 
