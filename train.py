@@ -70,7 +70,7 @@ def evaluate(model, loader, device, rank=0, world_size=1):
         samples, _labels = data[0].to(device), data[1]
         out = model(samples)
         embeds.append(out)  # Keep on GPU for gathering
-        labels.append(_labels)
+        labels.append(_labels.to(device))  # Move labels to GPU for gathering
 
     embeds = torch.cat(embeds, dim=0)
     labels = torch.cat(labels, dim=0)
