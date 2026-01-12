@@ -284,28 +284,30 @@ def main(args):
                                  shuffle=False,
                                  num_workers=args.workers)
 
-    # for epoch in range(1, args.epochs + 1):
-    #     if args.use_ddp:
-    #         train_loader.sampler.set_epoch(epoch)
-    #     if rank == 0:
-    #         print('Training...')
-    #     train_epoch(model, optimizer, criterion, train_loader,
-    #                 device, epoch, args.print_freq, rank=rank)
+    for epoch in range(1, args.epochs + 1):
+        if args.use_ddp:
+            train_loader.sampler.set_epoch(epoch)
+        if rank == 0:
+            print('Training...')
+        train_epoch(model, optimizer, criterion, train_loader,
+                    device, epoch, args.print_freq, rank=rank)
 
-    # # Save only from rank 0
-    # if rank == 0:
-    #     print('Saving...')
-    #     # Unwrap DDP model before saving
-    #     model_to_save = model.module if args.use_ddp else model
-    #     save(model_to_save, epoch, args.save_dir, args)
-    
-    # Synchronize all processes before evaluation
-    if args.use_ddp:
-        dist.barrier()
-    
-    if rank == 0:
-        print('Evaluating...')
-    evaluate(model, test_loader, device, rank=rank, world_size=world_size)
+        # Save only from rank 0
+        if rank == 0:
+            print('Saving...')
+            # Unwrap DDP model before saving
+            model_to_save = model.module if args.use_ddp else model
+            save(model_to_save, epoch, args.save_dir, args)
+        
+        # Evaluate every 3 epochs
+        if epoch % 3 == 0:
+            # Synchronize all processes before evaluation
+            if args.use_ddp:
+                dist.barrier()
+            
+            if rank == 0:
+                print('Evaluating...')
+            evaluate(model, test_loader, device, rank=rank, world_size=world_size)
     
     # Cleanup DDP
     if args.use_ddp:
