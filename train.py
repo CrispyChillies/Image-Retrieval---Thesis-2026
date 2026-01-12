@@ -132,6 +132,12 @@ def main(args):
     p = args.labels_per_batch if not args.anomaly else args.labels_per_batch - 1
     k = args.samples_per_label
     batch_size = p * k
+    
+    # For DDP, keep same batch size per GPU (effective batch = batch_size * world_size)
+    # This maximizes GPU utilization and training speed
+    per_gpu_batch_size = batch_size
+    if rank == 0 and args.use_ddp:
+        print(f"Per-GPU batch size: {per_gpu_batch_size}, Effective batch size: {per_gpu_batch_size * world_size}")
 
     # Choose model
     if args.model == 'densenet121':
@@ -233,21 +239,25 @@ def main(args):
     # Setup samplers and dataloaders
     if args.use_ddp:
         # Use DistributedSampler for DDP
-        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True, drop_last=True)
         test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank, shuffle=False)
         train_loader = DataLoader(
             train_dataset,
-            batch_size=batch_size,
+            batch_size=per_gpu_batch_size,
             sampler=train_sampler,
             num_workers=args.workers,
-            pin_memory=True
+            pin_memory=True,
+            prefetch_factor=2 if args.workers > 0 else None,
+            persistent_workers=True if args.workers > 0 else False
         )
         test_loader = DataLoader(
             test_dataset,
             batch_size=args.eval_batch_size,
             sampler=test_sampler,
             num_workers=args.workers,
-            pin_memory=True
+            pin_memory=True,
+            prefetch_factor=2 if args.workers > 0 else None,
+            persistent_workers=True if args.workers > 0 else False
         )
     else:
         # Initialize hardness scores (all zeros at first)
