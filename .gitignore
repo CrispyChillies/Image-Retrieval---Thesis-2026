@@ -2,3 +2,4 @@ models/
 samples/
 venv/
 __pycache__/
+saliency_results/
