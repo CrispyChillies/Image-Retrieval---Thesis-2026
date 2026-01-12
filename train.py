@@ -47,7 +47,7 @@ def retrieval_accuracy(output, target, topk=(1,)):
         batch_size = target.size(0)
 
         _, pred = output.topk(maxk, 1, True, True)
-        pred = target[pred].t()
+        pred = target[pred.cpu()].t()
         correct = pred.eq(target[None])
 
         res = []
@@ -219,10 +219,10 @@ def main(args):
         train_epoch(model, optimizer, criterion, train_loader,
                     device, epoch, args.print_freq)
 
-    print('Evaluating...')
-    evaluate(model, test_loader, device)
     print('Saving...')
     save(model, epoch, args.save_dir, args)
+    print('Evaluating...')
+    evaluate(model, test_loader, device)
 
 
 def parse_args():
