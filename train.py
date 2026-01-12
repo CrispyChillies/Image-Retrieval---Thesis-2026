@@ -69,7 +69,7 @@ def evaluate(model, loader, device, rank=0, world_size=1):
     for data in loader:
         samples, _labels = data[0].to(device), data[1]
         out = model(samples)
-        embeds.append(out.cpu())
+        embeds.append(out)  # Keep on GPU for gathering
         labels.append(_labels)
 
     embeds = torch.cat(embeds, dim=0)
@@ -83,6 +83,10 @@ def evaluate(model, loader, device, rank=0, world_size=1):
         dist.all_gather(labels_list, labels)
         embeds = torch.cat(embeds_list, dim=0)
         labels = torch.cat(labels_list, dim=0)
+    
+    # Move to CPU after gathering
+    embeds = embeds.cpu()
+    labels = labels.cpu()
 
     dists = -torch.cdist(embeds, embeds)
     dists.fill_diagonal_(torch.tensor(float('-inf')))
@@ -280,20 +284,20 @@ def main(args):
                                  shuffle=False,
                                  num_workers=args.workers)
 
-    for epoch in range(1, args.epochs + 1):
-        if args.use_ddp:
-            train_loader.sampler.set_epoch(epoch)
-        if rank == 0:
-            print('Training...')
-        train_epoch(model, optimizer, criterion, train_loader,
-                    device, epoch, args.print_freq, rank=rank)
+    # for epoch in range(1, args.epochs + 1):
+    #     if args.use_ddp:
+    #         train_loader.sampler.set_epoch(epoch)
+    #     if rank == 0:
+    #         print('Training...')
+    #     train_epoch(model, optimizer, criterion, train_loader,
+    #                 device, epoch, args.print_freq, rank=rank)
 
-    # Save only from rank 0
-    if rank == 0:
-        print('Saving...')
-        # Unwrap DDP model before saving
-        model_to_save = model.module if args.use_ddp else model
-        save(model_to_save, epoch, args.save_dir, args)
+    # # Save only from rank 0
+    # if rank == 0:
+    #     print('Saving...')
+    #     # Unwrap DDP model before saving
+    #     model_to_save = model.module if args.use_ddp else model
+    #     save(model_to_save, epoch, args.save_dir, args)
     
     # Synchronize all processes before evaluation
     if args.use_ddp:
