@@ -160,7 +160,9 @@ def main(args):
     
     # Wrap model with DDP if enabled
     if args.use_ddp:
-        model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
+        model = DDP(model, device_ids=[rank], output_device=rank, 
+                    find_unused_parameters=False, 
+                    gradient_as_bucket_view=False)  # Avoids stride mismatch warning
 
     criterion = TripletMarginLoss(margin=args.margin)
     optimizer = Adam(model.parameters(), lr=args.lr)
