@@ -63,7 +63,8 @@ def evaluate(model, loader, device):
     embeds, labels = [], []
 
     for data in loader:
-        samples, _labels = data[0].to(device), data[1]
+        samples = data[0].to(device)
+        _labels = data[1].to(device)
         out = model(samples)
         embeds.append(out)
         labels.append(_labels)
