@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet
 
-from model import ResNet50, DenseNet121
+from model import ResNet50, DenseNet121, ConvNeXtV2
 
 
 def retrieval_accuracy(output, target, topk=(1,)):
@@ -168,6 +168,8 @@ def main(args):
         model = DenseNet121(embedding_dim=args.embedding_dim)
     elif args.model == 'resnet50':
         model = ResNet50(embedding_dim=args.embedding_dim)
+    elif args.model == 'convnextv2':
+        model = ConvNeXtV2(embedding_dim=args.embedding_dim)
     else:
         raise NotImplementedError('Model not supported!')
 
