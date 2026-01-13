@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet
 
-from model import ResNet50, DenseNet121
+from model import ResNet50, DenseNet121, ConvNeXtV2
 
 
 def retrieval_accuracy(output, target, topk=(1,)):
@@ -168,6 +168,8 @@ def main(args):
         model = DenseNet121(embedding_dim=args.embedding_dim)
     elif args.model == 'resnet50':
         model = ResNet50(embedding_dim=args.embedding_dim)
+    elif args.model == 'convnextv2':
+        model = ConvNeXtV2(embedding_dim=args.embedding_dim)
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -186,11 +188,15 @@ def main(args):
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
 
-    test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-                                         transforms.Resize(256),
-                                         transforms.CenterCrop(224),
-                                         transforms.ToTensor(),
-                                         normalize])
+    # Use 384x384 for ConvNeXtV2, 224x224 for other models
+    img_size = 384 if args.model == 'convnextv2' else 224
+
+    test_transform = transforms.Compose([
+        transforms.Lambda(lambda img: img.convert('RGB')),
+        transforms.Resize((img_size, img_size)),
+        transforms.ToTensor(),
+        normalize
+    ])
 
     # Set up dataset and dataloader
     if args.dataset == 'covid':
@@ -227,7 +233,7 @@ def parse_args():
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121 or resnet50)')
+                        help='Model to use (densenet121, resnet50, or convnextv2)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
     parser.add_argument('--eval-batch-size', default=64, type=int)
@@ -236,7 +242,7 @@ def parse_args():
     parser.add_argument('--save-dir', default='./results',
                         help='Result save directory')
     parser.add_argument('--resume', default='',
-                        help='Resume from checkpoint')
+                        help='Resume from checkpoint')  
 
     return parser.parse_args()
 
