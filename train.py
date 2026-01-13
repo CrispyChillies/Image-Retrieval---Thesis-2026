@@ -4,12 +4,12 @@ import random
 import torch
 from torch.optim import Adam
 from torch.utils.data import DataLoader
+
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet
+
 from loss import TripletMarginLoss
 from sampler import PKSampler
-
-from sampler import HardMiningSampler
 from model import ResNet50, DenseNet121
 
 
@@ -132,28 +132,19 @@ def main(args):
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
 
-    # train_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-    #                                       transforms.Resize(256),
-    #                                       transforms.RandomResizedCrop(
-    #                                           224) if args.rand_resize else transforms.CenterCrop(224),
-    #                                       transforms.RandomHorizontalFlip(),
-    #                                       transforms.ToTensor(),
-    #                                       normalize])
+    train_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
+                                          transforms.Resize(256),
+                                          transforms.RandomResizedCrop(
+                                              224) if args.rand_resize else transforms.CenterCrop(224),
+                                          transforms.RandomHorizontalFlip(),
+                                          transforms.ToTensor(),
+                                          normalize])
 
-    train_transform = transforms.Compose([
-        transforms.Lambda(lambda img: img.convert("RGB")),
-        transforms.Resize((224, 224)),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.ToTensor(),
-        normalize
-    ])
-
-    test_transform = transforms.Compose([
-        transforms.Lambda(lambda img: img.convert("RGB")),
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        normalize
-    ])
+    test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
+                                         transforms.Resize(256),
+                                         transforms.CenterCrop(224),
+                                         transforms.ToTensor(),
+                                         normalize])
 
     # Set up dataset and dataloader for embedding learning using triplet loss
     if args.dataset == 'covid':
@@ -189,22 +180,9 @@ def main(args):
     # targets attribute with the same format.
     targets = train_dataset.labels
 
-    # Initialize hardness scores (all zeros at first)
-    hardness_scores = [0.0] * len(train_dataset)
-    num_hard = batch_size // 2  # e.g., half batch from hard samples
-    base_sampler = PKSampler(targets, p, k)
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        sampler=HardMiningSampler(
-            train_dataset,
-            hardness_scores,
-            num_hard=num_hard,
-            base_sampler=base_sampler,
-            batch_size=batch_size
-        ),
-        num_workers=args.workers
-    )
+    train_loader = DataLoader(train_dataset, batch_size=batch_size,
+                              sampler=PKSampler(targets, p, k),
+                              num_workers=args.workers)
     test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
                              shuffle=False,
                              num_workers=args.workers)

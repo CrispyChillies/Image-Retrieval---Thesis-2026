@@ -20,7 +20,7 @@ IMAGE_SIZE = (256,256,3)
 
 path_base_model = './models/'
 path_base_input = './samples/'
-
+    
 BACKBONE = 'efficientnetb0'
 
 # Khởi tạo các model B0
