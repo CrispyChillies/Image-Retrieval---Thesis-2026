@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 import torch.nn.functional as F
+from transformers import AutoModel
 
 
 class ResNet50(nn.Module):
@@ -62,3 +63,27 @@ class DenseNet121(nn.Module):
         # normalize features
         x = F.normalize(x, dim=1)
         return x
+
+class MedSigLIPGoogle(nn.Module):
+    def __init__(self, model_name="google/medsiglip-448"):
+        super().__init__()
+        self.model = AutoModel.from_pretrained(model_name)
+
+        # embedding dùng cho retrieval
+        self.embedding_dim = self.model.config.projection_dim
+
+        # optional: freeze text tower
+        if hasattr(self.model, "text_model"):
+            for p in self.model.text_model.parameters():
+                p.requires_grad = False
+
+    def forward(self, x):
+        """
+        x: (B, 3, 448, 448), normalized [-1, 1]
+        """
+        outputs = self.model(pixel_values=x)
+
+        embeds = outputs.image_embeds  # <<< QUAN TRỌNG
+        embeds = F.normalize(embeds, dim=-1)
+
+        return embeds

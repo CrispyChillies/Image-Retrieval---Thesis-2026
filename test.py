@@ -17,6 +17,8 @@ def retrieval_accuracy(output, target, topk=(1,)):
         batch_size = target.size(0)
 
         _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.cpu()
+        target = target.cpu()
         pred = target[pred].t()
         correct = pred.eq(target[None])
 
@@ -125,7 +127,8 @@ def evaluate(model, loader, device, args):
     embeds, labels = [], []
 
     for data in loader:
-        samples, _labels = data[0].to(device), data[1]
+        samples = data[0].to(device)
+        _labels = data[1].to(device)
         out = model(samples)
         embeds.append(out)
         labels.append(_labels)
@@ -134,17 +137,17 @@ def evaluate(model, loader, device, args):
     labels = torch.cat(labels, dim=0)
 
     dists = -torch.cdist(embeds, embeds)
-    dists.fill_diagonal_(torch.tensor(float('-inf')))
+    dists.fill_diagonal_(float('-inf'))
 
     # top-k accuracy (i.e. R@K)
     kappas = [1, 5, 10]
     accuracy = retrieval_accuracy(dists, labels, topk=kappas)
-    accuracy = torch.stack(accuracy).numpy()
+    accuracy = torch.stack(accuracy).cpu().numpy()
     print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
 
     # mean average precision and mean precision (i.e. mAP and pr)
     ranks = torch.argsort(dists, dim=0, descending=True)
-    mAP, _, pr, _ = compute_map(ranks.cpu().numpy(), labels.numpy(), kappas)
+    mAP, _, pr, _ = compute_map(ranks.cpu().numpy(),  labels.cpu().numpy(), kappas)
     print('>> mAP: {:.2f}%'.format(mAP * 100.0))
     print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
 

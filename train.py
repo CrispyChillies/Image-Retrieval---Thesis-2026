@@ -47,6 +47,8 @@ def retrieval_accuracy(output, target, topk=(1,)):
         batch_size = target.size(0)
 
         _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.cpu()
+        target = target.cpu()
         pred = target[pred].t()
         correct = pred.eq(target[None])
 
@@ -73,7 +75,7 @@ def evaluate(model, loader, device):
     labels = torch.cat(labels, dim=0)
 
     dists = -torch.cdist(embeds, embeds)
-    dists.fill_diagonal_(torch.tensor(float('-inf')))
+    dists.fill_diagonal_(float('-inf'))
 
     # top-k accuracy (i.e. R@K)
     accuracy = retrieval_accuracy(dists, labels)[0].item()
