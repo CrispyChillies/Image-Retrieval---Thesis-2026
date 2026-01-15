@@ -4,8 +4,9 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+
 import torchvision.transforms as transforms
-from read_data import ISICDataSet, ChestXrayDataSet
+from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
 
 from model import ResNet50, DenseNet121
 
@@ -130,7 +131,7 @@ def evaluate(model, loader, device, args):
         samples = data[0].to(device)
         _labels = data[1].to(device)
         out = model(samples)
-        embeds.append(out)
+        embeds.append(out)P
         labels.append(_labels)
 
     embeds = torch.cat(embeds, dim=0)
@@ -206,6 +207,10 @@ def main(args):
                                    image_list_file=args.test_image_list,
                                    mask_dir=args.mask_dir,
                                    transform=test_transform)
+    elif args.dataset == 'tbx11k':
+        test_dataset = TBX11kDataSet(data_dir=args.test_dataset_dir,
+                                     csv_file=args.test_image_list,
+                                     transform=test_transform)
     else:
         raise NotImplementedError('Dataset not supported!')
 

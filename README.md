@@ -1,3 +1,32 @@
+## Sử dụng dataset TBX11k
+
+Để huấn luyện hoặc đánh giá với dataset TBX11k:
+
+1. Đảm bảo bạn có các file `train.csv` và `test.csv` đúng định dạng trong thư mục, ví dụ: `tbx_11/train.csv` và `tbx_11/test.csv`.
+2. Thư mục chứa ảnh nên là `samples/` hoặc đường dẫn bạn mong muốn.
+3. Khi chạy lệnh train/test, truyền các tham số sau:
+
+```
+python train.py --dataset tbx11k \
+	--dataset-dir ./samples \
+	--train-image-list ./tbx_11/train.csv \
+	--test-image-list ./tbx_11/test.csv
+```
+
+Tương tự cho test:
+
+```
+python test.py --dataset tbx11k \
+	--test-dataset-dir ./samples \
+	--test-image-list ./tbx_11/test.csv
+```
+
+Nhãn sẽ được ánh xạ như sau:
+- `tb` → 0
+- `no_tb` → 1
+- `sick_but_no_tb` → 2
+
+Không cần sử dụng bbox cho retrieval.
 # X-MIR: EXplainable Medical Image Retrieval
 
 Code accompanying the WACV '22 paper "X-MIR: EXplainable Medical Image Retrieval"
