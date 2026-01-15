@@ -130,7 +130,7 @@ def main(args):
 
     model.to(device)
 
-    criterion = TripletMarginLoss(margin=args.margin)
+    criterion = TripletMarginLoss(margin=args.margin, mining='batch_hard')
     optimizer = Adam(model.parameters(), lr=args.lr)
 
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
