@@ -96,3 +96,33 @@ class ConvNeXtV2(nn.Module):
         # normalize features
         x = F.normalize(x, dim=1)
         return x
+
+
+class SwinV2(nn.Module):
+    # SwinV2 model for feature extraction using timm
+
+    def __init__(self, pretrained=True, embedding_dim=None):
+        super(SwinV2, self).__init__()
+        # load pretrained model from timm
+        self.swinv2 = timm.create_model(
+            'swinv2_base_window12to24_192to384.ms_in22k_ft_in1k',
+            pretrained=pretrained,
+            num_classes=0  # removes classifier, returns features directly
+        )
+        
+        # get the number of input features
+        in_features = self.swinv2.num_features
+        
+        # optional embedding layer
+        self.fc = nn.Linear(
+            in_features, embedding_dim) if embedding_dim else None
+    
+    def forward(self, x):
+        # extract features
+        x = self.swinv2(x)
+        x = torch.flatten(x, 1)
+        if self.fc:
+            x = self.fc(x)
+        # normalize features
+        x = F.normalize(x, dim=1)
+        return x

@@ -12,7 +12,7 @@ from read_data import ISICDataSet, ChestXrayDataSet
 from loss import TripletMarginLoss
 from sampler import PKSampler
 
-from model import ResNet50, DenseNet121, ConvNeXtV2
+from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2
 
 
 def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_freq, rank=0):
@@ -77,16 +77,17 @@ def evaluate(model, loader, device, rank=0, world_size=1):
 
     # Gather embeddings and labels from all processes if using DDP
     if world_size > 1:
+        # Move back to GPU temporarily for gathering
+        embeds = embeds.to(device)
+        labels = labels.to(device)
         embeds_list = [torch.zeros_like(embeds) for _ in range(world_size)]
         labels_list = [torch.zeros_like(labels) for _ in range(world_size)]
         dist.all_gather(embeds_list, embeds)
         dist.all_gather(labels_list, labels)
-        embeds = torch.cat(embeds_list, dim=0)
-        labels = torch.cat(labels_list, dim=0)
+        embeds = torch.cat(embeds_list, dim=0).cpu()
+        labels = torch.cat(labels_list, dim=0).cpu()
     
-    # Move to CPU after gathering
-    embeds = embeds.cpu()
-    labels = labels.cpu()
+    # Already on CPU from per-batch moves
 
     dists = -torch.cdist(embeds, embeds)
     dists.fill_diagonal_(torch.tensor(float('-inf')))
@@ -150,6 +151,8 @@ def main(args):
         model = ResNet50(embedding_dim=args.embedding_dim)
     elif args.model == 'convnextv2':
         model = ConvNeXtV2(embedding_dim=args.embedding_dim)
+    elif args.model == 'swinv2':
+        model = SwinV2(embedding_dim=args.embedding_dim)
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -293,8 +296,12 @@ def main(args):
             model_to_save = model.module if args.use_ddp else model
             save(model_to_save, epoch, args.save_dir, args)
         
-        # Evaluate every 3 epochs
+        # Evaluate every 2 epochs
         if epoch % 2 == 0:
+            # Clear CUDA cache before evaluation to avoid OOM
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             # Synchronize all processes before evaluation
             if args.use_ddp:
                 dist.barrier()
@@ -302,6 +309,10 @@ def main(args):
             if rank == 0:
                 print('Evaluating...')
             evaluate(model, test_loader, device, rank=rank, world_size=world_size)
+            
+            # Clear cache after evaluation
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
     
     # Cleanup DDP
     if args.use_ddp:
@@ -327,7 +338,7 @@ def parse_args():
     parser.add_argument('--anomaly', action='store_true',
                         help='Train without anomaly class')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, or convnextv2)')
+                        help='Model to use (densenet121, resnet50, convnextv2, or swinv2)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
     parser.add_argument('-p', '--labels-per-batch', default=3, type=int,
