@@ -294,7 +294,7 @@ def main(args):
             save(model_to_save, epoch, args.save_dir, args)
         
         # Evaluate every 3 epochs
-        if epoch % 3 == 0:
+        if epoch % 2 == 0:
             # Synchronize all processes before evaluation
             if args.use_ddp:
                 dist.barrier()
