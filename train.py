@@ -12,7 +12,7 @@ from read_data import ISICDataSet, ChestXrayDataSet
 from loss import TripletMarginLoss
 from sampler import PKSampler
 
-from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2
+from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2, SwinV2
 
 
 def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_freq, rank=0):
@@ -183,8 +183,8 @@ def main(args):
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
 
-    # Use 384x384 for ConvNeXtV2, 224x224 for other models
-    img_size = 384 if args.model == 'convnextv2' else 224
+    # Use 384x384 for ConvNeXtV2 and SwinV2, 224x224 for other models
+    img_size = 384 if args.model in ['convnextv2', 'swinv2'] else 224
 
     # train_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
     #                                       transforms.Resize(256),
