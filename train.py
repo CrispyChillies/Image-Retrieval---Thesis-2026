@@ -13,19 +13,49 @@ from loss import TripletMarginLoss
 from sampler import PKSampler
 from model import ResNet50, DenseNet121
 
+def freeze_backbone(model):
+    for p in model.f1.parameters():
+        p.requires_grad = False
+    for p in model.f2.parameters():
+        p.requires_grad = False
 
-def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_freq):
+def unfreeze_backbone(model):
+    for p in model.f1.parameters():
+        p.requires_grad = True
+    for p in model.f2.parameters():
+        p.requires_grad = True
+
+def freeze_attention(model):
+    for p in model.attention.parameters():
+        p.requires_grad = False
+
+def unfreeze_attention(model):
+    for p in model.attention.parameters():
+        p.requires_grad = True
+
+def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_freq, lambda_area=0.1, lambda_sparse=0.01):
     model.train()
     running_loss = 0
     running_frac_pos_triplets = 0
+
     for i, data in enumerate(data_loader):
         optimizer.zero_grad()
         samples, targets = data[0].to(device), data[1].to(device)
 
-        embeddings = model(samples)
+        embeddings, attn = model(samples, return_attention=True)
 
+        # Metric Loss 
         loss, frac_pos_triplets = criterion(embeddings, targets)
+        
+        # Attention Loss
+        loss_area = attn.mean() 
+        loss_sparse = torch.mean(attn * torch.log(attn + 1e-8)) 
+
+        loss = loss + lambda_area * loss_area + lambda_sparse * loss_sparse
+
         loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         optimizer.step()
 
         running_loss += loss.item()
@@ -131,7 +161,16 @@ def main(args):
     model.to(device)
 
     criterion = TripletMarginLoss(margin=args.margin, mining='batch_hard')
-    optimizer = Adam(model.parameters(), lr=args.lr)
+    
+    # optimizer = Adam(model.parameters(), lr=args.lr)
+    optimizer = Adam([
+        {'params': model.f1.parameters(), 'lr': args.lr * 0.1},
+        {'params': model.f2.parameters(), 'lr': args.lr * 0.1},
+        {'params': model.attention.parameters(), 'lr': args.lr * 0.01},  # 👈 attention LR nhỏ
+        {'params': model.bnneck.parameters(), 'lr': args.lr},
+        {'params': model.fc.parameters(), 'lr': args.lr},
+    ])
+
 
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
@@ -197,11 +236,40 @@ def main(args):
     test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
                              shuffle=False,
                              num_workers=args.workers)
-
+    
+    freeze_epochs = 10
     for epoch in range(1, args.epochs + 1):
-        print('Training...')
-        train_epoch(model, optimizer, criterion, train_loader,
-                    device, epoch, args.print_freq)
+
+        # ---- Unfreeze backbone ----
+        if epoch == 1:
+            freeze_backbone(model)
+            freeze_attention(model)
+            print("Stage 1: Warm-up (freeze backbone + attention)")
+
+        if epoch == 11:
+            unfreeze_attention(model)
+            print("Stage 2: Attention learning")
+
+        if epoch == 21:
+            unfreeze_backbone(model)
+            print("Stage 3: Full fine-tuning")
+
+        print(f'Training epoch {epoch}...')
+        train_epoch(
+            model,
+            optimizer,
+            criterion,
+            train_loader,
+            device,
+            epoch,
+            args.print_freq
+        )
+
+
+    # for epoch in range(1, args.epochs + 1):
+    #     print('Training...')
+    #     train_epoch(model, optimizer, criterion, train_loader,
+    #                 device, epoch, args.print_freq)
 
     print('Evaluating...')
     evaluate(model, test_loader, device)

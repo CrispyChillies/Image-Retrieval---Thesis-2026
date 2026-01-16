@@ -131,7 +131,7 @@ def evaluate(model, loader, device, args):
         samples = data[0].to(device)
         _labels = data[1].to(device)
         out = model(samples)
-        embeds.append(out)P
+        embeds.append(out)
         labels.append(_labels)
 
     embeds = torch.cat(embeds, dim=0)

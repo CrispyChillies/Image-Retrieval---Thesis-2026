@@ -28,53 +28,109 @@ class ResNet50(nn.Module):
         x = F.normalize(x, dim=1)
         return x
 
-class SpatialAttention(nn.Module):
-    def __init__(self, kernel_size=7):
+class SpatialAttentionMask(nn.Module):
+    """
+    Generate soft spatial attention mask m 
+    """
+    def __init__(self, in_channels, hidden_ratio=4):
         super().__init__()
-        self.conv = nn.Conv2d(
-            2, 1,
-            kernel_size=kernel_size,
-            padding=kernel_size // 2,
-            bias=False
-        )
-        self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x):
-        avg_out = torch.mean(x, dim=1, keepdim=True)
-        max_out, _ = torch.max(x, dim=1, keepdim=True)
-        x_cat = torch.cat([avg_out, max_out], dim=1)
-        attn = self.sigmoid(self.conv(x_cat))
-        return x * attn
-    
-class ChannelAttention(nn.Module):
-    def __init__(self, in_planes, ratio=16):
-        super().__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        hidden = in_channels // hidden_ratio
 
-        self.fc = nn.Sequential(
-            nn.Conv2d(in_planes, in_planes // ratio, 1, bias=False),
+        self.net = nn.Sequential(
+            nn.Conv2d(in_channels, hidden, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(hidden),
             nn.ReLU(inplace=True),
-            nn.Conv2d(in_planes // ratio, in_planes, 1, bias=False)
+
+            nn.Conv2d(hidden, 1, kernel_size=1, bias=True),
+            nn.Sigmoid()
         )
-        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        avg_out = self.fc(self.avg_pool(x))
-        max_out = self.fc(self.max_pool(x))
-        return x * self.sigmoid(avg_out + max_out)
-
-class CBAM(nn.Module):
-    def __init__(self, channels):
-        super().__init__()
-        self.ca = ChannelAttention(channels)
-        self.sa = SpatialAttention()
-
-    def forward(self, x):
-        x = self.ca(x)
-        x = self.sa(x)
-        return x
+        """
+        x: (B, C, H, W)
+        return: attention mask m (B, 1, H, W)
+        """
+        return self.net(x)
     
+class DenseNet121(nn.Module):
+    def __init__(self, pretrained=True, embedding_dim=256):
+        super().__init__()
+
+        base = models.densenet121(pretrained=pretrained)
+        features = base.features
+
+        # -------------------------
+        # f1: low-mid level feature
+        # -------------------------
+        self.f1 = nn.Sequential(
+            features.conv0,
+            features.norm0,
+            features.relu0,
+            features.pool0,
+            features.denseblock1,
+            features.transition1,
+            features.denseblock2,
+        )
+
+        # -------------------------
+        # f2: high-level feature
+        # -------------------------
+        self.f2 = nn.Sequential(
+            features.transition2,
+            features.denseblock3,
+            features.transition3,
+            features.denseblock4,
+            features.norm5
+        )
+
+        # Channel dimension after denseblock2 = 512
+        self.attention = SpatialAttentionMask(in_channels=512)
+
+        # Pooling + embedding
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
+
+        # BNNeck (metric learning)
+        self.bnneck = nn.BatchNorm1d(1024)
+        self.bnneck.bias.requires_grad_(False)
+
+        self.fc = nn.Linear(1024, embedding_dim)
+
+    def forward(self, x, return_attention=False):
+        """
+        return_attention: dùng cho x-MIR visualization
+        """
+        # f1 feature
+        f1 = self.f1(x)                     # (B, 512, H, W)
+
+        # attention mask
+        m = self.attention(f1)              # (B, 1, H, W)
+
+        # f2 feature
+        f2 = self.f2(f1)                    # (B, 1024, H', W')
+
+        # resize mask if needed
+        if m.shape[-2:] != f2.shape[-2:]:
+            m = F.interpolate(
+                m,
+                size=f2.shape[-2:],
+                mode='bilinear',
+                align_corners=False
+            )
+
+        # apply mask (GATING, NOT residual)
+        f_att = f2 * m
+
+        # global embedding
+        z = self.avgpool(f_att).flatten(1)
+        z = self.bnneck(z)
+        z = self.fc(z)
+        z = F.normalize(z, dim=1)
+
+        if return_attention:
+            return z, m
+        return z
+ 
 # class DenseNet121(nn.Module):
 #     """Model modified.
 
@@ -109,36 +165,6 @@ class CBAM(nn.Module):
 #         # normalize features
 #         x = F.normalize(x, dim=1)
 #         return x
-
-class DenseNet121(nn.Module):
-    def __init__(self, pretrained=True, embedding_dim=256):
-        super().__init__()
-
-        base = models.densenet121(pretrained=pretrained)
-        self.features = base.features
-        self.features.add_module('relu', nn.ReLU(inplace=True))
-
-        # 🔥 Attention
-        self.attn = CBAM(channels=1024)
-
-        self.avgpool = nn.AdaptiveAvgPool2d(1)
-
-        # 🔥 BNNeck (rất quan trọng với Triplet)
-        self.bnneck = nn.BatchNorm1d(1024)
-        self.bnneck.bias.requires_grad_(False)
-
-        self.fc = nn.Linear(1024, embedding_dim)
-
-    def forward(self, x):
-        x = self.features(x)
-        x = self.attn(x)
-        x = self.avgpool(x).flatten(1)
-
-        x = self.bnneck(x)
-        x = self.fc(x) # Fully connected layer
-
-        x = F.normalize(x, dim=1) # L2 normalize
-        return x
 
 class MedSigLIPGoogle(nn.Module):
     def __init__(self, model_name="google/medsiglip-448"):
