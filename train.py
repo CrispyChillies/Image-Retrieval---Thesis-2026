@@ -67,10 +67,24 @@ def evaluate(model, loader, device, rank=0, world_size=1):
 
     for data in loader:
         samples = data[0].to(device)
-        _labels = data[1].to(device)
-        out = model(samples)
-        embeds.append(out)  # Keep on GPU for gathering
-        labels.append(_labels.to(device))  # Move labels to GPU for gathering
+        _labels = data[1]
+        
+        # Process in micro-batches if batch is large to avoid OOM
+        batch_size = samples.size(0)
+        micro_batch_size = 16  # Process 16 samples at a time
+        batch_embeds = []
+        
+        for i in range(0, batch_size, micro_batch_size):
+            micro_batch = samples[i:i+micro_batch_size]
+            micro_out = model(micro_batch)
+            batch_embeds.append(micro_out.cpu())  # Move to CPU immediately
+            # Clear cache after each micro-batch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        out = torch.cat(batch_embeds, dim=0)
+        embeds.append(out)
+        labels.append(_labels)
 
     embeds = torch.cat(embeds, dim=0)
     labels = torch.cat(labels, dim=0)
@@ -87,7 +101,7 @@ def evaluate(model, loader, device, rank=0, world_size=1):
         embeds = torch.cat(embeds_list, dim=0).cpu()
         labels = torch.cat(labels_list, dim=0).cpu()
     
-    # Already on CPU from per-batch moves
+    # Already on CPU
 
     dists = -torch.cdist(embeds, embeds)
     dists.fill_diagonal_(torch.tensor(float('-inf')))
@@ -137,6 +151,14 @@ def main(args):
     p = args.labels_per_batch if not args.anomaly else args.labels_per_batch - 1
     k = args.samples_per_label
     batch_size = p * k
+    
+    # Auto-adjust eval batch size for memory-intensive models
+    eval_batch_size = args.eval_batch_size
+    if args.model in ['swinv2', 'convnextv2']:
+        # These models require more memory, reduce eval batch size
+        eval_batch_size = min(eval_batch_size, 32)
+        if rank == 0:
+            print(f"Reduced eval batch size to {eval_batch_size} for {args.model}")
     
     # For DDP, keep same batch size per GPU (effective batch = batch_size * world_size)
     # This maximizes GPU utilization and training speed
@@ -259,7 +281,7 @@ def main(args):
         )
         test_loader = DataLoader(
             test_dataset,
-            batch_size=args.eval_batch_size,
+            batch_size=eval_batch_size,
             sampler=test_sampler,
             num_workers=args.workers,
             pin_memory=True,
@@ -277,7 +299,7 @@ def main(args):
             sampler=base_sampler,
             num_workers=args.workers
         )
-        test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
+        test_loader = DataLoader(test_dataset, batch_size=eval_batch_size,
                                  shuffle=False,
                                  num_workers=args.workers)
 
