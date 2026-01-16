@@ -12,7 +12,6 @@ from read_data import ISICDataSet, ChestXrayDataSet
 from loss import TripletMarginLoss
 from sampler import PKSampler
 
-from sampler import HardMiningSampler
 from model import ResNet50, DenseNet121, ConvNeXtV2
 
 
@@ -272,13 +271,7 @@ def main(args):
         train_loader = DataLoader(
             train_dataset,
             batch_size=batch_size,
-            sampler=HardMiningSampler(
-                train_dataset,
-                hardness_scores,
-                num_hard=num_hard,
-                base_sampler=base_sampler,
-                batch_size=batch_size
-            ),
+            sampler=base_sampler,
             num_workers=args.workers
         )
         test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
