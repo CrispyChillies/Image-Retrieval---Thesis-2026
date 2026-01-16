@@ -12,7 +12,6 @@ from read_data import ISICDataSet, ChestXrayDataSet
 from loss import TripletMarginLoss
 from sampler import PKSampler
 
-from sampler import HardMiningSampler
 from model import ResNet50, DenseNet121, ConvNeXtV2
 
 

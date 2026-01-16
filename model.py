@@ -75,7 +75,7 @@ class ConvNeXtV2(nn.Module):
         super(ConvNeXtV2, self).__init__()
         # load pretrained model from timm
         self.convnext = timm.create_model(
-            'convnextv2_base.fcmae_ft_in22k_in1k_384',
+            'convnextv2_base.fcmae_ft_in22k_in1k_224',
             pretrained=pretrained,
             num_classes=0  # removes classifier, returns features directly
         )
