@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 
 
 import torchvision.transforms as transforms
-from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
+from read_data import ISICDataSet, ChestXrayDataSet
 
 from model import ResNet50, DenseNet121
 
@@ -207,10 +207,6 @@ def main(args):
                                    image_list_file=args.test_image_list,
                                    mask_dir=args.mask_dir,
                                    transform=test_transform)
-    elif args.dataset == 'tbx11k':
-        test_dataset = TBX11kDataSet(data_dir=args.test_dataset_dir,
-                                     csv_file=args.test_image_list,
-                                     transform=test_transform)
     else:
         raise NotImplementedError('Dataset not supported!')
 
