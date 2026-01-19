@@ -1,13 +1,16 @@
 import os
 import numpy as np
+from collections import Counter
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 
 import torch
 from torch.utils.data import DataLoader
 
-import torchvision.transforms as transforms
-from read_data import ISICDataSet, ChestXrayDataSet
 
-from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2
+import torchvision.transforms as transforms
+from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
+
+from model import ResNet50, DenseNet121
 
 
 def retrieval_accuracy(output, target, topk=(1,)):
@@ -17,6 +20,8 @@ def retrieval_accuracy(output, target, topk=(1,)):
         batch_size = target.size(0)
 
         _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.cpu()
+        target = target.cpu()
         pred = target[pred].t()
         correct = pred.eq(target[None])
 
@@ -119,6 +124,83 @@ def compute_map(ranks, gnd, kappas=[]):
     return mAP, aps, pr, prs
 
 
+def majority_vote(retrieved_labels):
+    """Get the majority label from retrieved images.
+    
+    Args:
+        retrieved_labels: array of labels from retrieved images
+    
+    Returns:
+        predicted label based on majority vote
+    """
+    if len(retrieved_labels) == 0:
+        return None
+    counter = Counter(retrieved_labels)
+    return counter.most_common(1)[0][0]
+
+
+def compute_classification_metrics(labels, dists, k_values=[1, 5, 10, 15, 20]):
+    """Compute Precision, Recall, F1, and Accuracy for different k values.
+    
+    Args:
+        labels (Tensor): ground truth labels
+        dists (Tensor): distance matrix (higher = more similar)
+        k_values (list): list of k values for top-k retrieval
+    
+    Returns:
+        dict: metrics for each k value
+    """
+    labels_np = labels.cpu().numpy()
+    n_samples = labels.size(0)
+    
+    # Get sorted indices for each query (most similar to least similar)
+    ranks = torch.argsort(dists, dim=0, descending=True).cpu().numpy()
+    
+    results = {}
+    
+    for k in k_values:
+        predicted_labels = []
+        true_labels = []
+        
+        # For each query image
+        for i in range(n_samples):
+            # Get top-k retrieved images (excluding self)
+            top_k_indices = ranks[:k, i]
+            retrieved_labels = labels_np[top_k_indices]
+            
+            # Get predicted label by majority vote
+            pred_label = majority_vote(retrieved_labels)
+            predicted_labels.append(pred_label)
+            true_labels.append(labels_np[i])
+        
+        # Calculate metrics
+        # Get unique labels for averaging
+        unique_labels = np.unique(labels_np)
+        
+        # Calculate metrics with different averaging methods
+        precision_macro = precision_score(true_labels, predicted_labels, average='macro', zero_division=0)
+        recall_macro = recall_score(true_labels, predicted_labels, average='macro', zero_division=0)
+        f1_macro = f1_score(true_labels, predicted_labels, average='macro', zero_division=0)
+        
+        precision_weighted = precision_score(true_labels, predicted_labels, average='weighted', zero_division=0)
+        recall_weighted = recall_score(true_labels, predicted_labels, average='weighted', zero_division=0)
+        f1_weighted = f1_score(true_labels, predicted_labels, average='weighted', zero_division=0)
+        
+        accuracy = accuracy_score(true_labels, predicted_labels)
+        
+        results[k] = {
+            'precision_macro': precision_macro * 100.0,
+            'recall_macro': recall_macro * 100.0,
+            'f1_macro': f1_macro * 100.0,
+            'precision_weighted': precision_weighted * 100.0,
+            'recall_weighted': recall_weighted * 100.0,
+            'f1_weighted': f1_weighted * 100.0,
+            'accuracy': accuracy * 100.0
+        }
+    
+    return results
+
+
 @torch.no_grad()
 def evaluate(model, loader, device, args):
     model.eval()
@@ -148,6 +230,22 @@ def evaluate(model, loader, device, args):
     mAP, _, pr, _ = compute_map(ranks.cpu().numpy(),  labels.cpu().numpy(), kappas)
     print('>> mAP: {:.2f}%'.format(mAP * 100.0))
     print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
+    
+    # Classification metrics with majority voting
+    print('\n>> Classification Metrics (Majority Voting):')
+    k_values = [1, 5, 10, 15, 20]
+    classification_results = compute_classification_metrics(labels, dists, k_values)
+    
+    for k in k_values:
+        metrics = classification_results[k]
+        print(f'\n>> Top-{k} Retrieved Images:')
+        print(f'   Accuracy: {metrics["accuracy"]:.2f}%')
+        print(f'   Precision (macro): {metrics["precision_macro"]:.2f}%')
+        print(f'   Recall (macro): {metrics["recall_macro"]:.2f}%')
+        print(f'   F1 (macro): {metrics["f1_macro"]:.2f}%')
+        print(f'   Precision (weighted): {metrics["precision_weighted"]:.2f}%')
+        print(f'   Recall (weighted): {metrics["recall_weighted"]:.2f}%')
+        print(f'   F1 (weighted): {metrics["f1_weighted"]:.2f}%')
 
     # Save results
     if args.save_dir:
@@ -156,9 +254,15 @@ def evaluate(model, loader, device, args):
         file_name = args.resume.split('/')[-1].split('.')[0]
 
         save_path = os.path.join(args.save_dir, file_name)
+        # Convert classification_results dict to numpy arrays for saving
+        classification_k_values = list(classification_results.keys())
+        classification_metrics = {k: v for k, v in classification_results.items()}
+        
         np.savez(save_path, embeds=embeds.cpu().numpy(),
                  labels=labels.cpu().numpy(), dists=-dists.cpu().numpy(),
-                 kappas=kappas, acc=accuracy, mAP=mAP, pr=pr)
+                 kappas=kappas, acc=accuracy, mAP=mAP, pr=pr,
+                 classification_k_values=classification_k_values,
+                 **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
 
 
 def main(args):
@@ -169,10 +273,6 @@ def main(args):
         model = DenseNet121(embedding_dim=args.embedding_dim)
     elif args.model == 'resnet50':
         model = ResNet50(embedding_dim=args.embedding_dim)
-    elif args.model == 'convnextv2':
-        model = ConvNeXtV2(embedding_dim=args.embedding_dim)
-    elif args.model == 'swinv2':
-        model = SwinV2(embedding_dim=args.embedding_dim)
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -191,15 +291,11 @@ def main(args):
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
 
-    # Use 384x384 for ConvNeXtV2 and SwinV2, 224x224 for other models
-    img_size = 384 if args.model in ['convnextv2', 'swinv2'] else 224
-
-    test_transform = transforms.Compose([
-        transforms.Lambda(lambda img: img.convert('RGB')),
-        transforms.Resize((img_size, img_size)),
-        transforms.ToTensor(),
-        normalize
-    ])
+    test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
+                                         transforms.Resize(256),
+                                         transforms.CenterCrop(224),
+                                         transforms.ToTensor(),
+                                         normalize])
 
     # Set up dataset and dataloader
     if args.dataset == 'covid':
@@ -212,6 +308,10 @@ def main(args):
                                    image_list_file=args.test_image_list,
                                    mask_dir=args.mask_dir,
                                    transform=test_transform)
+    elif args.dataset == 'tbx11k':
+        test_dataset = TBX11kDataSet(data_dir=args.test_dataset_dir,
+                                     csv_file=args.test_image_list,
+                                     transform=test_transform)
     else:
         raise NotImplementedError('Dataset not supported!')
 
@@ -236,7 +336,7 @@ def parse_args():
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, convnextv2, or swinv2)')
+                        help='Model to use (densenet121 or resnet50)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
     parser.add_argument('--eval-batch-size', default=64, type=int)
@@ -245,7 +345,7 @@ def parse_args():
     parser.add_argument('--save-dir', default='./results',
                         help='Result save directory')
     parser.add_argument('--resume', default='',
-                        help='Resume from checkpoint')  
+                        help='Resume from checkpoint')
 
     return parser.parse_args()
 
