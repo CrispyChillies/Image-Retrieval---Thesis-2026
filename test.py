@@ -126,22 +126,8 @@ def evaluate(model, loader, device, args):
 
     for data in loader:
         samples = data[0].to(device)
-        _labels = data[1]
-        
-        # Process in micro-batches if batch is large to avoid OOM
-        batch_size = samples.size(0)
-        micro_batch_size = 16  # Process 16 samples at a time
-        batch_embeds = []
-        
-        for i in range(0, batch_size, micro_batch_size):
-            micro_batch = samples[i:i+micro_batch_size]
-            micro_out = model(micro_batch)
-            batch_embeds.append(micro_out.cpu())  # Move to CPU immediately
-            # Clear cache after each micro-batch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        
-        out = torch.cat(batch_embeds, dim=0)
+        _labels = data[1].to(device)
+        out = model(samples)
         embeds.append(out)
         labels.append(_labels)
 
@@ -177,13 +163,6 @@ def evaluate(model, loader, device, args):
 
 def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-
-    # Auto-adjust eval batch size for memory-intensive models
-    eval_batch_size = args.eval_batch_size
-    if args.model in ['swinv2', 'convnextv2']:
-        # These models require more memory, reduce eval batch size
-        eval_batch_size = min(eval_batch_size, 32)
-        print(f"Reduced eval batch size to {eval_batch_size} for {args.model}")
 
     # Choose model
     if args.model == 'densenet121':
@@ -236,7 +215,7 @@ def main(args):
     else:
         raise NotImplementedError('Dataset not supported!')
 
-    test_loader = DataLoader(test_dataset, batch_size=eval_batch_size,
+    test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
                              shuffle=False,
                              num_workers=args.workers)
 
