@@ -298,11 +298,12 @@ def main(args):
     # Use 384x384 for ConvNeXtV2 and SwinV2, 224x224 for other models
     img_size = 384 if args.model in ['convnextv2', 'swinv2'] else 224
 
-    test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-                                         transforms.Resize(256),
-                                         transforms.CenterCrop(224),
-                                         transforms.ToTensor(),
-                                         normalize])
+    test_transform = transforms.Compose([
+        transforms.Lambda(lambda img: img.convert('RGB')),
+        transforms.Resize((img_size, img_size)),
+        transforms.ToTensor(),
+        normalize
+    ])
 
     # Set up dataset and dataloader
     if args.dataset == 'covid':
