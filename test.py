@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 
 
 import torchvision.transforms as transforms
-from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
+from read_data import ISICDataSet, ChestXrayDataSet
 
 from model import ResNet50, DenseNet121
 
