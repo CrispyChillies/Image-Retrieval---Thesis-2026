@@ -8,7 +8,7 @@ import torchvision.transforms as transforms
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
-from read_data import ISICDataSet, ChestXrayDataSet
+from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
 from loss import TripletMarginLoss
 from sampler import PKSampler
 
@@ -234,6 +234,13 @@ def main(args):
                                    mask_dir=os.path.join(
                                        args.mask_dir, 'test') if args.mask_dir else None,
                                    transform=test_transform)
+    elif args.dataset == 'tbx11k':
+        train_dataset = TBX11kDataSet(data_dir=os.path.join(args.dataset_dir, 'train'),
+                                      csv_file=args.train_image_list,
+                                      transform=train_transform)
+        test_dataset = TBX11kDataSet(data_dir=os.path.join(args.dataset_dir, 'test'),
+                                     csv_file=args.test_image_list,
+                                     transform=test_transform)
     else:
         raise NotImplementedError('Dataset not supported!')
 

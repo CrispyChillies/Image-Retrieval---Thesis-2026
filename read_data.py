@@ -135,6 +135,46 @@ class ChestXrayDataSet(Dataset):
     def __len__(self):
         return len(self.image_names)
 
+class TBX11kDataSet(Dataset):
+    def __init__(self, data_dir, csv_file, transform=None):
+        """
+        Args:
+            data_dir: path to image directory.
+            csv_file: path to the csv file (train.csv or test.csv).
+            transform: optional transform to be applied on a sample.
+        """
+        self.image_names = []
+        self.labels = []
+        self.transform = transform
+
+        # Map image_type to integer label
+        # image_type: tb, healthy, sick_but_no_tb
+        self.type_map = {"tb": 0, "healthy": 1, "sick_but_no_tb": 2}
+
+        import csv
+        with open(csv_file, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                fname = row["fname"]
+                image_type = row["image_type"].strip()
+                # Only use images with valid image_type
+                if image_type not in self.type_map:
+                    continue
+                img_path = os.path.join(data_dir, fname)
+                self.image_names.append(img_path)
+                self.labels.append(self.type_map[image_type])
+
+    def __getitem__(self, index):
+        image_name = self.image_names[index]
+        image = Image.open(image_name).convert('RGB')
+        label = self.labels[index]
+        if self.transform is not None:
+            image = self.transform(image)
+        return image, torch.tensor(label, dtype=torch.long)
+
+    def __len__(self):
+        return len(self.image_names)
+
 
 # Test main function for ChestXrayDataSet
 if __name__ == "__main__":
