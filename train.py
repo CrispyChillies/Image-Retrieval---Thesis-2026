@@ -3,7 +3,7 @@ import random
 
 import torch
 from torch.optim import Adam
-from totorchvision.transforms as transforms
+import torchvision.transforms as transforms
 import rch.utils.data import DataLoader
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
