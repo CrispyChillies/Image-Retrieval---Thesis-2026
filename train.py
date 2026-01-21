@@ -3,8 +3,8 @@ import random
 
 import torch
 from torch.optim import Adam
-from torch.utils.data import DataLoader
-import torchvision.transforms as transforms
+from totorchvision.transforms as transforms
+import rch.utils.data import DataLoader
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
