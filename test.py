@@ -10,6 +10,13 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
 
+
+def conceptclip_collate_fn(batch):
+    """Custom collate function for ConceptCLIP that keeps PIL images as-is."""
+    images = [item[0] for item in batch]
+    labels = torch.stack([item[1] if isinstance(item[1], torch.Tensor) else torch.tensor(item[1]) for item in batch])
+    return images, labels
+
 from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2
 
 try:
@@ -611,9 +618,16 @@ def main(args):
     else:
         raise NotImplementedError('Dataset not supported!')
 
-    test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
-                             shuffle=False,
-                             num_workers=args.workers)
+    # Use custom collate function for ConceptCLIP to handle PIL images
+    if is_conceptclip:
+        test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
+                                 shuffle=False,
+                                 num_workers=args.workers,
+                                 collate_fn=conceptclip_collate_fn)
+    else:
+        test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
+                                 shuffle=False,
+                                 num_workers=args.workers)
 
     print('Evaluating...')
     
