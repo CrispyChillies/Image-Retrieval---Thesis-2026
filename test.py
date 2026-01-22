@@ -238,15 +238,18 @@ def evaluate_conceptclip_with_text(model, processor, loader, device, args, label
         images = data[0]
         _labels = data[1].to(device)
         
-        # Process images only
+        # Process images with dummy text to get image embeddings
+        dummy_text = [""]  # Empty text to get image features
         inputs = processor(
             images=images,
-            return_tensors='pt'
+            text=dummy_text,
+            return_tensors='pt',
+            padding=True
         ).to(device)
         
-        # Get image embeddings
-        outputs = model.get_image_features(**inputs)
-        embeds.append(outputs)
+        # Get image embeddings from model outputs
+        outputs = model(**inputs)
+        embeds.append(outputs['image_features'])
         labels.append(_labels)
     
     embeds = torch.cat(embeds, dim=0)
@@ -257,14 +260,19 @@ def evaluate_conceptclip_with_text(model, processor, loader, device, args, label
     
     # Get text embeddings for each class
     texts = [f'a medical image of {label}' for label in label_names]
+    # Need to provide a dummy image for ConceptCLIP
+    from PIL import Image
+    dummy_image = Image.new('RGB', (224, 224), color='black')
     text_inputs = processor(
+        images=[dummy_image],
         text=texts,
         return_tensors='pt',
         padding=True,
         truncation=True
     ).to(device)
     
-    text_embeds = model.get_text_features(**text_inputs)
+    text_outputs = model(**text_inputs)
+    text_embeds = text_outputs['text_features']
     text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
     
     # Strategy 1: Hybrid Similarity (weighted combination)
@@ -402,15 +410,18 @@ def evaluate_conceptclip(model, processor, loader, device, args):
         images = data[0]
         _labels = data[1].to(device)
         
-        # Process images only (no text needed for retrieval)
+        # Process images - ConceptCLIP needs text input, use dummy text
+        dummy_text = [""]  # Empty text to get image features
         inputs = processor(
             images=images,
-            return_tensors='pt'
+            text=dummy_text,
+            return_tensors='pt',
+            padding=True
         ).to(device)
         
-        # Get image embeddings
-        outputs = model.get_image_features(**inputs)
-        embeds.append(outputs)
+        # Get image embeddings from model outputs
+        outputs = model(**inputs)
+        embeds.append(outputs['image_features'])
         labels.append(_labels)
     
     embeds = torch.cat(embeds, dim=0)
