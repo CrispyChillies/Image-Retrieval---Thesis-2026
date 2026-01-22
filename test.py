@@ -673,6 +673,12 @@ def parse_args():
                         help='Number of data loading workers')
     parser.add_argument('--save-dir', default='./results',
                         help='Result save directory')
+    parser.add_argument('--resume', default='',
+                        help='Resume from checkpoint')
+
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
     args = parse_args()
     main(args)
