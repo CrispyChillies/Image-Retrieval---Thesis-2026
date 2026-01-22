@@ -78,6 +78,16 @@ We also include code for producing saliency maps (including self-similarity sali
 ### Evaluating Saliency Maps
 We also include code for computing the insertion and deletion metrics used to evaluate similarity-based saliency maps (see `evaluate_saliency.py`). At the moment, this requires manually changing the dataset type, paths to the model weights, saliency maps, and test images, and the output filenames in the code. The final results are stored in a `.json` file, where each key is the name of the query image, and the first set of results are the insertion scores and the second set of results are the deletion scores.
 
+# Testing on ConceptCLIP command 
+
+```python
+python test_conceptclip.py \
+    --test-dataset-dir /data/brian.hu/COVID/data/test \
+    --test-image-list ./test_COVIDx4.txt \
+    --eval-batch-size 32 \
+    --save-dir ./results
+```
+
 Please address all questions to Brian Hu: brian.hu@kitware.com.
 
 ### Acknowledgment
