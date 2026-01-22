@@ -11,6 +11,13 @@ from PIL import Image
 from read_data import ChestXrayDataSet
 
 
+def custom_collate(batch):
+    """Custom collate function to keep PIL images as a list."""
+    images = [item[0] for item in batch]
+    labels = torch.stack([item[1] for item in batch])
+    return images, labels
+
+
 @torch.no_grad()
 def evaluate_conceptclip(model, processor, loader, device, args):
     model.eval()
@@ -175,7 +182,8 @@ def main(args):
         test_dataset, 
         batch_size=args.eval_batch_size,
         shuffle=False,
-        num_workers=args.workers
+        num_workers=args.workers,
+        collate_fn=custom_collate
     )
 
     print('\n' + '='*60)
