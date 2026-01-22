@@ -136,30 +136,37 @@ def main():
     # Initialize paths
     main_path = args.main_path
     query_img_path = args.query_img_path
+    class_labels = {}
+    image_list = []
 
     if args.dataset_type == 'covid':
         valid_class = ['pneumonia', 'normal']
-        # Unravel labels here
-        with open('test_COVIDx4.txt', 'r') as f:
+        # Expecting txt/csv with: index image_name label
+        with open(args.csv_path, 'r') as f:
             for line in f.readlines():
-                label = line.split()[2]
+                parts = line.strip().split()
+                if len(parts) < 3:
+                    continue
+                label = parts[2]
                 if label not in valid_class:
                     label = 'covid'
-                q_na = line.split()[1]
-                class_labels[q_na] = label
+                img_name = parts[1]
+                class_labels[img_name] = label
+                image_list.append(img_name)
 
     elif args.dataset_type == 'isic':
         import pandas as pd
         valid_class = ['melanoma', 'seborrheic_keratosis']
         df = pd.read_csv(args.csv_path)
-    for kj, im_name in enumerate(df['image_id']):
-        if (df['melanoma'][kj] + df['seborrheic_keratosis'][kj]) > 0:
-            if df['melanoma'][kj]:
-                class_labels[im_name+'.jpg'] = 'melanoma'
+        for kj, im_name in enumerate(df['image_id']):
+            if (df['melanoma'][kj] + df['seborrheic_keratosis'][kj]) > 0:
+                if df['melanoma'][kj]:
+                    class_labels[im_name+'.jpg'] = 'melanoma'
+                else:
+                    class_labels[im_name+'.jpg'] = 'seborrheic_keratosis'
             else:
-                class_labels[im_name+'.jpg'] = 'seborrheic_keratosis'
-        else:
-            class_labels[im_name+'.jpg'] = 'nevi'
+                class_labels[im_name+'.jpg'] = 'nevi'
+            image_list.append(im_name+'.jpg')
 
     transform = transforms.Compose([
         transforms.Resize(256),
