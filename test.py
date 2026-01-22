@@ -209,6 +209,173 @@ def compute_classification_metrics(labels, dists, k_values=[1, 5, 10, 15, 20]):
 
 
 @torch.no_grad()
+def evaluate_conceptclip_with_text(model, processor, loader, device, args, label_names):
+    """Evaluate ConceptCLIP using text-enhanced retrieval.
+    
+    Args:
+        model: ConceptCLIP model
+        processor: ConceptCLIP processor
+        loader: DataLoader for test data
+        device: torch device
+        args: command line arguments
+        label_names: list of class label names for text prompts
+    """
+    model.eval()
+    embeds, labels = [], []
+    
+    print(f"\nExtracting ConceptCLIP image embeddings for text-enhanced retrieval...")
+    print(f"Using {len(label_names)} class labels: {label_names}")
+    print(f"Fusion strategy: {args.text_fusion_strategy}")
+    
+    for data in loader:
+        images = data[0]
+        _labels = data[1].to(device)
+        
+        # Process images only
+        inputs = processor(
+            images=images,
+            return_tensors='pt'
+        ).to(device)
+        
+        # Get image embeddings
+        outputs = model.get_image_features(**inputs)
+        embeds.append(outputs)
+        labels.append(_labels)
+    
+    embeds = torch.cat(embeds, dim=0)
+    labels = torch.cat(labels, dim=0)
+    
+    # Normalize image embeddings
+    embeds = embeds / embeds.norm(dim=-1, keepdim=True)
+    
+    # Get text embeddings for each class
+    texts = [f'a medical image of {label}' for label in label_names]
+    text_inputs = processor(
+        text=texts,
+        return_tensors='pt',
+        padding=True,
+        truncation=True
+    ).to(device)
+    
+    text_embeds = model.get_text_features(**text_inputs)
+    text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
+    
+    # Strategy 1: Hybrid Similarity (weighted combination)
+    if args.text_fusion_strategy == 'hybrid':
+        alpha = args.text_weight  # weight for image similarity
+        beta = 1.0 - alpha  # weight for text similarity
+        
+        # Image-to-image similarity
+        img_sim = embeds @ embeds.t()
+        
+        # Image-to-text similarity for each sample
+        img_text_sim = embeds @ text_embeds.t()  # [N, num_classes]
+        
+        # For each query, get text similarity based on target labels
+        text_sim = torch.zeros_like(img_sim)
+        for i in range(len(labels)):
+            for j in range(len(labels)):
+                text_sim[i, j] = img_text_sim[j, labels[i]]
+        
+        # Combine similarities
+        dists = alpha * img_sim + beta * text_sim
+        print(f"   Using hybrid fusion (image weight={alpha:.2f}, text weight={beta:.2f})")
+    
+    # Strategy 2: Text-Guided Re-ranking
+    elif args.text_fusion_strategy == 'rerank':
+        k_initial = args.rerank_k  # number of top results to re-rank
+        alpha = args.text_weight
+        
+        # Initial retrieval with image similarity
+        img_sim = embeds @ embeds.t()
+        img_text_sim = embeds @ text_embeds.t()
+        
+        # Re-rank top-k for each query
+        dists = img_sim.clone()
+        for i in range(len(labels)):
+            # Get top-k indices
+            top_k_scores, top_k_indices = torch.topk(img_sim[i], k=min(k_initial, len(labels)), largest=True)
+            
+            # Re-score top-k using text similarity
+            for idx_pos, j in enumerate(top_k_indices):
+                if i != j:
+                    text_score = img_text_sim[j, labels[i]]
+                    dists[i, j] = alpha * img_sim[i, j] + (1-alpha) * text_score
+        
+        print(f"   Using re-ranking fusion (top-{k_initial}, text weight={1-alpha:.2f})")
+    
+    # Strategy 3: Concatenated Embeddings
+    elif args.text_fusion_strategy == 'concat':
+        # For each image, concatenate its embedding with its class text embedding
+        combined_embeds = []
+        for i in range(len(embeds)):
+            label_idx = labels[i]
+            # Concatenate image embedding with corresponding text embedding
+            combined = torch.cat([embeds[i], text_embeds[label_idx]], dim=0)
+            combined_embeds.append(combined)
+        
+        combined_embeds = torch.stack(combined_embeds)
+        combined_embeds = combined_embeds / combined_embeds.norm(dim=-1, keepdim=True)
+        
+        # Compute similarity with concatenated embeddings
+        dists = combined_embeds @ combined_embeds.t()
+        print(f"   Using concatenation fusion (image+text embeddings)")
+    
+    else:
+        raise ValueError(f"Unknown fusion strategy: {args.text_fusion_strategy}")
+    
+    dists.fill_diagonal_(float('-inf'))
+    
+    # top-k accuracy (i.e. R@K)
+    kappas = [1, 5, 10]
+    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = torch.stack(accuracy).cpu().numpy()
+    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+
+    # mean average precision and mean precision (i.e. mAP and pr)
+    ranks = torch.argsort(dists, dim=0, descending=True)
+    mAP, _, pr, _ = compute_map(ranks.cpu().numpy(), labels.cpu().numpy(), kappas)
+    print('>> mAP: {:.2f}%'.format(mAP * 100.0))
+    print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
+    
+    # Classification metrics with majority voting (same as other models)
+    print('\n>> Classification Metrics (Majority Voting):')  
+    k_values = [1, 5, 10, 15, 20]
+    classification_results = compute_classification_metrics(labels, dists, k_values)
+    
+    for k in k_values:
+        metrics = classification_results[k]
+        print(f'\n>> Top-{k} Retrieved Images:')
+        print(f'   Accuracy: {metrics["accuracy"]:.2f}%')
+        print(f'   Precision (macro): {metrics["precision_macro"]:.2f}%')
+        print(f'   Recall (macro): {metrics["recall_macro"]:.2f}%')
+        print(f'   F1 (macro): {metrics["f1_macro"]:.2f}%')
+        print(f'   Precision (weighted): {metrics["precision_weighted"]:.2f}%')
+        print(f'   Recall (weighted): {metrics["recall_weighted"]:.2f}%')
+        print(f'   F1 (weighted): {metrics["f1_weighted"]:.2f}%')
+    
+    # Save results
+    if args.save_dir:
+        if not os.path.exists(args.save_dir):
+            os.makedirs(args.save_dir)
+        file_name = f'conceptclip_text_{args.text_fusion_strategy}'
+        save_path = os.path.join(args.save_dir, file_name)
+        
+        classification_k_values = list(classification_results.keys())
+        classification_metrics = {k: v for k, v in classification_results.items()}
+        
+        np.savez(save_path, embeds=embeds.cpu().numpy(),
+                 labels=labels.cpu().numpy(), dists=-dists.cpu().numpy(),
+                 kappas=kappas, acc=accuracy, mAP=mAP, pr=pr,
+                 classification_k_values=classification_k_values,
+                 text_embeds=text_embeds.cpu().numpy(),
+                 label_names=label_names,
+                 fusion_strategy=args.text_fusion_strategy,
+                 **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
+        print(f'\n>> Results saved to {save_path}.npz')
+
+
+@torch.no_grad()
 def evaluate_conceptclip(model, processor, loader, device, args):
     """Evaluate ConceptCLIP model using image retrieval (same as other models).
     
@@ -220,7 +387,7 @@ def evaluate_conceptclip(model, processor, loader, device, args):
         args: command line arguments
     """
     model.eval()
-    embeds, labels = []
+    embeds, labels = [], []
     
     print(f"\nExtracting ConceptCLIP image embeddings for retrieval...")
     
@@ -451,7 +618,20 @@ def main(args):
     print('Evaluating...')
     
     if is_conceptclip:
-        evaluate_conceptclip(model, processor, test_loader, device, args)
+        if args.use_text:
+            # Get label names for text-enhanced retrieval
+            if args.dataset == 'covid':
+                label_names = args.covid_labels.split(',') if args.covid_labels else ['normal', 'pneumonia', 'COVID-19']
+            elif args.dataset == 'isic':
+                label_names = args.isic_labels.split(',') if args.isic_labels else ['melanoma', 'nevus', 'seborrheic keratosis']
+            elif args.dataset == 'tbx11k':
+                label_names = args.tbx11k_labels.split(',') if args.tbx11k_labels else ['normal', 'active TB', 'latent TB', 'uncertain TB']
+            else:
+                raise ValueError(f"Unknown dataset: {args.dataset}")
+            
+            evaluate_conceptclip_with_text(model, processor, test_loader, device, args, label_names)
+        else:
+            evaluate_conceptclip(model, processor, test_loader, device, args)
     else:
         evaluate(model, test_loader, device, args)
 
@@ -472,6 +652,16 @@ def parse_args():
                         help='Model to use (densenet121, resnet50, convnextv2, swinv2, or conceptclip)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
+    
+    # ConceptCLIP text-enhanced retrieval options
+    parser.add_argument('--use-text', action='store_true',
+                        help='Enable text-enhanced retrieval for ConceptCLIP')
+    parser.add_argument('--text-fusion-strategy', default='hybrid', choices=['hybrid', 'rerank', 'concat'],
+                        help='Text fusion strategy: hybrid (weighted combination), rerank (re-rank top-k), concat (concatenate embeddings)')
+    parser.add_argument('--text-weight', default=0.5, type=float,
+                        help='Weight for text similarity in hybrid/rerank fusion (0.0-1.0). For hybrid: image_weight=text_weight, text_weight=1-text_weight')
+    parser.add_argument('--rerank-k', default=50, type=int,
+                        help='Number of top results to re-rank when using rerank strategy')
     parser.add_argument('--covid-labels', default=None, type=str,
                         help='Comma-separated list of COVID dataset labels for ConceptCLIP (e.g., "normal,pneumonia,COVID-19")')
     parser.add_argument('--isic-labels', default=None, type=str,
