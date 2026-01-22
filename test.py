@@ -12,6 +12,13 @@ from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
 
 from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2
 
+try:
+    from transformers import AutoModel, AutoProcessor
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+    print("Warning: transformers library not available. ConceptCLIP will not be available.")
+
 
 def retrieval_accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
@@ -202,6 +209,93 @@ def compute_classification_metrics(labels, dists, k_values=[1, 5, 10, 15, 20]):
 
 
 @torch.no_grad()
+def evaluate_conceptclip(model, processor, loader, device, args):
+    """Evaluate ConceptCLIP model using image retrieval (same as other models).
+    
+    Args:
+        model: ConceptCLIP model
+        processor: ConceptCLIP processor
+        loader: DataLoader for test data
+        device: torch device
+        args: command line arguments
+    """
+    model.eval()
+    embeds, labels = []
+    
+    print(f"\nExtracting ConceptCLIP image embeddings for retrieval...")
+    
+    for data in loader:
+        images = data[0]
+        _labels = data[1].to(device)
+        
+        # Process images only (no text needed for retrieval)
+        inputs = processor(
+            images=images,
+            return_tensors='pt'
+        ).to(device)
+        
+        # Get image embeddings
+        outputs = model.get_image_features(**inputs)
+        embeds.append(outputs)
+        labels.append(_labels)
+    
+    embeds = torch.cat(embeds, dim=0)
+    labels = torch.cat(labels, dim=0)
+    
+    # Normalize embeddings for cosine similarity
+    embeds = embeds / embeds.norm(dim=-1, keepdim=True)
+    
+    # Compute similarity matrix (cosine similarity via normalized dot product)
+    dists = embeds @ embeds.t()
+    dists.fill_diagonal_(float('-inf'))
+    
+    # top-k accuracy (i.e. R@K)
+    kappas = [1, 5, 10]
+    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = torch.stack(accuracy).cpu().numpy()
+    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+
+    # mean average precision and mean precision (i.e. mAP and pr)
+    ranks = torch.argsort(dists, dim=0, descending=True)
+    mAP, _, pr, _ = compute_map(ranks.cpu().numpy(), labels.cpu().numpy(), kappas)
+    print('>> mAP: {:.2f}%'.format(mAP * 100.0))
+    print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
+    
+    # Classification metrics with majority voting (same as other models)
+    print('\n>> Classification Metrics (Majority Voting):')
+    k_values = [1, 5, 10, 15, 20]
+    classification_results = compute_classification_metrics(labels, dists, k_values)
+    
+    for k in k_values:
+        metrics = classification_results[k]
+        print(f'\n>> Top-{k} Retrieved Images:')
+        print(f'   Accuracy: {metrics["accuracy"]:.2f}%')
+        print(f'   Precision (macro): {metrics["precision_macro"]:.2f}%')
+        print(f'   Recall (macro): {metrics["recall_macro"]:.2f}%')
+        print(f'   F1 (macro): {metrics["f1_macro"]:.2f}%')
+        print(f'   Precision (weighted): {metrics["precision_weighted"]:.2f}%')
+        print(f'   Recall (weighted): {metrics["recall_weighted"]:.2f}%')
+        print(f'   F1 (weighted): {metrics["f1_weighted"]:.2f}%')
+    
+    # Save results
+    if args.save_dir:
+        if not os.path.exists(args.save_dir):
+            os.makedirs(args.save_dir)
+        file_name = 'conceptclip_retrieval'
+        save_path = os.path.join(args.save_dir, file_name)
+        
+        classification_k_values = list(classification_results.keys())
+        classification_metrics = {k: v for k, v in classification_results.items()}
+        
+        np.savez(save_path, embeds=embeds.cpu().numpy(),
+                 labels=labels.cpu().numpy(), dists=-dists.cpu().numpy(),
+                 kappas=kappas, acc=accuracy, mAP=mAP, pr=pr,
+                 classification_k_values=classification_k_values,
+                 **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
+        print(f'\n>> Results saved to {save_path}.npz')
+
+
+@torch.no_grad()
 def evaluate(model, loader, device, args):
     model.eval()
     embeds, labels = [], []
@@ -269,55 +363,68 @@ def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     # Choose model
-    if args.model == 'densenet121':
+    if args.model == 'conceptclip':
+        if not TRANSFORMERS_AVAILABLE:
+            raise ImportError('transformers library is required for ConceptCLIP. Install it with: pip install transformers')
+        print("Loading ConceptCLIP model...")
+        model = AutoModel.from_pretrained('JerrryNie/ConceptCLIP', trust_remote_code=True)
+        processor = AutoProcessor.from_pretrained('JerrryNie/ConceptCLIP', trust_remote_code=True)
+        model.to(device)
+        is_conceptclip = True
+    elif args.model == 'densenet121':
         model = DenseNet121(embedding_dim=args.embedding_dim)
+        is_conceptclip = False
     elif args.model == 'resnet50':
         model = ResNet50(embedding_dim=args.embedding_dim)
+        is_conceptclip = False
     elif args.model == 'convnextv2':
         model = ConvNeXtV2(embedding_dim=args.embedding_dim)
+        is_conceptclip = False
     elif args.model == 'swinv2':
         model = SwinV2(embedding_dim=args.embedding_dim)
+        is_conceptclip = False
     else:
         raise NotImplementedError('Model not supported!')
 
-    if os.path.isfile(args.resume):
-        print("=> loading checkpoint")
-        checkpoint = torch.load(args.resume)
-        if 'state-dict' in checkpoint:
-            checkpoint = checkpoint['state-dict']
-        model.load_state_dict(checkpoint, strict=False)
-        print("=> loaded checkpoint")
+    if not is_conceptclip:
+        if os.path.isfile(args.resume):
+            print("=> loading checkpoint")
+            checkpoint = torch.load(args.resume)
+            if 'state-dict' in checkpoint:
+                checkpoint = checkpoint['state-dict']
+            model.load_state_dict(checkpoint, strict=False)
+            print("=> loaded checkpoint")
+        else:
+            print("=> no checkpoint found")
+        model.to(device)
     else:
-        print("=> no checkpoint found")
-
-    model.to(device)
+        print("=> Using pre-trained ConceptCLIP (zero-shot), no checkpoint needed")
 
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
     
-    # Use 384x384 for ConvNeXtV2 and SwinV2, 224x224 for other models
-    img_size = 384 if args.model in ['convnextv2', 'swinv2'] else 224
-
-    # test_transform = transforms.Compose([
-    #     transforms.Lambda(lambda img: img.convert('RGB')),
-    #     transforms.Resize((img_size, img_size)),
-    #     transforms.ToTensor(),
-    #     normalize
-    # ])
-
-    if args.model in ['convnextv2', 'swinv2']:
+    # ConceptCLIP uses PIL images directly (processor handles preprocessing)
+    if is_conceptclip:
         test_transform = transforms.Compose([
-            transforms.Lambda(lambda img: img.convert('RGB')),
-            transforms.Resize((img_size, img_size)),
-            transforms.ToTensor(),
-            normalize
+            transforms.Lambda(lambda img: img.convert('RGB'))
         ])
     else:
-        test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-                                         transforms.Resize(256),
-                                         transforms.CenterCrop(224),
-                                         transforms.ToTensor(),
-                                         normalize])
+        # Use 384x384 for ConvNeXtV2 and SwinV2, 224x224 for other models
+        img_size = 384 if args.model in ['convnextv2', 'swinv2'] else 224
+
+        if args.model in ['convnextv2', 'swinv2']:
+            test_transform = transforms.Compose([
+                transforms.Lambda(lambda img: img.convert('RGB')),
+                transforms.Resize((img_size, img_size)),
+                transforms.ToTensor(),
+                normalize
+            ])
+        else:
+            test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
+                                             transforms.Resize(256),
+                                             transforms.CenterCrop(224),
+                                             transforms.ToTensor(),
+                                             normalize])
 
     # Set up dataset and dataloader
     if args.dataset == 'covid':
@@ -342,7 +449,11 @@ def main(args):
                              num_workers=args.workers)
 
     print('Evaluating...')
-    evaluate(model, test_loader, device, args)
+    
+    if is_conceptclip:
+        evaluate_conceptclip(model, processor, test_loader, device, args)
+    else:
+        evaluate(model, test_loader, device, args)
 
 
 def parse_args():
@@ -358,20 +469,20 @@ def parse_args():
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, convnextv2, or swinv2)')
+                        help='Model to use (densenet121, resnet50, convnextv2, swinv2, or conceptclip)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
+    parser.add_argument('--covid-labels', default=None, type=str,
+                        help='Comma-separated list of COVID dataset labels for ConceptCLIP (e.g., "normal,pneumonia,COVID-19")')
+    parser.add_argument('--isic-labels', default=None, type=str,
+                        help='Comma-separated list of ISIC dataset labels for ConceptCLIP')
+    parser.add_argument('--tbx11k-labels', default=None, type=str,
+                        help='Comma-separated list of TBX11K dataset labels for ConceptCLIP')
     parser.add_argument('--eval-batch-size', default=64, type=int)
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                         help='Number of data loading workers')
     parser.add_argument('--save-dir', default='./results',
                         help='Result save directory')
-    parser.add_argument('--resume', default='',
-                        help='Resume from checkpoint')
-
-    return parser.parse_args()
-
-
 if __name__ == '__main__':
     args = parse_args()
     main(args)
