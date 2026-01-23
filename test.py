@@ -238,9 +238,9 @@ def evaluate_with_text_reranking(img_model, text_model, text_processor, loader, 
     print(f"Text Model: ConceptCLIP")
     print(f"Using {len(label_names)} class labels: {label_names}")
     print(f"Re-ranking top-{args.rerank_k} results with text similarity")
-    print(f"Text weight: {args.text_weight}\n")
+    print(f"Image weight: {args.text_weight}, Text weight: {1-args.text_weight}\\n")
     
-    print("Step 1: Extracting image embeddings from backbone model...")
+    print("Step 1: Extracting image embeddings from backbone model for initial retrieval...")
     for data in loader:
         if is_conceptclip_img:
             # ConceptCLIP as image backbone
@@ -264,7 +264,30 @@ def evaluate_with_text_reranking(img_model, text_model, text_processor, loader, 
     # Normalize image embeddings
     embeds = embeds / embeds.norm(dim=-1, keepdim=True)
     
-    print("Step 2: Getting text embeddings from ConceptCLIP...")
+    print("Step 2: Extracting ConceptCLIP image embeddings for text similarity...")
+    # Need to extract ConceptCLIP image embeddings for compatibility with text embeddings
+    conceptclip_img_embeds = []
+    
+    for data in loader:
+        if is_conceptclip_img:
+            # Already have ConceptCLIP embeddings
+            break
+        else:
+            # Need to extract ConceptCLIP image embeddings
+            images = data[0]
+            dummy_text = [""]
+            inputs = text_processor(images=images, text=dummy_text, return_tensors='pt', padding=True).to(device)
+            outputs = text_model(**inputs)
+            conceptclip_img_embeds.append(outputs['image_features'])
+    
+    if not is_conceptclip_img:
+        conceptclip_img_embeds = torch.cat(conceptclip_img_embeds, dim=0)
+        conceptclip_img_embeds = conceptclip_img_embeds / conceptclip_img_embeds.norm(dim=-1, keepdim=True)
+    else:
+        # Use the already extracted embeddings
+        conceptclip_img_embeds = embeds
+    
+    print("Step 3: Getting text embeddings from ConceptCLIP...")
     # Get text embeddings for each class using ConceptCLIP
     texts = [f'a medical image of {label}' for label in label_names]
     from PIL import Image
@@ -274,20 +297,21 @@ def evaluate_with_text_reranking(img_model, text_model, text_processor, loader, 
         text=texts,
         return_tensors='pt',
         padding=True,
-        truncation=True
+        truncation=True,
+        max_length=77
     ).to(device)
     
     text_outputs = text_model(**text_inputs)
     text_embeds = text_outputs['text_features']
     text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
     
-    print("Step 3: Computing initial image-based retrieval...")
-    # Initial retrieval with image similarity
+    print("Step 4: Computing initial image-based retrieval...")
+    # Initial retrieval with image similarity (using backbone model embeddings)
     img_sim = embeds @ embeds.t()
     
-    print(f"Step 4: Re-ranking top-{args.rerank_k} results using text similarity...")
-    # Compute image-to-text similarity
-    img_text_sim = embeds @ text_embeds.t()  # [N, num_classes]
+    print(f"Step 5: Re-ranking top-{args.rerank_k} results using text similarity...")
+    # Compute image-to-text similarity using ConceptCLIP embeddings
+    img_text_sim = conceptclip_img_embeds @ text_embeds.t()  # [N, num_classes]
     
     # Re-rank top-k for each query
     dists = img_sim.clone()
