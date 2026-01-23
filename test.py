@@ -216,6 +216,150 @@ def compute_classification_metrics(labels, dists, k_values=[1, 5, 10, 15, 20]):
 
 
 @torch.no_grad()
+def evaluate_with_text_reranking(img_model, text_model, text_processor, loader, device, args, label_names, is_conceptclip_img=False):
+    """Evaluate using image backbone for initial retrieval + ConceptCLIP text encoder for re-ranking.
+    
+    Args:
+        img_model: Image backbone model (e.g., ConvNeXtV2, ResNet50)
+        text_model: ConceptCLIP model for text encoding
+        text_processor: ConceptCLIP processor
+        loader: DataLoader for test data
+        device: torch device
+        args: command line arguments
+        label_names: list of class label names for text prompts
+        is_conceptclip_img: whether the image model is ConceptCLIP
+    """
+    img_model.eval()
+    text_model.eval()
+    embeds, labels = [], []
+    
+    print(f"\n=== Two-Model Re-ranking Evaluation ===")
+    print(f"Image Model: {args.model}")
+    print(f"Text Model: ConceptCLIP")
+    print(f"Using {len(label_names)} class labels: {label_names}")
+    print(f"Re-ranking top-{args.rerank_k} results with text similarity")
+    print(f"Text weight: {args.text_weight}\n")
+    
+    print("Step 1: Extracting image embeddings from backbone model...")
+    for data in loader:
+        if is_conceptclip_img:
+            # ConceptCLIP as image backbone
+            images = data[0]
+            _labels = data[1].to(device)
+            dummy_text = [""]
+            inputs = text_processor(images=images, text=dummy_text, return_tensors='pt', padding=True).to(device)
+            outputs = img_model(**inputs)
+            embeds.append(outputs['image_features'])
+        else:
+            # Regular backbone (ConvNeXtV2, ResNet50, etc.)
+            samples = data[0].to(device)
+            _labels = data[1].to(device)
+            out = img_model(samples)
+            embeds.append(out)
+        labels.append(_labels)
+    
+    embeds = torch.cat(embeds, dim=0)
+    labels = torch.cat(labels, dim=0)
+    
+    # Normalize image embeddings
+    embeds = embeds / embeds.norm(dim=-1, keepdim=True)
+    
+    print("Step 2: Getting text embeddings from ConceptCLIP...")
+    # Get text embeddings for each class using ConceptCLIP
+    texts = [f'a medical image of {label}' for label in label_names]
+    from PIL import Image
+    dummy_image = Image.new('RGB', (224, 224), color='black')
+    text_inputs = text_processor(
+        images=[dummy_image],
+        text=texts,
+        return_tensors='pt',
+        padding=True,
+        truncation=True
+    ).to(device)
+    
+    text_outputs = text_model(**text_inputs)
+    text_embeds = text_outputs['text_features']
+    text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
+    
+    print("Step 3: Computing initial image-based retrieval...")
+    # Initial retrieval with image similarity
+    img_sim = embeds @ embeds.t()
+    
+    print(f"Step 4: Re-ranking top-{args.rerank_k} results using text similarity...")
+    # Compute image-to-text similarity
+    img_text_sim = embeds @ text_embeds.t()  # [N, num_classes]
+    
+    # Re-rank top-k for each query
+    dists = img_sim.clone()
+    alpha = args.text_weight  # weight for image similarity
+    beta = 1.0 - alpha  # weight for text similarity
+    
+    for i in range(len(labels)):
+        # Get top-k indices from initial retrieval
+        top_k_scores, top_k_indices = torch.topk(img_sim[i], k=min(args.rerank_k, len(labels)), largest=True)
+        
+        # Re-score top-k using text similarity
+        for j in top_k_indices:
+            if i != j:
+                # Text score based on whether retrieved image's class matches query
+                text_score = img_text_sim[j, labels[i]]
+                dists[i, j] = alpha * img_sim[i, j] + beta * text_score
+    
+    dists.fill_diagonal_(float('-inf'))
+    
+    print("\n=== Evaluation Results ===")
+    # top-k accuracy (i.e. R@K)
+    kappas = [1, 5, 10]
+    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = torch.stack(accuracy).cpu().numpy()
+    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+
+    # mean average precision and mean precision (i.e. mAP and pr)
+    ranks = torch.argsort(dists, dim=0, descending=True)
+    mAP, _, pr, _ = compute_map(ranks.cpu().numpy(), labels.cpu().numpy(), kappas)
+    print('>> mAP: {:.2f}%'.format(mAP * 100.0))
+    print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
+    
+    # Classification metrics with majority voting
+    print('\n>> Classification Metrics (Majority Voting):')
+    k_values = [1, 5, 10, 15, 20]
+    classification_results = compute_classification_metrics(labels, dists, k_values)
+    
+    for k in k_values:
+        metrics = classification_results[k]
+        print(f'\n>> Top-{k} Retrieved Images:')
+        print(f'   Accuracy: {metrics["accuracy"]:.2f}%')
+        print(f'   Precision (macro): {metrics["precision_macro"]:.2f}%')
+        print(f'   Recall (macro): {metrics["recall_macro"]:.2f}%')
+        print(f'   F1 (macro): {metrics["f1_macro"]:.2f}%')
+        print(f'   Precision (weighted): {metrics["precision_weighted"]:.2f}%')
+        print(f'   Recall (weighted): {metrics["recall_weighted"]:.2f}%')
+        print(f'   F1 (weighted): {metrics["f1_weighted"]:.2f}%')
+    
+    # Save results
+    if args.save_dir:
+        if not os.path.exists(args.save_dir):
+            os.makedirs(args.save_dir)
+        file_name = f'{args.model}_conceptclip_rerank'
+        save_path = os.path.join(args.save_dir, file_name)
+        
+        classification_k_values = list(classification_results.keys())
+        classification_metrics = {k: v for k, v in classification_results.items()}
+        
+        np.savez(save_path, embeds=embeds.cpu().numpy(),
+                 labels=labels.cpu().numpy(), dists=-dists.cpu().numpy(),
+                 kappas=kappas, acc=accuracy, mAP=mAP, pr=pr,
+                 classification_k_values=classification_k_values,
+                 text_embeds=text_embeds.cpu().numpy(),
+                 label_names=label_names,
+                 image_model=args.model,
+                 rerank_k=args.rerank_k,
+                 text_weight=args.text_weight,
+                 **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
+        print(f'\n>> Results saved to {save_path}.npz')
+
+
+@torch.no_grad()
 def evaluate_conceptclip_with_text(model, processor, loader, device, args, label_names):
     """Evaluate ConceptCLIP using text-enhanced retrieval.
     
@@ -547,49 +691,103 @@ def evaluate(model, loader, device, args):
 def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    # Choose model
-    if args.model == 'conceptclip':
+    # Two-model re-ranking: load both image backbone and ConceptCLIP
+    if args.use_rerank_2models:
         if not TRANSFORMERS_AVAILABLE:
             raise ImportError('transformers library is required for ConceptCLIP. Install it with: pip install transformers')
-        print("Loading ConceptCLIP model...")
-        model = AutoModel.from_pretrained('JerrryNie/ConceptCLIP', trust_remote_code=True)
-        processor = AutoProcessor.from_pretrained('JerrryNie/ConceptCLIP', trust_remote_code=True)
-        model.to(device)
-        is_conceptclip = True
-    elif args.model == 'densenet121':
-        model = DenseNet121(embedding_dim=args.embedding_dim)
-        is_conceptclip = False
-    elif args.model == 'resnet50':
-        model = ResNet50(embedding_dim=args.embedding_dim)
-        is_conceptclip = False
-    elif args.model == 'convnextv2':
-        model = ConvNeXtV2(embedding_dim=args.embedding_dim)
-        is_conceptclip = False
-    elif args.model == 'swinv2':
-        model = SwinV2(embedding_dim=args.embedding_dim)
-        is_conceptclip = False
-    else:
-        raise NotImplementedError('Model not supported!')
-
-    if not is_conceptclip:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint")
-            checkpoint = torch.load(args.resume)
-            if 'state-dict' in checkpoint:
-                checkpoint = checkpoint['state-dict']
-            model.load_state_dict(checkpoint, strict=False)
-            print("=> loaded checkpoint")
+        
+        print("=== Loading Two Models for Re-ranking ===")
+        
+        # Load ConceptCLIP for text encoding
+        print("Loading ConceptCLIP for text encoding...")
+        text_model = AutoModel.from_pretrained('JerrryNie/ConceptCLIP', trust_remote_code=True)
+        text_processor = AutoProcessor.from_pretrained('JerrryNie/ConceptCLIP', trust_remote_code=True)
+        text_model.to(device)
+        
+        # Load image backbone model
+        print(f"Loading {args.model} as image backbone...")
+        if args.model == 'conceptclip':
+            # Use ConceptCLIP for both (image features only)
+            img_model = text_model
+            is_conceptclip_img = True
+        elif args.model == 'densenet121':
+            img_model = DenseNet121(embedding_dim=args.embedding_dim)
+            is_conceptclip_img = False
+        elif args.model == 'resnet50':
+            img_model = ResNet50(embedding_dim=args.embedding_dim)
+            is_conceptclip_img = False
+        elif args.model == 'convnextv2':
+            img_model = ConvNeXtV2(embedding_dim=args.embedding_dim)
+            is_conceptclip_img = False
+        elif args.model == 'swinv2':
+            img_model = SwinV2(embedding_dim=args.embedding_dim)
+            is_conceptclip_img = False
         else:
-            print("=> no checkpoint found")
-        model.to(device)
+            raise NotImplementedError('Model not supported!')
+        
+        # Load checkpoint for image model if not ConceptCLIP
+        if not is_conceptclip_img:
+            if os.path.isfile(args.resume):
+                print("=> loading image model checkpoint")
+                checkpoint = torch.load(args.resume)
+                if 'state-dict' in checkpoint:
+                    checkpoint = checkpoint['state-dict']
+                img_model.load_state_dict(checkpoint, strict=False)
+                print("=> loaded checkpoint")
+            else:
+                print("=> no checkpoint found for image model")
+            img_model.to(device)
+        
+        is_conceptclip = False  # We're using two-model approach
+        use_two_model_rerank = True
     else:
-        print("=> Using pre-trained ConceptCLIP (zero-shot), no checkpoint needed")
+        # Single model approach (original behavior)
+        use_two_model_rerank = False
+        
+        # Choose model
+        if args.model == 'conceptclip':
+            if not TRANSFORMERS_AVAILABLE:
+                raise ImportError('transformers library is required for ConceptCLIP. Install it with: pip install transformers')
+            print("Loading ConceptCLIP model...")
+            model = AutoModel.from_pretrained('JerrryNie/ConceptCLIP', trust_remote_code=True)
+            processor = AutoProcessor.from_pretrained('JerrryNie/ConceptCLIP', trust_remote_code=True)
+            model.to(device)
+            is_conceptclip = True
+        elif args.model == 'densenet121':
+            model = DenseNet121(embedding_dim=args.embedding_dim)
+            is_conceptclip = False
+        elif args.model == 'resnet50':
+            model = ResNet50(embedding_dim=args.embedding_dim)
+            is_conceptclip = False
+        elif args.model == 'convnextv2':
+            model = ConvNeXtV2(embedding_dim=args.embedding_dim)
+            is_conceptclip = False
+        elif args.model == 'swinv2':
+            model = SwinV2(embedding_dim=args.embedding_dim)
+            is_conceptclip = False
+        else:
+            raise NotImplementedError('Model not supported!')
+
+    if not use_two_model_rerank:
+        if not is_conceptclip:
+            if os.path.isfile(args.resume):
+                print("=> loading checkpoint")
+                checkpoint = torch.load(args.resume)
+                if 'state-dict' in checkpoint:
+                    checkpoint = checkpoint['state-dict']
+                model.load_state_dict(checkpoint, strict=False)
+                print("=> loaded checkpoint")
+            else:
+                print("=> no checkpoint found")
+            model.to(device)
+        else:
+            print("=> Using pre-trained ConceptCLIP (zero-shot), no checkpoint needed")
 
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
     
     # ConceptCLIP uses PIL images directly (processor handles preprocessing)
-    if is_conceptclip:
+    if (is_conceptclip and not use_two_model_rerank) or (use_two_model_rerank and is_conceptclip_img):
         test_transform = transforms.Compose([
             transforms.Lambda(lambda img: img.convert('RGB'))
         ])
@@ -630,7 +828,9 @@ def main(args):
         raise NotImplementedError('Dataset not supported!')
 
     # Use custom collate function for ConceptCLIP to handle PIL images
-    if is_conceptclip:
+    use_conceptclip_collate = (is_conceptclip and not use_two_model_rerank) or (use_two_model_rerank and is_conceptclip_img)
+    
+    if use_conceptclip_collate:
         test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
                                  shuffle=False,
                                  num_workers=args.workers,
@@ -642,7 +842,19 @@ def main(args):
 
     print('Evaluating...')
     
-    if is_conceptclip:
+    if use_two_model_rerank:
+        # Two-model re-ranking approach
+        if args.dataset == 'covid':
+            label_names = args.covid_labels.split(',') if args.covid_labels else ['normal', 'pneumonia', 'COVID-19']
+        elif args.dataset == 'isic':
+            label_names = args.isic_labels.split(',') if args.isic_labels else ['melanoma', 'nevus', 'seborrheic keratosis']
+        elif args.dataset == 'tbx11k':
+            label_names = args.tbx11k_labels.split(',') if args.tbx11k_labels else ['normal', 'active TB', 'latent TB', 'uncertain TB']
+        else:
+            raise ValueError(f"Unknown dataset: {args.dataset}")
+        
+        evaluate_with_text_reranking(img_model, text_model, text_processor, test_loader, device, args, label_names, is_conceptclip_img)
+    elif is_conceptclip:
         if args.use_text:
             # Get label names for text-enhanced retrieval
             if args.dataset == 'covid':
@@ -681,6 +893,8 @@ def parse_args():
     # ConceptCLIP text-enhanced retrieval options
     parser.add_argument('--use-text', action='store_true',
                         help='Enable text-enhanced retrieval for ConceptCLIP')
+    parser.add_argument('--use-rerank-2models', action='store_true',
+                        help='Use image backbone (e.g., ConvNeXtV2) for initial retrieval + ConceptCLIP text encoder for re-ranking')
     parser.add_argument('--text-fusion-strategy', default='hybrid', choices=['hybrid', 'rerank', 'concat'],
                         help='Text fusion strategy: hybrid (weighted combination), rerank (re-rank top-k), concat (concatenate embeddings)')
     parser.add_argument('--text-weight', default=0.5, type=float,
