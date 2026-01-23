@@ -246,20 +246,25 @@ def evaluate_conceptclip_concept_retrieval(model, processor, loader, device, arg
     # Create concept prompts
     concept_texts = [f'a medical image showing {concept}' for concept in concept_list]
     
-    # ConceptCLIP needs both images and text, create dummy images for each text
-    dummy_images = [Image.new('RGB', (224, 224), color='black') for _ in concept_texts]
+    # ConceptCLIP needs a dummy image with all text prompts (not one image per text)
+    dummy_image = Image.new('RGB', (224, 224), color='black')
     
-    text_inputs = processor(
-        images=dummy_images,
-        text=concept_texts,
-        return_tensors='pt',
-        padding=True,
-        truncation=True,
-        max_length=77
-    ).to(device)
+    # Process each concept text separately to avoid batch size issues
+    concept_embeds_list = []
+    for concept_text in concept_texts:
+        text_inputs = processor(
+            images=[dummy_image],
+            text=[concept_text],
+            return_tensors='pt',
+            padding=True,
+            truncation=True,
+            max_length=77
+        ).to(device)
+        
+        text_outputs = model(**text_inputs)
+        concept_embeds_list.append(text_outputs['text_features'])
     
-    text_outputs = model(**text_inputs)
-    concept_embeds = text_outputs['text_features']
+    concept_embeds = torch.cat(concept_embeds_list, dim=0)
     concept_embeds = concept_embeds / concept_embeds.norm(dim=-1, keepdim=True)
     print(f"   Concept embeddings shape: {concept_embeds.shape}")
     
