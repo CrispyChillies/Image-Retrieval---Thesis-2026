@@ -216,6 +216,165 @@ def compute_classification_metrics(labels, dists, k_values=[1, 5, 10, 15, 20]):
 
 
 @torch.no_grad()
+def evaluate_conceptclip_concept_retrieval(model, processor, loader, device, args, concept_list):
+    """Evaluate using concept-based multi-label classification and retrieval.
+    
+    Each image is represented by confidence scores for multiple concepts.
+    Retrieval is based on similarity of concept profiles between images.
+    
+    Args:
+        model: ConceptCLIP model
+        processor: ConceptCLIP processor
+        loader: DataLoader for test data
+        device: torch device
+        args: command line arguments
+        concept_list: list of concept descriptions (e.g., ["ground glass opacity", "consolidation", ...])
+    """
+    model.eval()
+    labels = []
+    
+    print(f"\n=== Concept-Based Multi-Label Retrieval ===")
+    print(f"Using {len(concept_list)} concepts:")
+    for i, concept in enumerate(concept_list):
+        print(f"  {i+1}. {concept}")
+    print()
+    
+    # Step 1: Get text embeddings for all concepts
+    print("Step 1: Extracting concept embeddings from text encoder...")
+    from PIL import Image
+    dummy_image = Image.new('RGB', (224, 224), color='black')
+    
+    # Create concept prompts
+    concept_texts = [f'a medical image showing {concept}' for concept in concept_list]
+    
+    text_inputs = processor(
+        images=[dummy_image],
+        text=concept_texts,
+        return_tensors='pt',
+        padding=True,
+        truncation=True,
+        max_length=77
+    ).to(device)
+    
+    text_outputs = model(**text_inputs)
+    concept_embeds = text_outputs['text_features']
+    concept_embeds = concept_embeds / concept_embeds.norm(dim=-1, keepdim=True)
+    print(f"   Concept embeddings shape: {concept_embeds.shape}")
+    
+    # Step 2: Extract image embeddings and compute concept scores
+    print("Step 2: Computing concept confidence scores for each image...")
+    all_concept_scores = []
+    
+    for batch_idx, data in enumerate(loader):
+        images = data[0]
+        _labels = data[1].to(device)
+        
+        # Get image embeddings
+        dummy_text = [""]
+        inputs = processor(
+            images=images,
+            text=dummy_text,
+            return_tensors='pt',
+            padding=True
+        ).to(device)
+        
+        outputs = model(**inputs)
+        img_embeds = outputs['image_features']
+        img_embeds = img_embeds / img_embeds.norm(dim=-1, keepdim=True)
+        
+        # Compute image-to-concept similarities
+        # Use logit_scale from ConceptCLIP model
+        logit_scale = outputs.get('logit_scale', torch.tensor(100.0).to(device))
+        similarities = logit_scale * (img_embeds @ concept_embeds.t())  # [batch_size, num_concepts]
+        
+        # Apply sigmoid to get confidence scores (0-1) for multi-label classification
+        concept_scores = torch.sigmoid(similarities)
+        all_concept_scores.append(concept_scores)
+        labels.append(_labels)
+        
+        if (batch_idx + 1) % 5 == 0:
+            print(f"   Processed {(batch_idx + 1) * args.eval_batch_size} images...")
+    
+    all_concept_scores = torch.cat(all_concept_scores, dim=0)  # [N, num_concepts]
+    labels = torch.cat(labels, dim=0)
+    
+    print(f"   Concept scores shape: {all_concept_scores.shape}")
+    print(f"   Mean concept scores: {all_concept_scores.mean(dim=0).cpu().numpy()}")
+    print(f"   Min concept score: {all_concept_scores.min().item():.4f}, Max: {all_concept_scores.max().item():.4f}")
+    
+    # Step 3: Compute similarity based on concept profiles
+    print("\nStep 3: Computing image similarity based on concept profiles...")
+    # Use cosine similarity between concept score vectors
+    # Normalize concept scores to unit vectors
+    concept_scores_norm = all_concept_scores / (all_concept_scores.norm(dim=-1, keepdim=True) + 1e-8)
+    
+    # Compute pairwise similarity matrix
+    dists = concept_scores_norm @ concept_scores_norm.t()
+    dists.fill_diagonal_(float('-inf'))
+    
+    print("\n=== Evaluation Results ===")
+    # top-k accuracy (i.e. R@K)
+    kappas = [1, 5, 10]
+    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = torch.stack(accuracy).cpu().numpy()
+    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+
+    # mean average precision and mean precision (i.e. mAP and pr)
+    ranks = torch.argsort(dists, dim=0, descending=True)
+    mAP, _, pr, _ = compute_map(ranks.cpu().numpy(), labels.cpu().numpy(), kappas)
+    print('>> mAP: {:.2f}%'.format(mAP * 100.0))
+    print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
+    
+    # Classification metrics with majority voting
+    print('\n>> Classification Metrics (Majority Voting):')
+    k_values = [1, 5, 10, 15, 20]
+    classification_results = compute_classification_metrics(labels, dists, k_values)
+    
+    for k in k_values:
+        metrics = classification_results[k]
+        print(f'\n>> Top-{k} Retrieved Images:')
+        print(f'   Accuracy: {metrics["accuracy"]:.2f}%')
+        print(f'   Precision (macro): {metrics["precision_macro"]:.2f}%')
+        print(f'   Recall (macro): {metrics["recall_macro"]:.2f}%')
+        print(f'   F1 (macro): {metrics["f1_macro"]:.2f}%')
+        print(f'   Precision (weighted): {metrics["precision_weighted"]:.2f}%')
+        print(f'   Recall (weighted): {metrics["recall_weighted"]:.2f}%')
+        print(f'   F1 (weighted): {metrics["f1_weighted"]:.2f}%')
+    
+    # Additional: Show top concepts for sample images
+    print("\n>> Sample Concept Activations:")
+    sample_indices = torch.randperm(len(all_concept_scores))[:min(5, len(all_concept_scores))]
+    for idx in sample_indices:
+        scores = all_concept_scores[idx]
+        label = labels[idx].item()
+        top_concepts = torch.topk(scores, k=min(5, len(concept_list)))
+        print(f"\n   Image {idx.item()} (Label: {label}):")
+        for score, concept_idx in zip(top_concepts.values, top_concepts.indices):
+            print(f"      {concept_list[concept_idx]}: {score.item():.3f}")
+    
+    # Save results
+    if args.save_dir:
+        if not os.path.exists(args.save_dir):
+            os.makedirs(args.save_dir)
+        file_name = 'conceptclip_concept_retrieval'
+        save_path = os.path.join(args.save_dir, file_name)
+        
+        classification_k_values = list(classification_results.keys())
+        classification_metrics = {k: v for k, v in classification_results.items()}
+        
+        np.savez(save_path,
+                 concept_scores=all_concept_scores.cpu().numpy(),
+                 labels=labels.cpu().numpy(),
+                 dists=-dists.cpu().numpy(),
+                 kappas=kappas, acc=accuracy, mAP=mAP, pr=pr,
+                 classification_k_values=classification_k_values,
+                 concept_list=concept_list,
+                 concept_embeds=concept_embeds.cpu().numpy(),
+                 **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
+        print(f'\n>> Results saved to {save_path}.npz')
+
+
+@torch.no_grad()
 def evaluate_with_text_reranking(img_model, text_model, text_processor, loader, conceptclip_loader, device, args, label_names, is_conceptclip_img=False):
     """Evaluate using image backbone for initial retrieval + ConceptCLIP text encoder for re-ranking.
     
@@ -905,7 +1064,50 @@ def main(args):
         
         evaluate_with_text_reranking(img_model, text_model, text_processor, test_loader, conceptclip_loader, device, args, label_names, is_conceptclip_img)
     elif is_conceptclip:
-        if args.use_text:
+        if args.use_concept_retrieval:
+            # Concept-based multi-label retrieval
+            if args.concept_list:
+                concept_list = args.concept_list.split(',')
+            else:
+                # Default concepts for each dataset
+                if args.dataset == 'covid':
+                    concept_list = [
+                        'ground glass opacity',
+                        'consolidation',
+                        'pleural effusion',
+                        'normal lung tissue',
+                        'bilateral infiltrates',
+                        'clear lung fields',
+                        'pulmonary edema',
+                        'pneumonia pattern'
+                    ]
+                elif args.dataset == 'isic':
+                    concept_list = [
+                        'irregular border',
+                        'asymmetric shape',
+                        'color variation',
+                        'dark pigmentation',
+                        'light brown color',
+                        'smooth surface',
+                        'uniform color',
+                        'well-defined border'
+                    ]
+                elif args.dataset == 'tbx11k':
+                    concept_list = [
+                        'cavitation',
+                        'infiltration',
+                        'fibrosis',
+                        'calcification',
+                        'pleural thickening',
+                        'normal lung',
+                        'nodular pattern',
+                        'miliary pattern'
+                    ]
+                else:
+                    raise ValueError(f"Please provide --concept-list for dataset: {args.dataset}")
+            
+            evaluate_conceptclip_concept_retrieval(model, processor, test_loader, device, args, concept_list)
+        elif args.use_text:
             # Get label names for text-enhanced retrieval
             if args.dataset == 'covid':
                 label_names = args.covid_labels.split(',') if args.covid_labels else ['normal', 'pneumonia', 'COVID-19']
@@ -943,6 +1145,10 @@ def parse_args():
     # ConceptCLIP text-enhanced retrieval options
     parser.add_argument('--use-text', action='store_true',
                         help='Enable text-enhanced retrieval for ConceptCLIP')
+    parser.add_argument('--use-concept-retrieval', action='store_true',
+                        help='Enable concept-based multi-label retrieval using ConceptCLIP text encoder')
+    parser.add_argument('--concept-list', default=None, type=str,
+                        help='Comma-separated list of concepts for multi-label retrieval (e.g., "ground glass opacity,consolidation,pleural effusion")')
     parser.add_argument('--use-rerank-2models', action='store_true',
                         help='Use image backbone (e.g., ConvNeXtV2) for initial retrieval + ConceptCLIP text encoder for re-ranking')
     parser.add_argument('--text-fusion-strategy', default='hybrid', choices=['hybrid', 'rerank', 'concat'],
