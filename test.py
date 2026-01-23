@@ -216,14 +216,15 @@ def compute_classification_metrics(labels, dists, k_values=[1, 5, 10, 15, 20]):
 
 
 @torch.no_grad()
-def evaluate_with_text_reranking(img_model, text_model, text_processor, loader, device, args, label_names, is_conceptclip_img=False):
+def evaluate_with_text_reranking(img_model, text_model, text_processor, loader, conceptclip_loader, device, args, label_names, is_conceptclip_img=False):
     """Evaluate using image backbone for initial retrieval + ConceptCLIP text encoder for re-ranking.
     
     Args:
         img_model: Image backbone model (e.g., ConvNeXtV2, ResNet50)
         text_model: ConceptCLIP model for text encoding
         text_processor: ConceptCLIP processor
-        loader: DataLoader for test data
+        loader: DataLoader for test data (with backbone transforms)
+        conceptclip_loader: DataLoader with PIL images for ConceptCLIP
         device: torch device
         args: command line arguments
         label_names: list of class label names for text prompts
@@ -268,24 +269,20 @@ def evaluate_with_text_reranking(img_model, text_model, text_processor, loader, 
     # Need to extract ConceptCLIP image embeddings for compatibility with text embeddings
     conceptclip_img_embeds = []
     
-    for data in loader:
-        if is_conceptclip_img:
-            # Already have ConceptCLIP embeddings
-            break
-        else:
-            # Need to extract ConceptCLIP image embeddings
-            images = data[0]
+    if is_conceptclip_img:
+        # Already have ConceptCLIP embeddings
+        conceptclip_img_embeds = embeds
+    else:
+        # Need to extract ConceptCLIP image embeddings using PIL images
+        for data in conceptclip_loader:
+            images = data[0]  # PIL images
             dummy_text = [""]
             inputs = text_processor(images=images, text=dummy_text, return_tensors='pt', padding=True).to(device)
             outputs = text_model(**inputs)
             conceptclip_img_embeds.append(outputs['image_features'])
-    
-    if not is_conceptclip_img:
+        
         conceptclip_img_embeds = torch.cat(conceptclip_img_embeds, dim=0)
         conceptclip_img_embeds = conceptclip_img_embeds / conceptclip_img_embeds.norm(dim=-1, keepdim=True)
-    else:
-        # Use the already extracted embeddings
-        conceptclip_img_embeds = embeds
     
     print("Step 3: Getting text embeddings from ConceptCLIP...")
     # Get text embeddings for each class using ConceptCLIP
@@ -867,7 +864,7 @@ def main(args):
     print('Evaluating...')
     
     if use_two_model_rerank:
-        # Two-model re-ranking approach
+        # Two-model re-ranking approach - need separate loader for ConceptCLIP with PIL images
         if args.dataset == 'covid':
             label_names = args.covid_labels.split(',') if args.covid_labels else ['normal', 'pneumonia', 'COVID-19']
         elif args.dataset == 'isic':
@@ -877,7 +874,36 @@ def main(args):
         else:
             raise ValueError(f"Unknown dataset: {args.dataset}")
         
-        evaluate_with_text_reranking(img_model, text_model, text_processor, test_loader, device, args, label_names, is_conceptclip_img)
+        # Create separate dataset/loader with PIL images for ConceptCLIP
+        if not is_conceptclip_img:
+            pil_transform = transforms.Compose([
+                transforms.Lambda(lambda img: img.convert('RGB'))
+            ])
+            
+            if args.dataset == 'covid':
+                conceptclip_dataset = ChestXrayDataSet(data_dir=args.test_dataset_dir,
+                                                       image_list_file=args.test_image_list,
+                                                       mask_dir=args.mask_dir,
+                                                       transform=pil_transform)
+            elif args.dataset == 'isic':
+                conceptclip_dataset = ISICDataSet(data_dir=args.test_dataset_dir,
+                                                  image_list_file=args.test_image_list,
+                                                  mask_dir=args.mask_dir,
+                                                  transform=pil_transform)
+            elif args.dataset == 'tbx11k':
+                conceptclip_dataset = TBX11kDataSet(data_dir=args.test_dataset_dir,
+                                                   csv_file=args.test_image_list,
+                                                   transform=pil_transform)
+            
+            conceptclip_loader = DataLoader(conceptclip_dataset, batch_size=args.eval_batch_size,
+                                           shuffle=False,
+                                           num_workers=args.workers,
+                                           collate_fn=conceptclip_collate_fn)
+        else:
+            # Already using PIL images
+            conceptclip_loader = test_loader
+        
+        evaluate_with_text_reranking(img_model, text_model, text_processor, test_loader, conceptclip_loader, device, args, label_names, is_conceptclip_img)
     elif is_conceptclip:
         if args.use_text:
             # Get label names for text-enhanced retrieval
