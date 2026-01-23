@@ -242,14 +242,13 @@ def evaluate_conceptclip_concept_retrieval(model, processor, loader, device, arg
     # Step 1: Get text embeddings for all concepts
     print("Step 1: Extracting concept embeddings from text encoder...")
     import numpy as np
-    from PIL import Image as PILImage
+    from PIL import Image
     
     # Create concept prompts
     concept_texts = [f'a medical image showing {concept}' for concept in concept_list]
     
-    # Create a simple numpy array and convert to PIL - this avoids TensorFlow issues
-    dummy_array = np.zeros((224, 224, 3), dtype=np.uint8)
-    dummy_image = PILImage.fromarray(dummy_array)
+    # Create dummy image (same pattern as other working functions)
+    dummy_image = Image.new('RGB', (224, 224), color='black')
     
     # Process all concept texts at once (not one by one)
     text_inputs = processor(
