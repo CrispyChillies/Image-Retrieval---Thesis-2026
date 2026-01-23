@@ -241,30 +241,28 @@ def evaluate_conceptclip_concept_retrieval(model, processor, loader, device, arg
     
     # Step 1: Get text embeddings for all concepts
     print("Step 1: Extracting concept embeddings from text encoder...")
+    import numpy as np
+    from PIL import Image as PILImage
     
     # Create concept prompts
     concept_texts = [f'a medical image showing {concept}' for concept in concept_list]
     
-    # Get a real image from the dataset to use as dummy (ConceptCLIP processor needs valid PIL image)
-    first_batch = next(iter(loader))
-    dummy_image = first_batch[0][0]  # Get first image from first batch
+    # Create a simple numpy array and convert to PIL - this avoids TensorFlow issues
+    dummy_array = np.zeros((224, 224, 3), dtype=np.uint8)
+    dummy_image = PILImage.fromarray(dummy_array)
     
-    # Process each concept text separately to avoid batch size issues
-    concept_embeds_list = []
-    for concept_text in concept_texts:
-        text_inputs = processor(
-            images=[dummy_image],
-            text=[concept_text],
-            return_tensors='pt',
-            padding=True,
-            truncation=True,
-            max_length=77
-        ).to(device)
-        
-        text_outputs = model(**text_inputs)
-        concept_embeds_list.append(text_outputs['text_features'])
+    # Process all concept texts at once (not one by one)
+    text_inputs = processor(
+        images=[dummy_image],
+        text=concept_texts,
+        return_tensors='pt',
+        padding=True,
+        truncation=True,
+        max_length=77
+    ).to(device)
     
-    concept_embeds = torch.cat(concept_embeds_list, dim=0)
+    text_outputs = model(**text_inputs)
+    concept_embeds = text_outputs['text_features']
     concept_embeds = concept_embeds / concept_embeds.norm(dim=-1, keepdim=True)
     print(f"   Concept embeddings shape: {concept_embeds.shape}")
     
