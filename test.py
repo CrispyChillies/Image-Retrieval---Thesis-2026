@@ -241,13 +241,13 @@ def evaluate_conceptclip_concept_retrieval(model, processor, loader, device, arg
     
     # Step 1: Get text embeddings for all concepts
     print("Step 1: Extracting concept embeddings from text encoder...")
-    from PIL import Image
     
     # Create concept prompts
     concept_texts = [f'a medical image showing {concept}' for concept in concept_list]
     
-    # ConceptCLIP needs a dummy image with all text prompts (not one image per text)
-    dummy_image = Image.new('RGB', (224, 224), color='black')
+    # Get a real image from the dataset to use as dummy (ConceptCLIP processor needs valid PIL image)
+    first_batch = next(iter(loader))
+    dummy_image = first_batch[0][0]  # Get first image from first batch
     
     # Process each concept text separately to avoid batch size issues
     concept_embeds_list = []
