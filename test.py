@@ -417,9 +417,9 @@ def evaluate(model, loader, device, args):
     # ============================================================
 
     print('\n>> Extracting ConceptCLIP patch-level agreement scores (batched)...')
-
+    raw_images_denorm = denormalize(raw_samples)
     concept_embeds, patch_scores = extract_conceptclip_with_patch_scores(
-        raw_samples,    # your denormalized images
+        raw_images_denorm,    # your denormalized images
         c_processor,
         c_model,
         batch_size=8          # Kaggle-safe
