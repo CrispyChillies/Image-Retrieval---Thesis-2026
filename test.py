@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
 
-from model import ConvNeXtV2, ResNet50, DenseNet121
+from model import ConvNeXtV2, ResNet50, DenseNet121, HybridConvNeXtViT
 
 
 def retrieval_accuracy(output, target, topk=(1,)):
@@ -201,312 +201,312 @@ def compute_classification_metrics(labels, dists, k_values=[1, 5, 10, 15, 20]):
     return results
 
 
-# @torch.no_grad()
-# def evaluate(model, loader, device, args):
-#     model.eval()
-#     embeds, labels = [], []
-
-#     for data in loader:
-#         samples = data[0].to(device)
-#         _labels = data[1].to(device)
-#         out = model(samples)
-#         embeds.append(out)
-#         labels.append(_labels)
-
-#     embeds = torch.cat(embeds, dim=0)
-#     labels = torch.cat(labels, dim=0)
-
-#     dists = -torch.cdist(embeds, embeds)
-#     dists.fill_diagonal_(float('-inf'))
-
-#     covid_labels = ['No Finding', 'Pneumonia', 'COVID-19'] 
-#     prompts = [f'a radiographic representation assessing for {l}' for l in covid_labels]
-
-#     K = 50 # Number of rerank candidates
-#     alpha = 0.7 # Combination weights: alpha * ConvNeXt + (1-alpha) * ConceptCLIP
-
-#     # top-k accuracy (i.e. R@K)
-#     kappas = [1, 5, 10]
-#     accuracy = retrieval_accuracy(dists, labels, topk=kappas)
-#     accuracy = torch.stack(accuracy).cpu().numpy()
-#     print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
-
-#     # mean average precision and mean precision (i.e. mAP and pr)
-#     ranks = torch.argsort(dists, dim=0, descending=True)
-#     mAP, _, pr, _ = compute_map(ranks.cpu().numpy(),  labels.cpu().numpy(), kappas)
-#     print('>> mAP: {:.2f}%'.format(mAP * 100.0))
-#     print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
-    
-#     # Classification metrics with majority voting
-#     print('\n>> Classification Metrics (Majority Voting):')
-#     k_values = [1, 5, 10, 15, 20]
-#     classification_results = compute_classification_metrics(labels, dists, k_values)
-    
-#     for k in k_values:
-#         metrics = classification_results[k]
-#         print(f'\n>> Top-{k} Retrieved Images:')
-#         print(f'   Accuracy: {metrics["accuracy"]:.2f}%')
-#         print(f'   Precision (macro): {metrics["precision_macro"]:.2f}%')
-#         print(f'   Recall (macro): {metrics["recall_macro"]:.2f}%')
-#         print(f'   F1 (macro): {metrics["f1_macro"]:.2f}%')
-#         print(f'   Precision (weighted): {metrics["precision_weighted"]:.2f}%')
-#         print(f'   Recall (weighted): {metrics["recall_weighted"]:.2f}%')
-#         print(f'   F1 (weighted): {metrics["f1_weighted"]:.2f}%')
-
-#     # Save results
-#     if args.save_dir:
-#         if not os.path.exists(args.save_dir):
-#             os.makedirs(args.save_dir)
-#         file_name = args.resume.split('/')[-1].split('.')[0]
-
-#         save_path = os.path.join(args.save_dir, file_name)
-#         # Convert classification_results dict to numpy arrays for saving
-#         classification_k_values = list(classification_results.keys())
-#         classification_metrics = {k: v for k, v in classification_results.items()}
-        
-#         np.savez(save_path, embeds=embeds.cpu().numpy(),
-#                  labels=labels.cpu().numpy(), dists=-dists.cpu().numpy(),
-#                  kappas=kappas, acc=accuracy, mAP=mAP, pr=pr,
-#                  classification_k_values=classification_k_values,
-#                  **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
-        
-
-def denormalize(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
-    """Denormalize a tensor image with mean and standard deviation."""
-    mean = torch.tensor(mean).view(3, 1, 1).to(tensor.device)
-    std = torch.tensor(std).view(3, 1, 1).to(tensor.device)
-    return tensor * std + mean
-
 @torch.no_grad()
 def evaluate(model, loader, device, args):
-    """
-    Evaluation with hypothesis:
-    - ConvNeXtV2 = primary retriever
-    - ConceptCLIP = semantic reranker (top-K only)
-    - Expect mAP ↑, R@1 ~ unchanged
-
-    OOM-safe for Kaggle 16GB GPU.
-    """
-
-    import torch
-    import numpy as np
-    import torch.nn.functional as F
-    from transformers import AutoModel, AutoProcessor
-
-    # ============================================================
-    # 1. Load ConceptCLIP ONCE
-    # ============================================================
-    print('>> Loading ConceptCLIP...')
-    c_model = AutoModel.from_pretrained(
-        'JerrryNie/ConceptCLIP',
-        trust_remote_code=True
-    ).to(device)
-    c_processor = AutoProcessor.from_pretrained(
-        'JerrryNie/ConceptCLIP',
-        trust_remote_code=True
-    )
-    c_model.eval()
-
-    # ============================================================
-    # 2. Extract ConvNeXtV2 embeddings
-    # ============================================================
     model.eval()
-    embeds, labels, raw_samples = [], [], []
+    embeds, labels = [], []
 
     for data in loader:
-        images = data[0].to(device)
-        lbls = data[1].to(device)
+        samples = data[0].to(device)
+        _labels = data[1].to(device)
+        out = model(samples)
+        embeds.append(out)
+        labels.append(_labels)
 
-        feats = model(images)
+    embeds = torch.cat(embeds, dim=0)
+    labels = torch.cat(labels, dim=0)
 
-        embeds.append(feats)
-        labels.append(lbls)
-        raw_samples.append(images)
+    dists = -torch.cdist(embeds, embeds)
+    dists.fill_diagonal_(float('-inf'))
 
-    embeds = torch.cat(embeds, dim=0)          # [N, D]
-    labels = torch.cat(labels, dim=0)          # [N]
-    raw_samples = torch.cat(raw_samples, dim=0)
+    covid_labels = ['No Finding', 'Pneumonia', 'COVID-19'] 
+    prompts = [f'a radiographic representation assessing for {l}' for l in covid_labels]
 
-    # ============================================================
-    # 3. BASELINE RETRIEVAL (ConvNeXtV2)
-    # ============================================================
-    print('\n===== BASELINE: ConvNeXtV2 =====')
+    K = 50 # Number of rerank candidates
+    alpha = 0.7 # Combination weights: alpha * ConvNeXt + (1-alpha) * ConceptCLIP
 
-    dists_base = -torch.cdist(embeds, embeds)
-    dists_base.fill_diagonal_(float('-inf'))
-
+    # top-k accuracy (i.e. R@K)
     kappas = [1, 5, 10]
+    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = torch.stack(accuracy).cpu().numpy()
+    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
 
-    acc_base = retrieval_accuracy(dists_base, labels, topk=kappas)
-    acc_base = torch.stack(acc_base).cpu().numpy()
-    print(f'>> R@K{kappas}: {np.around(acc_base, 2)}%')
-
-    ranks_base = torch.argsort(dists_base, dim=0, descending=True)
-    mAP_base, _, pr_base, _ = compute_map(
-        ranks_base.cpu().numpy(),
-        labels.cpu().numpy(),
-        kappas
-    )
-
-    print(f'>> mAP: {mAP_base * 100:.2f}%')
-    print(f'>> mP@K{kappas}: {np.around(pr_base * 100, 2)}%')
-
-    # ============================================================
-    # 4. Free memory BEFORE ConceptCLIP
-    # ============================================================
-    torch.cuda.empty_cache()
-
-    # ============================================================
-    # 5. Extract ConceptCLIP embeddings (BATCHED, OOM-SAFE)
-    # ============================================================
-    print('\n>> Extracting ConceptCLIP patch-level agreement scores (batched)...')
-
-    def compute_patch_agreement(token_features, topk=5):
-        """
-        token_features: [num_patches, D]
-        returns: scalar agreement score
-        """
-        # L2 norm = strength of semantic activation
-        patch_strength = token_features.norm(dim=1)   # [num_patches]
-
-        # Focus on strongest semantic regions
-        return patch_strength.topk(topk).values.mean()
+    # mean average precision and mean precision (i.e. mAP and pr)
+    ranks = torch.argsort(dists, dim=0, descending=True)
+    mAP, _, pr, _ = compute_map(ranks.cpu().numpy(),  labels.cpu().numpy(), kappas)
+    print('>> mAP: {:.2f}%'.format(mAP * 100.0))
+    print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
     
-    @torch.no_grad()
-    def extract_conceptclip_with_patch_scores(
-        images, processor, model, batch_size=8
-    ):
-        image_embeds = []
-        patch_scores = []
-
-        for i in range(0, len(images), batch_size):
-            batch = images[i:i + batch_size]
-
-            inputs = processor(
-                images=batch,
-                return_tensors='pt',
-                padding=True
-            ).to(model.device)
-
-            outputs = model(**inputs)
-
-            # global embedding
-            img_feat = F.normalize(outputs["image_features"], dim=-1)
-            image_embeds.append(img_feat)
-
-            # patch tokens
-            token_feats = outputs["image_token_features"]  # [B, P, D]
-
-            for b in range(token_feats.size(0)):
-                score = compute_patch_agreement(token_feats[b])
-                patch_scores.append(score)
-
-             # free memory
-            del outputs, inputs
-            torch.cuda.empty_cache()
-
-        return (
-            torch.cat(image_embeds, dim=0),
-            torch.stack(patch_scores)
-        )
-
-
-
-    # ============================================================
-    # 6. SEMANTIC RE-RANKING (TOP-K ONLY)
-    # ============================================================
-
-    print('\n>> Extracting ConceptCLIP patch-level agreement scores (batched)...')
-    raw_images_denorm = denormalize(raw_samples)
-    concept_embeds, patch_scores = extract_conceptclip_with_patch_scores(
-        raw_images_denorm,    # your denormalized images
-        c_processor,
-        c_model,
-        batch_size=8          # Kaggle-safe
-    )
-    K = 5
-    alpha = 0.1
-    beta = 0.05  # small on purpose
-
-    print(f'\n>> Patch-level agreement re-ranking (K={K}, beta={beta})')
-
-    dists_rerank = dists_base.clone()
-    _, topk_indices = torch.topk(dists_base, K, dim=1)
-
-    for i in range(dists_base.size(0)):
-        candidates = topk_indices[i]
-
-        sim_conv = dists_base[i, candidates]
-
-         # patch agreement consistency
-        patch_q = patch_scores[i]
-        patch_db = patch_scores[candidates]
-
-        patch_agreement = torch.minimum(patch_q, patch_db)
-
-        # normalize agreement
-        patch_agreement = (patch_agreement - patch_agreement.mean()) / (
-            patch_agreement.std() + 1e-6
-        )
-
-        # apply as small bias
-        dists_rerank[i, candidates] = sim_conv + beta * patch_agreement
-
-
-    # ============================================================
-    # 7. EVALUATION AFTER RE-RANKING
-    # ============================================================
-    print('\n===== RERANKED: ConvNeXtV2 + ConceptCLIP =====')
-
-    acc_rerank = retrieval_accuracy(dists_rerank, labels, topk=kappas)
-    acc_rerank = torch.stack(acc_rerank).cpu().numpy()
-    print(f'>> R@K{kappas}: {np.around(acc_rerank, 2)}%')
-
-    ranks_rerank = torch.argsort(dists_rerank, dim=0, descending=True)
-    mAP_rerank, _, pr_rerank, _ = compute_map(
-        ranks_rerank.cpu().numpy(),
-        labels.cpu().numpy(),
-        kappas
-    )
-
-    print(f'>> mAP: {mAP_rerank * 100:.2f}%')
-    print(f'>> mP@K{kappas}: {np.around(pr_rerank * 100, 2)}%')
-
-    # ============================================================
-    # 8. OPTIONAL: Classification via retrieval (reranked)
-    # ============================================================
-    print('\n>> Classification Metrics (Majority Voting, reranked)')
+    # Classification metrics with majority voting
+    print('\n>> Classification Metrics (Majority Voting):')
     k_values = [1, 5, 10, 15, 20]
-    cls_results = compute_classification_metrics(labels, dists_rerank, k_values)
-
+    classification_results = compute_classification_metrics(labels, dists, k_values)
+    
     for k in k_values:
-        m = cls_results[k]
-        print(
-            f'Top-{k}: '
-            f'Acc={m["accuracy"]:.2f}% | '
-            f'F1(macro)={m["f1_macro"]:.2f}% | '
-            f'F1(weighted)={m["f1_weighted"]:.2f}%'
-        )
+        metrics = classification_results[k]
+        print(f'\n>> Top-{k} Retrieved Images:')
+        print(f'   Accuracy: {metrics["accuracy"]:.2f}%')
+        print(f'   Precision (macro): {metrics["precision_macro"]:.2f}%')
+        print(f'   Recall (macro): {metrics["recall_macro"]:.2f}%')
+        print(f'   F1 (macro): {metrics["f1_macro"]:.2f}%')
+        print(f'   Precision (weighted): {metrics["precision_weighted"]:.2f}%')
+        print(f'   Recall (weighted): {metrics["recall_weighted"]:.2f}%')
+        print(f'   F1 (weighted): {metrics["f1_weighted"]:.2f}%')
 
-    # ============================================================
-    # 9. SAVE RESULTS
-    # ============================================================
+    # Save results
     if args.save_dir:
-        os.makedirs(args.save_dir, exist_ok=True)
-        name = os.path.basename(args.resume).split('.')[0] or 'eval'
+        if not os.path.exists(args.save_dir):
+            os.makedirs(args.save_dir)
+        file_name = args.resume.split('/')[-1].split('.')[0]
 
-        np.savez(
-            os.path.join(args.save_dir, name + '_rerank'),
-            labels=labels.cpu().numpy(),
-            dists_base=-dists_base.cpu().numpy(),
-            dists_rerank=-dists_rerank.cpu().numpy(),
-            mAP_base=mAP_base,
-            mAP_rerank=mAP_rerank,
-            pr_base=pr_base,
-            pr_rerank=pr_rerank,
-            acc_base=acc_base,
-            acc_rerank=acc_rerank
-        )
+        save_path = os.path.join(args.save_dir, file_name)
+        # Convert classification_results dict to numpy arrays for saving
+        classification_k_values = list(classification_results.keys())
+        classification_metrics = {k: v for k, v in classification_results.items()}
+        
+        np.savez(save_path, embeds=embeds.cpu().numpy(),
+                 labels=labels.cpu().numpy(), dists=-dists.cpu().numpy(),
+                 kappas=kappas, acc=accuracy, mAP=mAP, pr=pr,
+                 classification_k_values=classification_k_values,
+                 **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
+        
+
+# def denormalize(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+#     """Denormalize a tensor image with mean and standard deviation."""
+#     mean = torch.tensor(mean).view(3, 1, 1).to(tensor.device)
+#     std = torch.tensor(std).view(3, 1, 1).to(tensor.device)
+#     return tensor * std + mean
+
+# @torch.no_grad()
+# def evaluate(model, loader, device, args):
+#     """
+#     Evaluation with hypothesis:
+#     - ConvNeXtV2 = primary retriever
+#     - ConceptCLIP = semantic reranker (top-K only)
+#     - Expect mAP ↑, R@1 ~ unchanged
+
+#     OOM-safe for Kaggle 16GB GPU.
+#     """
+
+#     import torch
+#     import numpy as np
+#     import torch.nn.functional as F
+#     from transformers import AutoModel, AutoProcessor
+
+#     # ============================================================
+#     # 1. Load ConceptCLIP ONCE
+#     # ============================================================
+#     print('>> Loading ConceptCLIP...')
+#     c_model = AutoModel.from_pretrained(
+#         'JerrryNie/ConceptCLIP',
+#         trust_remote_code=True
+#     ).to(device)
+#     c_processor = AutoProcessor.from_pretrained(
+#         'JerrryNie/ConceptCLIP',
+#         trust_remote_code=True
+#     )
+#     c_model.eval()
+
+#     # ============================================================
+#     # 2. Extract ConvNeXtV2 embeddings
+#     # ============================================================
+#     model.eval()
+#     embeds, labels, raw_samples = [], [], []
+
+#     for data in loader:
+#         images = data[0].to(device)
+#         lbls = data[1].to(device)
+
+#         feats = model(images)
+
+#         embeds.append(feats)
+#         labels.append(lbls)
+#         raw_samples.append(images)
+
+#     embeds = torch.cat(embeds, dim=0)          # [N, D]
+#     labels = torch.cat(labels, dim=0)          # [N]
+#     raw_samples = torch.cat(raw_samples, dim=0)
+
+#     # ============================================================
+#     # 3. BASELINE RETRIEVAL (ConvNeXtV2)
+#     # ============================================================
+#     print('\n===== BASELINE: ConvNeXtV2 =====')
+
+#     dists_base = -torch.cdist(embeds, embeds)
+#     dists_base.fill_diagonal_(float('-inf'))
+
+#     kappas = [1, 5, 10]
+
+#     acc_base = retrieval_accuracy(dists_base, labels, topk=kappas)
+#     acc_base = torch.stack(acc_base).cpu().numpy()
+#     print(f'>> R@K{kappas}: {np.around(acc_base, 2)}%')
+
+#     ranks_base = torch.argsort(dists_base, dim=0, descending=True)
+#     mAP_base, _, pr_base, _ = compute_map(
+#         ranks_base.cpu().numpy(),
+#         labels.cpu().numpy(),
+#         kappas
+#     )
+
+#     print(f'>> mAP: {mAP_base * 100:.2f}%')
+#     print(f'>> mP@K{kappas}: {np.around(pr_base * 100, 2)}%')
+
+#     # ============================================================
+#     # 4. Free memory BEFORE ConceptCLIP
+#     # ============================================================
+#     torch.cuda.empty_cache()
+
+#     # ============================================================
+#     # 5. Extract ConceptCLIP embeddings (BATCHED, OOM-SAFE)
+#     # ============================================================
+#     print('\n>> Extracting ConceptCLIP patch-level agreement scores (batched)...')
+
+#     def compute_patch_agreement(token_features, topk=5):
+#         """
+#         token_features: [num_patches, D]
+#         returns: scalar agreement score
+#         """
+#         # L2 norm = strength of semantic activation
+#         patch_strength = token_features.norm(dim=1)   # [num_patches]
+
+#         # Focus on strongest semantic regions
+#         return patch_strength.topk(topk).values.mean()
+    
+#     @torch.no_grad()
+#     def extract_conceptclip_with_patch_scores(
+#         images, processor, model, batch_size=8
+#     ):
+#         image_embeds = []
+#         patch_scores = []
+
+#         for i in range(0, len(images), batch_size):
+#             batch = images[i:i + batch_size]
+
+#             inputs = processor(
+#                 images=batch,
+#                 return_tensors='pt',
+#                 padding=True
+#             ).to(model.device)
+
+#             outputs = model(**inputs)
+
+#             # global embedding
+#             img_feat = F.normalize(outputs["image_features"], dim=-1)
+#             image_embeds.append(img_feat)
+
+#             # patch tokens
+#             token_feats = outputs["image_token_features"]  # [B, P, D]
+
+#             for b in range(token_feats.size(0)):
+#                 score = compute_patch_agreement(token_feats[b])
+#                 patch_scores.append(score)
+
+#              # free memory
+#             del outputs, inputs
+#             torch.cuda.empty_cache()
+
+#         return (
+#             torch.cat(image_embeds, dim=0),
+#             torch.stack(patch_scores)
+#         )
+
+
+
+#     # ============================================================
+#     # 6. SEMANTIC RE-RANKING (TOP-K ONLY)
+#     # ============================================================
+
+#     print('\n>> Extracting ConceptCLIP patch-level agreement scores (batched)...')
+#     raw_images_denorm = denormalize(raw_samples)
+#     concept_embeds, patch_scores = extract_conceptclip_with_patch_scores(
+#         raw_images_denorm,    # your denormalized images
+#         c_processor,
+#         c_model,
+#         batch_size=8          # Kaggle-safe
+#     )
+#     K = 5
+#     alpha = 0.1
+#     beta = 0.05  # small on purpose
+
+#     print(f'\n>> Patch-level agreement re-ranking (K={K}, beta={beta})')
+
+#     dists_rerank = dists_base.clone()
+#     _, topk_indices = torch.topk(dists_base, K, dim=1)
+
+#     for i in range(dists_base.size(0)):
+#         candidates = topk_indices[i]
+
+#         sim_conv = dists_base[i, candidates]
+
+#          # patch agreement consistency
+#         patch_q = patch_scores[i]
+#         patch_db = patch_scores[candidates]
+
+#         patch_agreement = torch.minimum(patch_q, patch_db)
+
+#         # normalize agreement
+#         patch_agreement = (patch_agreement - patch_agreement.mean()) / (
+#             patch_agreement.std() + 1e-6
+#         )
+
+#         # apply as small bias
+#         dists_rerank[i, candidates] = sim_conv + beta * patch_agreement
+
+
+#     # ============================================================
+#     # 7. EVALUATION AFTER RE-RANKING
+#     # ============================================================
+#     print('\n===== RERANKED: ConvNeXtV2 + ConceptCLIP =====')
+
+#     acc_rerank = retrieval_accuracy(dists_rerank, labels, topk=kappas)
+#     acc_rerank = torch.stack(acc_rerank).cpu().numpy()
+#     print(f'>> R@K{kappas}: {np.around(acc_rerank, 2)}%')
+
+#     ranks_rerank = torch.argsort(dists_rerank, dim=0, descending=True)
+#     mAP_rerank, _, pr_rerank, _ = compute_map(
+#         ranks_rerank.cpu().numpy(),
+#         labels.cpu().numpy(),
+#         kappas
+#     )
+
+#     print(f'>> mAP: {mAP_rerank * 100:.2f}%')
+#     print(f'>> mP@K{kappas}: {np.around(pr_rerank * 100, 2)}%')
+
+#     # ============================================================
+#     # 8. OPTIONAL: Classification via retrieval (reranked)
+#     # ============================================================
+#     print('\n>> Classification Metrics (Majority Voting, reranked)')
+#     k_values = [1, 5, 10, 15, 20]
+#     cls_results = compute_classification_metrics(labels, dists_rerank, k_values)
+
+#     for k in k_values:
+#         m = cls_results[k]
+#         print(
+#             f'Top-{k}: '
+#             f'Acc={m["accuracy"]:.2f}% | '
+#             f'F1(macro)={m["f1_macro"]:.2f}% | '
+#             f'F1(weighted)={m["f1_weighted"]:.2f}%'
+#         )
+
+#     # ============================================================
+#     # 9. SAVE RESULTS
+#     # ============================================================
+#     if args.save_dir:
+#         os.makedirs(args.save_dir, exist_ok=True)
+#         name = os.path.basename(args.resume).split('.')[0] or 'eval'
+
+#         np.savez(
+#             os.path.join(args.save_dir, name + '_rerank'),
+#             labels=labels.cpu().numpy(),
+#             dists_base=-dists_base.cpu().numpy(),
+#             dists_rerank=-dists_rerank.cpu().numpy(),
+#             mAP_base=mAP_base,
+#             mAP_rerank=mAP_rerank,
+#             pr_base=pr_base,
+#             pr_rerank=pr_rerank,
+#             acc_base=acc_base,
+#             acc_rerank=acc_rerank
+#         )
 
 
 
@@ -520,6 +520,8 @@ def main(args):
         model = ResNet50(embedding_dim=args.embedding_dim)
     elif args.model == 'convnextv2':
         model = ConvNeXtV2(embedding_dim=args.embedding_dim)
+    elif args.model == 'hybrid_convnext_vit':
+        model = HybridConvNeXtViT(embedding_dim=args.embedding_dim)
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -538,14 +540,8 @@ def main(args):
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
 
-    # test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-    #                                      transforms.Resize(256),
-    #                                      transforms.CenterCrop(224),
-    #                                      transforms.ToTensor(),
-    #                                      normalize])
-
-    # Use 384x384 for ConvNeXtV2, 224x224 for other models
-    img_size = 384 if args.model == 'convnextv2' else 224
+    # Use 384x384 for ConvNeXtV2 and Hybrid model, 224x224 for other models
+    img_size = 384 if args.model in ['convnextv2', 'hybrid_convnext_vit'] else 224
 
     test_transform = transforms.Compose([
         transforms.Lambda(lambda img: img.convert('RGB')),
@@ -593,7 +589,7 @@ def parse_args():
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121 or resnet50)')
+                        help='Model to use (densenet121, resnet50, convnextv2, or hybrid_convnext_vit)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
     parser.add_argument('--eval-batch-size', default=64, type=int)

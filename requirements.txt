@@ -1,9 +1,24 @@
+# Core Deep Learning
+torch>=2.0.0
+torchvision>=0.15.0
+timm>=0.9.0  # Required for ConvNeXtV2 and ViT models
+
+# Image Processing & Augmentation
 albumentations==2.0.8
-efficientnet==1.0.0
-matplotlib==3.10.8
-numpy==2.2.6
 opencv-python==4.12.0.88
-scikit-learn==1.6.1
+Pillow>=9.0.0
+
+# Scientific Computing
+numpy==2.2.6
 scipy==1.15.3
+scikit-learn==1.6.1
+
+# Visualization
+matplotlib==3.10.8
+
+# Other Dependencies (from original requirements)
+efficientnet==1.0.0
 segmentation-models==1.0.1
 tensorflow==2.20.0
+tensorboard>=2.20.0
+tqdm >=4.66.1

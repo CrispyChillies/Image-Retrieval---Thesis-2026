@@ -11,7 +11,7 @@ from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
 
 from loss import TripletMarginLoss
 from sampler import PKSampler
-from model import ResNet50, DenseNet121
+from model import ResNet50, DenseNet121, ConvNeXtV2, HybridConvNeXtViT
 
 def freeze_backbone(model):
     for p in model.f1.parameters():
@@ -145,6 +145,10 @@ def main(args):
         model = DenseNet121(embedding_dim=args.embedding_dim)
     elif args.model == 'resnet50':
         model = ResNet50(embedding_dim=args.embedding_dim)
+    elif args.model == 'convnextv2':
+        model = ConvNeXtV2(embedding_dim=args.embedding_dim)
+    elif args.model == 'hybrid_convnext_vit':
+        model = HybridConvNeXtViT(embedding_dim=args.embedding_dim)
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -175,17 +179,21 @@ def main(args):
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
 
+    # Use 384x384 for ConvNeXtV2 and Hybrid model, 224x224 for others
+    img_size = 384 if args.model in ['convnextv2', 'hybrid_convnext_vit'] else 224
+    resize_size = 432 if img_size == 384 else 256
+
     train_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-                                          transforms.Resize(256),
+                                          transforms.Resize(resize_size),
                                           transforms.RandomResizedCrop(
-                                              224) if args.rand_resize else transforms.CenterCrop(224),
+                                              img_size) if args.rand_resize else transforms.CenterCrop(img_size),
                                           transforms.RandomHorizontalFlip(),
                                           transforms.ToTensor(),
                                           normalize])
 
     test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-                                         transforms.Resize(256),
-                                         transforms.CenterCrop(224),
+                                         transforms.Resize(resize_size),
+                                         transforms.CenterCrop(img_size),
                                          transforms.ToTensor(),
                                          normalize])
 
@@ -292,7 +300,7 @@ def parse_args():
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--rand-resize', action='store_true',
-                        help='Use random resizing data augmentation')
+                        help='Use random resizing data , resnet50, convnextv2, or hybrid_convnext_vit')
     parser.add_argument('--anomaly', action='store_true',
                         help='Train without anomaly class')
     parser.add_argument('--model', default='densenet121',
