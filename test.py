@@ -280,18 +280,23 @@ def denormalize(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
 @torch.no_grad()
 def evaluate(model, loader, device, args):
     """
-    Hypothesis:
-    - ConvNeXtV2 is the primary retriever
-    - ConceptCLIP is used ONLY for semantic re-ranking (top-K)
+    Evaluation with hypothesis:
+    - ConvNeXtV2 = primary retriever
+    - ConceptCLIP = semantic reranker (top-K only)
     - Expect mAP ↑, R@1 ~ unchanged
+
+    OOM-safe for Kaggle 16GB GPU.
     """
 
-    from transformers import AutoModel, AutoProcessor
+    import torch
+    import numpy as np
     import torch.nn.functional as F
+    from transformers import AutoModel, AutoProcessor
 
-    # -------------------------
-    # Load ConceptCLIP ONCE
-    # -------------------------
+    # ============================================================
+    # 1. Load ConceptCLIP ONCE
+    # ============================================================
+    print('>> Loading ConceptCLIP...')
     c_model = AutoModel.from_pretrained(
         'JerrryNie/ConceptCLIP',
         trust_remote_code=True
@@ -302,75 +307,98 @@ def evaluate(model, loader, device, args):
     )
     c_model.eval()
 
-    # -------------------------
-    # Extract ConvNeXt embeddings
-    # -------------------------
+    # ============================================================
+    # 2. Extract ConvNeXtV2 embeddings
+    # ============================================================
     model.eval()
     embeds, labels, raw_samples = [], [], []
 
     for data in loader:
-        samples = data[0].to(device)
-        _labels = data[1].to(device)
+        images = data[0].to(device)
+        lbls = data[1].to(device)
 
-        out = model(samples)
-        embeds.append(out)
-        labels.append(_labels)
-        raw_samples.append(samples)
+        feats = model(images)
+
+        embeds.append(feats)
+        labels.append(lbls)
+        raw_samples.append(images)
 
     embeds = torch.cat(embeds, dim=0)          # [N, D]
     labels = torch.cat(labels, dim=0)          # [N]
     raw_samples = torch.cat(raw_samples, dim=0)
 
-    # -------------------------
-    # BASELINE RETRIEVAL (ConvNeXtV2)
-    # -------------------------
+    # ============================================================
+    # 3. BASELINE RETRIEVAL (ConvNeXtV2)
+    # ============================================================
+    print('\n===== BASELINE: ConvNeXtV2 =====')
+
     dists_base = -torch.cdist(embeds, embeds)
     dists_base.fill_diagonal_(float('-inf'))
 
     kappas = [1, 5, 10]
 
-    print('\n===== BASELINE: ConvNeXtV2 =====')
-
-    # Recall@K
     acc_base = retrieval_accuracy(dists_base, labels, topk=kappas)
     acc_base = torch.stack(acc_base).cpu().numpy()
     print(f'>> R@K{kappas}: {np.around(acc_base, 2)}%')
 
-    # mAP
     ranks_base = torch.argsort(dists_base, dim=0, descending=True)
     mAP_base, _, pr_base, _ = compute_map(
         ranks_base.cpu().numpy(),
         labels.cpu().numpy(),
         kappas
     )
+
     print(f'>> mAP: {mAP_base * 100:.2f}%')
     print(f'>> mP@K{kappas}: {np.around(pr_base * 100, 2)}%')
 
-    # -------------------------
-    # Extract ConceptCLIP image embeddings
-    # -------------------------
-    print('\n>> Extracting ConceptCLIP embeddings...')
+    # ============================================================
+    # 4. Free memory BEFORE ConceptCLIP
+    # ============================================================
+    torch.cuda.empty_cache()
 
-    def extract_conceptclip_embeddings(images):
-        inputs = c_processor(
-            images=images,
-            return_tensors='pt',
-            padding=True
-        )
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-        out = c_model(**inputs)
-        return F.normalize(out.image_features, dim=-1)
+    # ============================================================
+    # 5. Extract ConceptCLIP embeddings (BATCHED, OOM-SAFE)
+    # ============================================================
+    print('\n>> Extracting ConceptCLIP embeddings (batched)...')
+
+    def extract_conceptclip_embeddings_batched(images, batch_size=4):
+        all_embeds = []
+
+        for i in range(0, images.size(0), batch_size):
+            batch = images[i:i + batch_size]
+
+            inputs = c_processor(
+                images=batch,
+                return_tensors='pt',
+                padding=True,
+                do_rescale=False   # IMPORTANT: avoid double rescaling
+            )
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+
+            out = c_model(**inputs)
+            emb = F.normalize(out.image_features, dim=-1)
+
+            all_embeds.append(emb.cpu())
+
+            # aggressive cleanup
+            del inputs, out, emb
+            torch.cuda.empty_cache()
+
+        return torch.cat(all_embeds, dim=0).to(device)
 
     raw_images_denorm = denormalize(raw_samples)
-    concept_embeds = extract_conceptclip_embeddings(raw_images_denorm)
+    concept_embeds = extract_conceptclip_embeddings_batched(
+        raw_images_denorm,
+        batch_size=4   # SAFE for Kaggle 16GB
+    )
 
-    # -------------------------
-    # SEMANTIC RE-RANKING (TOP-K)
-    # -------------------------
-    K = 50        # reranking depth
-    alpha = 0.7  # ConvNeXt weight
+    # ============================================================
+    # 6. SEMANTIC RE-RANKING (TOP-K ONLY)
+    # ============================================================
+    K = 50
+    alpha = 0.7
 
-    print(f'\n>> Semantic re-ranking with ConceptCLIP (K={K}, alpha={alpha})')
+    print(f'\n>> Semantic re-ranking (K={K}, alpha={alpha})')
 
     dists_rerank = dists_base.clone()
     _, topk_indices = torch.topk(dists_base, K, dim=1)
@@ -384,12 +412,12 @@ def evaluate(model, loader, device, args):
             concept_embeds[candidates].T
         )
 
-        fused_sim = alpha * sim_conv + (1 - alpha) * sim_concept
+        fused_sim = alpha * sim_conv + (1.0 - alpha) * sim_concept
         dists_rerank[i, candidates] = fused_sim
 
-    # -------------------------
-    # EVALUATION AFTER RE-RANKING
-    # -------------------------
+    # ============================================================
+    # 7. EVALUATION AFTER RE-RANKING
+    # ============================================================
     print('\n===== RERANKED: ConvNeXtV2 + ConceptCLIP =====')
 
     acc_rerank = retrieval_accuracy(dists_rerank, labels, topk=kappas)
@@ -402,26 +430,29 @@ def evaluate(model, loader, device, args):
         labels.cpu().numpy(),
         kappas
     )
+
     print(f'>> mAP: {mAP_rerank * 100:.2f}%')
     print(f'>> mP@K{kappas}: {np.around(pr_rerank * 100, 2)}%')
 
-    # -------------------------
-    # OPTIONAL: Classification-via-retrieval
-    # -------------------------
+    # ============================================================
+    # 8. OPTIONAL: Classification via retrieval (reranked)
+    # ============================================================
     print('\n>> Classification Metrics (Majority Voting, reranked)')
     k_values = [1, 5, 10, 15, 20]
     cls_results = compute_classification_metrics(labels, dists_rerank, k_values)
 
     for k in k_values:
         m = cls_results[k]
-        print(f'\nTop-{k}: '
-              f'Acc={m["accuracy"]:.2f}% | '
-              f'F1(macro)={m["f1_macro"]:.2f}% | '
-              f'F1(weighted)={m["f1_weighted"]:.2f}%')
+        print(
+            f'Top-{k}: '
+            f'Acc={m["accuracy"]:.2f}% | '
+            f'F1(macro)={m["f1_macro"]:.2f}% | '
+            f'F1(weighted)={m["f1_weighted"]:.2f}%'
+        )
 
-    # -------------------------
-    # SAVE RESULTS
-    # -------------------------
+    # ============================================================
+    # 9. SAVE RESULTS
+    # ============================================================
     if args.save_dir:
         os.makedirs(args.save_dir, exist_ok=True)
         name = os.path.basename(args.resume).split('.')[0] or 'eval'
@@ -438,6 +469,7 @@ def evaluate(model, loader, device, args):
             acc_base=acc_base,
             acc_rerank=acc_rerank
         )
+
 
 
 def main(args):
