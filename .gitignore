@@ -5,3 +5,4 @@ __pycache__/
 saliency_results/
 medsiglip_fintune/
 tbx_11/
+eval.ipynb
