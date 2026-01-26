@@ -13,8 +13,6 @@ from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
 from model import ConvNeXtV2, ResNet50, DenseNet121
 
 
-
-
 def retrieval_accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
     with torch.no_grad():
@@ -203,151 +201,29 @@ def compute_classification_metrics(labels, dists, k_values=[1, 5, 10, 15, 20]):
     return results
 
 
-@torch.no_grad()
-def evaluate(model, loader, device, args):
-    model.eval()
-    embeds, labels = [], []
-
-    for data in loader:
-        samples = data[0].to(device)
-        _labels = data[1].to(device)
-        out = model(samples)
-        embeds.append(out)
-        labels.append(_labels)
-
-    embeds = torch.cat(embeds, dim=0)
-    labels = torch.cat(labels, dim=0)
-
-    dists = -torch.cdist(embeds, embeds)
-    dists.fill_diagonal_(float('-inf'))
-
-    covid_labels = ['No Finding', 'Pneumonia', 'COVID-19'] 
-    prompts = [f'a radiographic representation assessing for {l}' for l in covid_labels]
-
-    K = 50 # Number of rerank candidates
-    alpha = 0.7 # Combination weights: alpha * ConvNeXt + (1-alpha) * ConceptCLIP
-
-    # top-k accuracy (i.e. R@K)
-    kappas = [1, 5, 10]
-    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
-    accuracy = torch.stack(accuracy).cpu().numpy()
-    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
-
-    # mean average precision and mean precision (i.e. mAP and pr)
-    ranks = torch.argsort(dists, dim=0, descending=True)
-    mAP, _, pr, _ = compute_map(ranks.cpu().numpy(),  labels.cpu().numpy(), kappas)
-    print('>> mAP: {:.2f}%'.format(mAP * 100.0))
-    print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
-    
-    # Classification metrics with majority voting
-    print('\n>> Classification Metrics (Majority Voting):')
-    k_values = [1, 5, 10, 15, 20]
-    classification_results = compute_classification_metrics(labels, dists, k_values)
-    
-    for k in k_values:
-        metrics = classification_results[k]
-        print(f'\n>> Top-{k} Retrieved Images:')
-        print(f'   Accuracy: {metrics["accuracy"]:.2f}%')
-        print(f'   Precision (macro): {metrics["precision_macro"]:.2f}%')
-        print(f'   Recall (macro): {metrics["recall_macro"]:.2f}%')
-        print(f'   F1 (macro): {metrics["f1_macro"]:.2f}%')
-        print(f'   Precision (weighted): {metrics["precision_weighted"]:.2f}%')
-        print(f'   Recall (weighted): {metrics["recall_weighted"]:.2f}%')
-        print(f'   F1 (weighted): {metrics["f1_weighted"]:.2f}%')
-
-    # Save results
-    if args.save_dir:
-        if not os.path.exists(args.save_dir):
-            os.makedirs(args.save_dir)
-        file_name = args.resume.split('/')[-1].split('.')[0]
-
-        save_path = os.path.join(args.save_dir, file_name)
-        # Convert classification_results dict to numpy arrays for saving
-        classification_k_values = list(classification_results.keys())
-        classification_metrics = {k: v for k, v in classification_results.items()}
-        
-        np.savez(save_path, embeds=embeds.cpu().numpy(),
-                 labels=labels.cpu().numpy(), dists=-dists.cpu().numpy(),
-                 kappas=kappas, acc=accuracy, mAP=mAP, pr=pr,
-                 classification_k_values=classification_k_values,
-                 **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
-        
-
-def denormalize(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
-    """Denormalize a tensor image with mean and standard deviation."""
-    mean = torch.tensor(mean).view(3, 1, 1).to(tensor.device)
-    std = torch.tensor(std).view(3, 1, 1).to(tensor.device)
-    return tensor * std + mean
-
-
 # @torch.no_grad()
 # def evaluate(model, loader, device, args):
-#     from transformers import AutoModel, AutoProcessor
-    
-#     # 1. Initialize ConceptCLIP (Ideally passed in or initialized once)
-#     c_model = AutoModel.from_pretrained('JerrryNie/ConceptCLIP', trust_remote_code=True).to(device)
-#     c_processor = AutoProcessor.from_pretrained('JerrryNie/ConceptCLIP', trust_remote_code=True)
-#     c_model.eval()
-
 #     model.eval()
-#     embeds, labels, raw_samples = [], [], []
+#     embeds, labels = [], []
 
-#     # Keep track of raw samples for ConceptCLIP processing
 #     for data in loader:
 #         samples = data[0].to(device)
 #         _labels = data[1].to(device)
 #         out = model(samples)
 #         embeds.append(out)
 #         labels.append(_labels)
-#         raw_samples.append(samples)
 
 #     embeds = torch.cat(embeds, dim=0)
 #     labels = torch.cat(labels, dim=0)
-#     raw_samples = torch.cat(raw_samples, dim=0)
 
-#     # Calculate initial Backbone distances
 #     dists = -torch.cdist(embeds, embeds)
 #     dists.fill_diagonal_(float('-inf'))
 
-#     # --- START RERANKING BLOCK ---
 #     covid_labels = ['No Finding', 'Pneumonia', 'COVID-19'] 
 #     prompts = [f'a radiographic representation assessing for {l}' for l in covid_labels]
-    
+
 #     K = 50 # Number of rerank candidates
 #     alpha = 0.7 # Combination weights: alpha * ConvNeXt + (1-alpha) * ConceptCLIP
-    
-#     # Identify top-K candidates from backbone to rerank
-#     _, top_k_indices = torch.topk(dists, K, dim=1)
-#     new_dists = dists.clone()
-
-#     print(f'>> Reranking top {K} candidates with ConceptCLIP...')
-#     for i in range(embeds.size(0)):
-#         # Denormalize query image for ConceptCLIP
-#         query_img_denorm = denormalize(raw_samples[i])
-        
-#         # Extract ConceptCLIP features for Query i
-#         query_input = c_processor(images=query_img_denorm, text=prompts, return_tensors='pt', padding=True).to(device)
-#         query_out = c_model(**query_input)
-#         # IT-Align: Global image-text alignment [cite: 18, 434]
-#         query_sim = query_out['image_features'] @ query_out['text_features'].t()
-
-#         for j in top_k_indices[i]:
-#             # Denormalize candidate image for ConceptCLIP
-#             cand_img_denorm = denormalize(raw_samples[j])
-            
-#             # Extract ConceptCLIP features for Candidate j
-#             cand_input = c_processor(images=cand_img_denorm, text=prompts, return_tensors='pt', padding=True).to(device)
-#             cand_out = c_model(**cand_input)
-#             cand_sim = cand_out['image_features'] @ cand_out['text_features'].t()
-
-#             # Calculate semantic consistency score
-#             semantic_score = torch.nn.functional.cosine_similarity(query_sim, cand_sim, dim=1)
-            
-#             # Update distance with weighted fusion [cite: 490]
-#             new_dists[i, j] = (alpha * dists[i, j]) + ((1 - alpha) * semantic_score)
-            
-#     dists = new_dists # Use reranked distances for all subsequent metrics
-#     # --- END RERANKING BLOCK ---
 
 #     # top-k accuracy (i.e. R@K)
 #     kappas = [1, 5, 10]
@@ -356,8 +232,8 @@ def denormalize(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
 #     print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
 
 #     # mean average precision and mean precision (i.e. mAP and pr)
-#     ranks = torch.argsort(dists, dim=1, descending=True) # Sort row-wise for distance matrix
-#     mAP, _, pr, _ = compute_map(ranks.t().cpu().numpy(), labels.cpu().numpy(), kappas)
+#     ranks = torch.argsort(dists, dim=0, descending=True)
+#     mAP, _, pr, _ = compute_map(ranks.cpu().numpy(),  labels.cpu().numpy(), kappas)
 #     print('>> mAP: {:.2f}%'.format(mAP * 100.0))
 #     print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
     
@@ -393,6 +269,175 @@ def denormalize(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
 #                  kappas=kappas, acc=accuracy, mAP=mAP, pr=pr,
 #                  classification_k_values=classification_k_values,
 #                  **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
+        
+
+def denormalize(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+    """Denormalize a tensor image with mean and standard deviation."""
+    mean = torch.tensor(mean).view(3, 1, 1).to(tensor.device)
+    std = torch.tensor(std).view(3, 1, 1).to(tensor.device)
+    return tensor * std + mean
+
+@torch.no_grad()
+def evaluate(model, loader, device, args):
+    """
+    Hypothesis:
+    - ConvNeXtV2 is the primary retriever
+    - ConceptCLIP is used ONLY for semantic re-ranking (top-K)
+    - Expect mAP ↑, R@1 ~ unchanged
+    """
+
+    from transformers import AutoModel, AutoProcessor
+    import torch.nn.functional as F
+
+    # -------------------------
+    # Load ConceptCLIP ONCE
+    # -------------------------
+    c_model = AutoModel.from_pretrained(
+        'JerrryNie/ConceptCLIP',
+        trust_remote_code=True
+    ).to(device)
+    c_processor = AutoProcessor.from_pretrained(
+        'JerrryNie/ConceptCLIP',
+        trust_remote_code=True
+    )
+    c_model.eval()
+
+    # -------------------------
+    # Extract ConvNeXt embeddings
+    # -------------------------
+    model.eval()
+    embeds, labels, raw_samples = [], [], []
+
+    for data in loader:
+        samples = data[0].to(device)
+        _labels = data[1].to(device)
+
+        out = model(samples)
+        embeds.append(out)
+        labels.append(_labels)
+        raw_samples.append(samples)
+
+    embeds = torch.cat(embeds, dim=0)          # [N, D]
+    labels = torch.cat(labels, dim=0)          # [N]
+    raw_samples = torch.cat(raw_samples, dim=0)
+
+    # -------------------------
+    # BASELINE RETRIEVAL (ConvNeXtV2)
+    # -------------------------
+    dists_base = -torch.cdist(embeds, embeds)
+    dists_base.fill_diagonal_(float('-inf'))
+
+    kappas = [1, 5, 10]
+
+    print('\n===== BASELINE: ConvNeXtV2 =====')
+
+    # Recall@K
+    acc_base = retrieval_accuracy(dists_base, labels, topk=kappas)
+    acc_base = torch.stack(acc_base).cpu().numpy()
+    print(f'>> R@K{kappas}: {np.around(acc_base, 2)}%')
+
+    # mAP
+    ranks_base = torch.argsort(dists_base, dim=0, descending=True)
+    mAP_base, _, pr_base, _ = compute_map(
+        ranks_base.cpu().numpy(),
+        labels.cpu().numpy(),
+        kappas
+    )
+    print(f'>> mAP: {mAP_base * 100:.2f}%')
+    print(f'>> mP@K{kappas}: {np.around(pr_base * 100, 2)}%')
+
+    # -------------------------
+    # Extract ConceptCLIP image embeddings
+    # -------------------------
+    print('\n>> Extracting ConceptCLIP embeddings...')
+
+    def extract_conceptclip_embeddings(images):
+        inputs = c_processor(
+            images=images,
+            return_tensors='pt',
+            padding=True
+        )
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        out = c_model(**inputs)
+        return F.normalize(out.image_features, dim=-1)
+
+    raw_images_denorm = denormalize(raw_samples)
+    concept_embeds = extract_conceptclip_embeddings(raw_images_denorm)
+
+    # -------------------------
+    # SEMANTIC RE-RANKING (TOP-K)
+    # -------------------------
+    K = 50        # reranking depth
+    alpha = 0.7  # ConvNeXt weight
+
+    print(f'\n>> Semantic re-ranking with ConceptCLIP (K={K}, alpha={alpha})')
+
+    dists_rerank = dists_base.clone()
+    _, topk_indices = torch.topk(dists_base, K, dim=1)
+
+    for i in range(dists_base.size(0)):
+        candidates = topk_indices[i]
+
+        sim_conv = dists_base[i, candidates]
+        sim_concept = torch.matmul(
+            concept_embeds[i],
+            concept_embeds[candidates].T
+        )
+
+        fused_sim = alpha * sim_conv + (1 - alpha) * sim_concept
+        dists_rerank[i, candidates] = fused_sim
+
+    # -------------------------
+    # EVALUATION AFTER RE-RANKING
+    # -------------------------
+    print('\n===== RERANKED: ConvNeXtV2 + ConceptCLIP =====')
+
+    acc_rerank = retrieval_accuracy(dists_rerank, labels, topk=kappas)
+    acc_rerank = torch.stack(acc_rerank).cpu().numpy()
+    print(f'>> R@K{kappas}: {np.around(acc_rerank, 2)}%')
+
+    ranks_rerank = torch.argsort(dists_rerank, dim=0, descending=True)
+    mAP_rerank, _, pr_rerank, _ = compute_map(
+        ranks_rerank.cpu().numpy(),
+        labels.cpu().numpy(),
+        kappas
+    )
+    print(f'>> mAP: {mAP_rerank * 100:.2f}%')
+    print(f'>> mP@K{kappas}: {np.around(pr_rerank * 100, 2)}%')
+
+    # -------------------------
+    # OPTIONAL: Classification-via-retrieval
+    # -------------------------
+    print('\n>> Classification Metrics (Majority Voting, reranked)')
+    k_values = [1, 5, 10, 15, 20]
+    cls_results = compute_classification_metrics(labels, dists_rerank, k_values)
+
+    for k in k_values:
+        m = cls_results[k]
+        print(f'\nTop-{k}: '
+              f'Acc={m["accuracy"]:.2f}% | '
+              f'F1(macro)={m["f1_macro"]:.2f}% | '
+              f'F1(weighted)={m["f1_weighted"]:.2f}%')
+
+    # -------------------------
+    # SAVE RESULTS
+    # -------------------------
+    if args.save_dir:
+        os.makedirs(args.save_dir, exist_ok=True)
+        name = os.path.basename(args.resume).split('.')[0] or 'eval'
+
+        np.savez(
+            os.path.join(args.save_dir, name + '_rerank'),
+            labels=labels.cpu().numpy(),
+            dists_base=-dists_base.cpu().numpy(),
+            dists_rerank=-dists_rerank.cpu().numpy(),
+            mAP_base=mAP_base,
+            mAP_rerank=mAP_rerank,
+            pr_base=pr_base,
+            pr_rerank=pr_rerank,
+            acc_base=acc_base,
+            acc_rerank=acc_rerank
+        )
 
 
 def main(args):
