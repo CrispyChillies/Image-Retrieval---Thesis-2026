@@ -403,17 +403,49 @@ def evaluate(model, loader, device, args):
     dists_rerank = dists_base.clone()
     _, topk_indices = torch.topk(dists_base, K, dim=1)
 
+    # for i in range(dists_base.size(0)):
+    #     candidates = topk_indices[i]
+
+    #     sim_conv = dists_base[i, candidates]
+    #     sim_concept = torch.matmul(
+    #         concept_embeds[i],
+    #         concept_embeds[candidates].T
+    #     )
+
+    #     fused_sim = alpha * sim_conv + (1.0 - alpha) * sim_concept
+    #     dists_rerank[i, candidates] = fused_sim
+
+    # ---- helpers ----
+    def z_norm(x):
+        return (x - x.mean()) / (x.std() + 1e-6)
+
+    # ---- reranking loop ----
     for i in range(dists_base.size(0)):
         candidates = topk_indices[i]
 
-        sim_conv = dists_base[i, candidates]
+        # baseline similarity (ConvNeXt)
+        sim_conv = dists_base[i, candidates]                # [K]
+
+        # ConceptCLIP similarity
         sim_concept = torch.matmul(
             concept_embeds[i],
-            concept_embeds[candidates].T
+            concept_embeds[candidates].T                    # [K]
         )
 
-        fused_sim = alpha * sim_conv + (1.0 - alpha) * sim_concept
+        # z-normalize both spaces
+        sim_conv_z = z_norm(sim_conv)
+        sim_concept_z = z_norm(sim_concept)
+
+        # ---- CONFIDENCE GATING ----
+        if (sim_conv.max() - sim_conv.min()) < 0.05:
+            # ConvNeXt confident → no rerank
+            fused_sim = sim_conv_z
+        else:
+            # ambiguous → semantic reranking
+            fused_sim = (1.0 - alpha) * sim_conv_z + alpha * sim_concept_z
+
         dists_rerank[i, candidates] = fused_sim
+
 
     # ============================================================
     # 7. EVALUATION AFTER RE-RANKING
