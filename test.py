@@ -370,8 +370,7 @@ def evaluate(model, loader, device, args):
             inputs = c_processor(
                 images=batch,
                 return_tensors='pt',
-                padding=True,
-                do_rescale=False   # IMPORTANT: avoid double rescaling
+                padding=True
             )
             inputs = {k: v.to(device) for k, v in inputs.items()}
 
@@ -385,6 +384,7 @@ def evaluate(model, loader, device, args):
             torch.cuda.empty_cache()
 
         return torch.cat(all_embeds, dim=0).to(device)
+
 
     raw_images_denorm = denormalize(raw_samples)
     concept_embeds = extract_conceptclip_embeddings_batched(
