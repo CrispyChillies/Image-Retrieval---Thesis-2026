@@ -395,7 +395,7 @@ def evaluate(model, loader, device, args):
     # ============================================================
     # 6. SEMANTIC RE-RANKING (TOP-K ONLY)
     # ============================================================
-    K = 20
+    K = 5
     alpha = 0.1
 
     print(f'\n>> Semantic re-ranking (K={K}, alpha={alpha})')
