@@ -14,24 +14,30 @@ from sampler import PKSampler
 from model import ResNet50, DenseNet121, ConvNeXtV2, HybridConvNeXtViT
 
 def freeze_backbone(model):
-    for p in model.f1.parameters():
-        p.requires_grad = False
-    for p in model.f2.parameters():
-        p.requires_grad = False
+    if hasattr(model, 'f1'):
+        for p in model.f1.parameters():
+            p.requires_grad = False
+    if hasattr(model, 'f2'):
+        for p in model.f2.parameters():
+            p.requires_grad = False
 
 def unfreeze_backbone(model):
-    for p in model.f1.parameters():
-        p.requires_grad = True
-    for p in model.f2.parameters():
-        p.requires_grad = True
+    if hasattr(model, 'f1'):
+        for p in model.f1.parameters():
+            p.requires_grad = True
+    if hasattr(model, 'f2'):
+        for p in model.f2.parameters():
+            p.requires_grad = True
 
 def freeze_attention(model):
-    for p in model.attention.parameters():
-        p.requires_grad = False
+    if hasattr(model, 'attention'):
+        for p in model.attention.parameters():
+            p.requires_grad = False
 
 def unfreeze_attention(model):
-    for p in model.attention.parameters():
-        p.requires_grad = True
+    if hasattr(model, 'attention'):
+        for p in model.attention.parameters():
+            p.requires_grad = True
 
 def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_freq, lambda_area=0.1, lambda_sparse=0.01):
     model.train()
@@ -42,16 +48,22 @@ def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_f
         optimizer.zero_grad()
         samples, targets = data[0].to(device), data[1].to(device)
 
-        embeddings, attn = model(samples, return_attention=True)
+        # Check if model supports attention output
+        try:
+            embeddings, attn = model(samples, return_attention=True)
+            has_attention = True
+        except (TypeError, AttributeError):
+            embeddings = model(samples)
+            has_attention = False
 
         # Metric Loss 
         loss, frac_pos_triplets = criterion(embeddings, targets)
         
-        # Attention Loss
-        loss_area = attn.mean() 
-        loss_sparse = torch.mean(attn * torch.log(attn + 1e-8)) 
-
-        loss = loss + lambda_area * loss_area + lambda_sparse * loss_sparse
+        # Attention Loss (only if model supports it)
+        if has_attention:
+            loss_area = attn.mean() 
+            loss_sparse = torch.mean(attn * torch.log(attn + 1e-8)) 
+            loss = loss + lambda_area * loss_area + lambda_sparse * loss_sparse
 
         loss.backward()
 
@@ -166,14 +178,34 @@ def main(args):
 
     criterion = TripletMarginLoss(margin=args.margin, mining='batch_hard')
     
-    # optimizer = Adam(model.parameters(), lr=args.lr)
-    optimizer = Adam([
-        {'params': model.f1.parameters(), 'lr': args.lr * 0.1},
-        {'params': model.f2.parameters(), 'lr': args.lr * 0.1},
-        {'params': model.attention.parameters(), 'lr': args.lr * 0.01},  # 👈 attention LR nhỏ
-        {'params': model.bnneck.parameters(), 'lr': args.lr},
-        {'params': model.fc.parameters(), 'lr': args.lr},
-    ])
+    # Setup optimizer with different learning rates for different model parts
+    if hasattr(model, 'f1') and hasattr(model, 'f2') and hasattr(model, 'attention'):
+        # Attention-based model with custom parameter groups
+        optimizer = Adam([
+            {'params': model.f1.parameters(), 'lr': args.lr * 0.1},
+            {'params': model.f2.parameters(), 'lr': args.lr * 0.1},
+            {'params': model.attention.parameters(), 'lr': args.lr * 0.01},
+            {'params': model.bnneck.parameters(), 'lr': args.lr},
+            {'params': model.fc.parameters(), 'lr': args.lr},
+        ])
+    elif args.model in ['convnextv2', 'hybrid_convnext_vit']:
+        # ConvNeXt or Hybrid model - use different LR for backbone vs head
+        backbone_params = []
+        head_params = []
+        
+        for name, param in model.named_parameters():
+            if 'fc' in name or 'fusion' in name:
+                head_params.append(param)
+            else:
+                backbone_params.append(param)
+        
+        optimizer = Adam([
+            {'params': backbone_params, 'lr': args.lr * 0.1},  # Lower LR for pretrained backbone
+            {'params': head_params, 'lr': args.lr}  # Higher LR for new head
+        ])
+    else:
+        # Simple optimizer for other models
+        optimizer = Adam(model.parameters(), lr=args.lr)
 
 
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
@@ -300,11 +332,11 @@ def parse_args():
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--rand-resize', action='store_true',
-                        help='Use random resizing data , resnet50, convnextv2, or hybrid_convnext_vit')
+                        help='Use random resizing data augmentation')
     parser.add_argument('--anomaly', action='store_true',
                         help='Train without anomaly class')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121 or resnet50)')
+                        help='Model to use (densenet121, resnet50, convnextv2, or hybrid_convnext_vit)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
     parser.add_argument('-p', '--labels-per-batch', default=3, type=int,
