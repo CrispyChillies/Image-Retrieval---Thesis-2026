@@ -375,7 +375,7 @@ def evaluate(model, loader, device, args):
             inputs = {k: v.to(device) for k, v in inputs.items()}
 
             out = c_model(**inputs)
-            emb = F.normalize(out.image_features, dim=-1)
+            emb = F.normalize(out["image_features"], dim=-1)
 
             all_embeds.append(emb.cpu())
 
