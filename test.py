@@ -273,6 +273,13 @@ def compute_classification_metrics(labels, dists, k_values=[1, 5, 10, 15, 20]):
 #                  **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
         
 
+def denormalize(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+    """Denormalize a tensor image with mean and standard deviation."""
+    mean = torch.tensor(mean).view(3, 1, 1).to(tensor.device)
+    std = torch.tensor(std).view(3, 1, 1).to(tensor.device)
+    return tensor * std + mean
+
+
 @torch.no_grad()
 def evaluate(model, loader, device, args):
     from transformers import AutoModel, AutoProcessor
@@ -315,15 +322,21 @@ def evaluate(model, loader, device, args):
 
     print(f'>> Reranking top {K} candidates with ConceptCLIP...')
     for i in range(embeds.size(0)):
+        # Denormalize query image for ConceptCLIP
+        query_img_denorm = denormalize(raw_samples[i])
+        
         # Extract ConceptCLIP features for Query i
-        query_input = c_processor(images=raw_samples[i], text=prompts, return_tensors='pt', padding=True).to(device)
+        query_input = c_processor(images=query_img_denorm, text=prompts, return_tensors='pt', padding=True).to(device)
         query_out = c_model(**query_input)
         # IT-Align: Global image-text alignment [cite: 18, 434]
         query_sim = query_out['image_features'] @ query_out['text_features'].t()
 
         for j in top_k_indices[i]:
+            # Denormalize candidate image for ConceptCLIP
+            cand_img_denorm = denormalize(raw_samples[j])
+            
             # Extract ConceptCLIP features for Candidate j
-            cand_input = c_processor(images=raw_samples[j], text=prompts, return_tensors='pt', padding=True).to(device)
+            cand_input = c_processor(images=cand_img_denorm, text=prompts, return_tensors='pt', padding=True).to(device)
             cand_out = c_model(**cand_input)
             cand_sim = cand_out['image_features'] @ cand_out['text_features'].t()
 
