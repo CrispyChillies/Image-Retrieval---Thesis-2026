@@ -359,93 +359,98 @@ def evaluate(model, loader, device, args):
     # ============================================================
     # 5. Extract ConceptCLIP embeddings (BATCHED, OOM-SAFE)
     # ============================================================
-    print('\n>> Extracting ConceptCLIP embeddings (batched)...')
+    print('\n>> Extracting ConceptCLIP patch-level agreement scores (batched)...')
 
-    def extract_conceptclip_embeddings_batched(images, batch_size=4):
-        all_embeds = []
+    def compute_patch_agreement(token_features, topk=5):
+        """
+        token_features: [num_patches, D]
+        returns: scalar agreement score
+        """
+        # L2 norm = strength of semantic activation
+        patch_strength = token_features.norm(dim=1)   # [num_patches]
 
-        for i in range(0, images.size(0), batch_size):
+        # Focus on strongest semantic regions
+        return patch_strength.topk(topk).values.mean()
+    
+    @torch.no_grad()
+    def extract_conceptclip_with_patch_scores(
+        images, processor, model, batch_size=8
+    ):
+        image_embeds = []
+        patch_scores = []
+
+        for i in range(0, len(images), batch_size):
             batch = images[i:i + batch_size]
 
-            inputs = c_processor(
+            inputs = processor(
                 images=batch,
                 return_tensors='pt',
                 padding=True
-            )
-            inputs = {k: v.to(device) for k, v in inputs.items()}
+            ).to(model.device)
 
-            out = c_model(**inputs)
-            emb = F.normalize(out["image_features"], dim=-1)
+            outputs = model(**inputs)
 
-            all_embeds.append(emb.cpu())
+            # global embedding
+            img_feat = F.normalize(outputs["image_features"], dim=-1)
+            image_embeds.append(img_feat)
 
-            # aggressive cleanup
-            del inputs, out, emb
+            # patch tokens
+            token_feats = outputs["image_token_features"]  # [B, P, D]
+
+            for b in range(token_feats.size(0)):
+                score = compute_patch_agreement(token_feats[b])
+                patch_scores.append(score)
+
+             # free memory
+            del outputs, inputs
             torch.cuda.empty_cache()
 
-        return torch.cat(all_embeds, dim=0).to(device)
+        return (
+            torch.cat(image_embeds, dim=0),
+            torch.stack(patch_scores)
+        )
 
 
-    raw_images_denorm = denormalize(raw_samples)
-    concept_embeds = extract_conceptclip_embeddings_batched(
-        raw_images_denorm,
-        batch_size=4   # SAFE for Kaggle 16GB
-    )
 
     # ============================================================
     # 6. SEMANTIC RE-RANKING (TOP-K ONLY)
     # ============================================================
-    K = 5
-    M = 3
-    alpha = 0.1
 
-    print(f'\n>> Semantic re-ranking (K={K}, alpha={alpha})')
+    print('\n>> Extracting ConceptCLIP patch-level agreement scores (batched)...')
+
+    concept_embeds, patch_scores = extract_conceptclip_with_patch_scores(
+        raw_samples,    # your denormalized images
+        c_processor,
+        c_model,
+        batch_size=8          # Kaggle-safe
+    )
+    K = 5
+    alpha = 0.1
+    beta = 0.05  # small on purpose
+
+    print(f'\n>> Patch-level agreement re-ranking (K={K}, beta={beta})')
 
     dists_rerank = dists_base.clone()
     _, topk_indices = torch.topk(dists_base, K, dim=1)
 
-    # for i in range(dists_base.size(0)):
-    #     candidates = topk_indices[i]
-
-    #     sim_conv = dists_base[i, candidates]
-    #     sim_concept = torch.matmul(
-    #         concept_embeds[i],
-    #         concept_embeds[candidates].T
-    #     )
-
-    #     fused_sim = alpha * sim_conv + (1.0 - alpha) * sim_concept
-    #     dists_rerank[i, candidates] = fused_sim
-
-    # ---- helpers ----
-    # ---- helpers ----
-    def z_norm(x):
-        return (x - x.mean()) / (x.std() + 1e-6)
-
     for i in range(dists_base.size(0)):
-        candidates = topk_indices[i]          # [K]
-        rerank_candidates = candidates[:M]    # ONLY top-M
+        candidates = topk_indices[i]
 
-        # baseline similarity
-        sim_conv = dists_base[i, rerank_candidates]   # [M]
+        sim_conv = dists_base[i, candidates]
 
-        # ConceptCLIP similarity
-        sim_concept = torch.matmul(
-            concept_embeds[i],
-            concept_embeds[rerank_candidates].T       # [M]
+         # patch agreement consistency
+        patch_q = patch_scores[i]
+        patch_db = patch_scores[candidates]
+
+        patch_agreement = torch.minimum(patch_q, patch_db)
+
+        # normalize agreement
+        patch_agreement = (patch_agreement - patch_agreement.mean()) / (
+            patch_agreement.std() + 1e-6
         )
 
-        # normalize
-        sim_conv_z = z_norm(sim_conv)
-        sim_concept_z = z_norm(sim_concept)
-
-        # confidence gating
-        if (sim_conv[0] - sim_conv.mean()) > 0.15:
-            fused_sim = sim_conv_z
-        else:
-            fused_sim = (1.0 - alpha) * sim_conv_z + alpha * sim_concept_z
-
-        # write back ONLY top-M
-        dists_rerank[i, rerank_candidates] = fused_sim
+        # apply as small bias
+        dists_rerank[i, candidates] = sim_conv + beta * patch_agreement
 
 
     # ============================================================
