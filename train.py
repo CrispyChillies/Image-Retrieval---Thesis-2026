@@ -176,7 +176,7 @@ def main(args):
 
     model.to(device)
 
-    criterion = TripletMarginLoss(margin=args.margin, mining='batch_hard')
+    criterion = TripletMarginLoss(margin=args.margin)
     
     # Setup optimizer with different learning rates for different model parts
     if hasattr(model, 'f1') and hasattr(model, 'f2') and hasattr(model, 'attention'):
