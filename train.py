@@ -123,10 +123,11 @@ def evaluate(model, loader, device):
     # top-k accuracy (i.e. R@K)
     accuracy = retrieval_accuracy(dists, labels)[0].item()
 
-    print('accuracy: {:.3f}%'.format(accuracy))
+    print('>> R@1 accuracy: {:.3f}%'.format(accuracy))
+    return accuracy
 
 
-def save(model, epoch, save_dir, args):
+def save(model, epoch, save_dir, args, is_best=False):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     file_name = args.dataset+'_'+args.model
@@ -136,10 +137,17 @@ def save(model, epoch, save_dir, args):
         file_name += '_anomaly'
     if args.rand_resize:
         file_name += '_randresize'
-    file_name += '_seed_'+str(args.seed)+'_epoch_'+str(epoch)+'_ckpt.pth'
+    file_name += '_seed_'+str(args.seed)
+    
+    if is_best:
+        file_name += '_best_ckpt.pth'
+    else:
+        file_name += '_epoch_'+str(epoch)+'_ckpt.pth'
 
     save_path = os.path.join(save_dir, file_name)
     torch.save(model.state_dict(), save_path)
+    print(f'>> Checkpoint saved: {save_path}')
+    return save_path
 
 
 def main(args):
@@ -277,6 +285,10 @@ def main(args):
                              shuffle=False,
                              num_workers=args.workers)
     
+    # Track best model
+    best_accuracy = 0.0
+    best_epoch = 0
+    
     freeze_epochs = 10
     for epoch in range(1, args.epochs + 1):
 
@@ -294,7 +306,9 @@ def main(args):
             unfreeze_backbone(model)
             print("Stage 3: Full fine-tuning")
 
-        print(f'Training epoch {epoch}...')
+        print(f'\n{"="*60}')
+        print(f'Training epoch {epoch}/{args.epochs}...')
+        print(f'{"="*60}')
         train_epoch(
             model,
             optimizer,
@@ -304,6 +318,26 @@ def main(args):
             epoch,
             args.print_freq
         )
+        
+        # Evaluate every N epochs
+        if epoch % args.eval_freq == 0:
+            print(f'\n{"="*60}')
+            print(f'Evaluating epoch {epoch}...')
+            print(f'{"="*60}')
+            accuracy = evaluate(model, test_loader, device)
+            
+            # Save if best model
+            if accuracy > best_accuracy:
+                best_accuracy = accuracy
+                best_epoch = epoch
+                print(f'\n🎯 New best model! Accuracy: {accuracy:.3f}% (epoch {epoch})')
+                save(model, epoch, args.save_dir, args, is_best=True)
+            else:
+                print(f'\nCurrent: {accuracy:.3f}%, Best: {best_accuracy:.3f}% (epoch {best_epoch})')
+            
+            # Also save periodic checkpoint
+            if epoch % 10 == 0:
+                save(model, epoch, args.save_dir, args, is_best=False)
 
 
     # for epoch in range(1, args.epochs + 1):
@@ -311,10 +345,12 @@ def main(args):
     #     train_epoch(model, optimizer, criterion, train_loader,
     #                 device, epoch, args.print_freq)
 
-    print('Evaluating...')
-    evaluate(model, test_loader, device)
-    print('Saving...')
-    save(model, epoch, args.save_dir, args)
+    print(f'\n{"="*60}')
+    print('Training completed!')
+    print(f'{"="*60}')
+    print(f'Best model: Epoch {best_epoch} with R@1 accuracy: {best_accuracy:.3f}%')
+    print(f'Best model saved in: {args.save_dir}')
+    print(f'{"="*60}')
 
 
 def parse_args():
@@ -346,6 +382,8 @@ def parse_args():
     parser.add_argument('--eval-batch-size', default=64, type=int)
     parser.add_argument('--epochs', default=20, type=int, metavar='N',
                         help='Number of training epochs to run')
+    parser.add_argument('--eval-freq', default=2, type=int,
+                        help='Evaluate model every N epochs')
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                         help='Number of data loading workers')
     parser.add_argument('--lr', default=0.0001,
