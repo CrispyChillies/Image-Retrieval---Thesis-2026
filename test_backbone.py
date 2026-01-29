@@ -28,26 +28,28 @@ from PIL import Image
 import torch
 
 
-def load_embeddings(convnext_path, conceptclip_path, labels_path, image_ids_path=None):
+def load_embeddings(model1_path, model2_path, labels_path, model1_name="Model1", model2_name="Model2", image_ids_path=None):
     """
     Load pre-extracted embeddings and labels.
     
     Args:
-        convnext_path: Path to ConvNeXtV2 embeddings (.npy)
-        conceptclip_path: Path to ConceptCLIP embeddings (.npy)
+        model1_path: Path to first model embeddings (.npy)
+        model2_path: Path to second model embeddings (.npy)
         labels_path: Path to labels (.npy)
+        model1_name: Name of first model for display
+        model2_name: Name of second model for display
         image_ids_path: Optional path to image IDs (.npy)
     
     Returns:
-        convnext_emb: [N, D1] normalized embeddings
-        conceptclip_emb: [N, D2] normalized embeddings
+        model1_emb: [N, D1] normalized embeddings
+        model2_emb: [N, D2] normalized embeddings
         labels: [N] class labels
         image_ids: [N] image identifiers (or indices if not provided)
     """
     print("Loading embeddings...")
     
-    convnext_emb = np.load(convnext_path)
-    conceptclip_emb = np.load(conceptclip_path)
+    model1_emb = np.load(model1_path)
+    model2_emb = np.load(model2_path)
     labels = np.load(labels_path)
     
     if image_ids_path and os.path.exists(image_ids_path):
@@ -56,15 +58,15 @@ def load_embeddings(convnext_path, conceptclip_path, labels_path, image_ids_path
         image_ids = np.arange(len(labels))
     
     # Ensure embeddings are L2 normalized
-    convnext_emb = convnext_emb / (np.linalg.norm(convnext_emb, axis=1, keepdims=True) + 1e-8)
-    conceptclip_emb = conceptclip_emb / (np.linalg.norm(conceptclip_emb, axis=1, keepdims=True) + 1e-8)
+    model1_emb = model1_emb / (np.linalg.norm(model1_emb, axis=1, keepdims=True) + 1e-8)
+    model2_emb = model2_emb / (np.linalg.norm(model2_emb, axis=1, keepdims=True) + 1e-8)
     
-    print(f"ConvNeXtV2 embeddings: {convnext_emb.shape}")
-    print(f"ConceptCLIP embeddings: {conceptclip_emb.shape}")
+    print(f"{model1_name} embeddings: {model1_emb.shape}")
+    print(f"{model2_name} embeddings: {model2_emb.shape}")
     print(f"Labels: {labels.shape}")
     print(f"Unique classes: {np.unique(labels)}")
     
-    return convnext_emb, conceptclip_emb, labels, image_ids
+    return model1_emb, model2_emb, labels, image_ids
 
 
 def compute_similarity_matrix(query_emb, db_emb):
@@ -213,12 +215,14 @@ def compute_rank_correlation(sim_matrix1, sim_matrix2):
     return correlations, mean_rho, std_rho
 
 
-def plot_overlap_histogram(overlaps, save_path=None):
+def plot_overlap_histogram(overlaps, model1_name, model2_name, save_path=None):
     """
     Plot histogram of retrieval overlaps.
     
     Args:
         overlaps: [N_q] overlap counts
+        model1_name: Name of first model
+        model2_name: Name of second model
         save_path: Path to save figure
     """
     plt.figure(figsize=(8, 6))
@@ -228,7 +232,7 @@ def plot_overlap_histogram(overlaps, save_path=None):
     
     plt.xlabel('Overlap Count (out of 5)', fontsize=12)
     plt.ylabel('Number of Queries', fontsize=12)
-    plt.title('Retrieval Overlap Distribution\n(ConvNeXtV2 vs ConceptCLIP)', fontsize=14)
+    plt.title(f'Retrieval Overlap Distribution\n({model1_name} vs {model2_name})', fontsize=14)
     plt.xticks(range(6))
     plt.grid(axis='y', alpha=0.3)
     
@@ -251,22 +255,25 @@ def plot_overlap_histogram(overlaps, save_path=None):
 
 
 def visualize_retrieval_comparison(query_idx, 
-                                   convnext_indices, convnext_scores,
-                                   conceptclip_indices, conceptclip_scores,
+                                   model1_indices, model1_scores,
+                                   model2_indices, model2_scores,
                                    labels, image_ids, image_dir,
+                                   model1_name="Model1", model2_name="Model2",
                                    class_names=None, k=5, save_path=None):
     """
     Visualize retrieval comparison for a single query.
     
     Args:
         query_idx: Index of query image
-        convnext_indices: [k] top-k indices from ConvNeXtV2
-        convnext_scores: [k] similarity scores from ConvNeXtV2
-        conceptclip_indices: [k] top-k indices from ConceptCLIP
-        conceptclip_scores: [k] similarity scores from ConceptCLIP
+        model1_indices: [k] top-k indices from first model
+        model1_scores: [k] similarity scores from first model
+        model2_indices: [k] top-k indices from second model
+        model2_scores: [k] similarity scores from second model
         labels: [N] class labels
         image_ids: [N] image identifiers
         image_dir: Directory containing images
+        model1_name: Name of first model
+        model2_name: Name of second model
         class_names: Dict mapping label to class name
         k: Number of retrievals to show
         save_path: Path to save figure
@@ -299,14 +306,14 @@ def visualize_retrieval_comparison(query_idx,
     for j in range(1, k + 1):
         axes[0, j].axis('off')
     
-    # Row 1: ConvNeXtV2 retrievals
-    axes[1, 0].text(0.5, 0.5, 'ConvNeXtV2\nTop-5', ha='center', va='center',
+    # Row 1: First model retrievals
+    axes[1, 0].text(0.5, 0.5, f'{model1_name}\nTop-5', ha='center', va='center',
                    fontsize=12, fontweight='bold')
     axes[1, 0].axis('off')
     
     for j in range(k):
-        idx = convnext_indices[j]
-        score = convnext_scores[j]
+        idx = model1_indices[j]
+        score = model1_scores[j]
         label = labels[idx]
         img_id = image_ids[idx]
         
@@ -327,14 +334,14 @@ def visualize_retrieval_comparison(query_idx,
                                 fontsize=9, color=color)
         axes[1, j + 1].axis('off')
     
-    # Row 2: ConceptCLIP retrievals
-    axes[2, 0].text(0.5, 0.5, 'ConceptCLIP\nTop-5', ha='center', va='center',
+    # Row 2: Second model retrievals
+    axes[2, 0].text(0.5, 0.5, f'{model2_name}\nTop-5', ha='center', va='center',
                    fontsize=12, fontweight='bold')
     axes[2, 0].axis('off')
     
     for j in range(k):
-        idx = conceptclip_indices[j]
-        score = conceptclip_scores[j]
+        idx = model2_indices[j]
+        score = model2_scores[j]
         label = labels[idx]
         img_id = image_ids[idx]
         
@@ -380,12 +387,14 @@ def late_fusion_retrieval(sim_matrix1, sim_matrix2, alpha=0.5):
     return alpha * sim_matrix1 + (1 - alpha) * sim_matrix2
 
 
-def print_summary_table(results):
+def print_summary_table(results, model1_name, model2_name):
     """
     Print a formatted summary table of results.
     
     Args:
         results: Dict containing evaluation metrics
+        model1_name: Name of first model
+        model2_name: Name of second model
     """
     print("\n" + "="*70)
     print("BACKBONE COMPARISON SUMMARY")
@@ -395,11 +404,11 @@ def print_summary_table(results):
     print(f"{'Model':<25} {'mAP@5':<12} {'Mean Overlap@5':<18} {'Spearman ρ':<15}")
     print("-"*70)
     
-    # ConvNeXtV2
-    print(f"{'ConvNeXtV2':<25} {results['convnext_map']:<12.4f} {'-':<18} {'-':<15}")
+    # Model 1
+    print(f"{model1_name:<25} {results['model1_map']:<12.4f} {'-':<18} {'-':<15}")
     
-    # ConceptCLIP
-    print(f"{'ConceptCLIP':<25} {results['conceptclip_map']:<12.4f} "
+    # Model 2
+    print(f"{model2_name:<25} {results['model2_map']:<12.4f} "
           f"{results['mean_overlap']:<18.4f} {results['mean_spearman']:<15.4f}")
     
     # Fusion results
@@ -430,10 +439,12 @@ def main(args):
     print("STEP 1: LOADING EMBEDDINGS")
     print("="*70)
     
-    convnext_emb, conceptclip_emb, labels, image_ids = load_embeddings(
-        args.convnext_embeddings,
-        args.conceptclip_embeddings,
+    model1_emb, model2_emb, labels, image_ids = load_embeddings(
+        args.model1_embeddings,
+        args.model2_embeddings,
         args.labels,
+        args.model1_name,
+        args.model2_name,
         args.image_ids
     )
     
@@ -444,54 +455,55 @@ def main(args):
     print("STEP 2: COMPUTING SIMILARITY MATRICES")
     print("="*70)
     
-    print("Computing ConvNeXtV2 similarities...")
-    sim_convnext = compute_similarity_matrix(convnext_emb, convnext_emb)
+    print(f"Computing {args.model1_name} similarities...")
+    sim_model1 = compute_similarity_matrix(model1_emb, model1_emb)
     
-    print("Computing ConceptCLIP similarities...")
-    sim_conceptclip = compute_similarity_matrix(conceptclip_emb, conceptclip_emb)
+    print(f"Computing {args.model2_name} similarities...")
+    sim_model2 = compute_similarity_matrix(model2_emb, model2_emb)
     
     # 3. Retrieve top-k
     print("\n" + "="*70)
     print(f"STEP 3: RETRIEVING TOP-{args.k}")
     print("="*70)
     
-    topk_convnext, scores_convnext = retrieve_topk(sim_convnext, k=args.k, exclude_self=True)
-    topk_conceptclip, scores_conceptclip = retrieve_topk(sim_conceptclip, k=args.k, exclude_self=True)
+    topk_model1, scores_model1 = retrieve_topk(sim_model1, k=args.k, exclude_self=True)
+    topk_model2, scores_model2 = retrieve_topk(sim_model2, k=args.k, exclude_self=True)
     
-    print(f"ConvNeXtV2 top-{args.k} shape: {topk_convnext.shape}")
-    print(f"ConceptCLIP top-{args.k} shape: {topk_conceptclip.shape}")
+    print(f"{args.model1_name} top-{args.k} shape: {topk_model1.shape}")
+    print(f"{args.model2_name} top-{args.k} shape: {topk_model2.shape}")
     
     # 4. Compute mAP@k
     print("\n" + "="*70)
     print(f"STEP 4: COMPUTING mAP@{args.k}")
     print("="*70)
     
-    map_convnext, aps_convnext = compute_map_at_k(topk_convnext, labels, labels, k=args.k)
-    map_conceptclip, aps_conceptclip = compute_map_at_k(topk_conceptclip, labels, labels, k=args.k)
+    map_model1, aps_model1 = compute_map_at_k(topk_model1, labels, labels, k=args.k)
+    map_model2, aps_model2 = compute_map_at_k(topk_model2, labels, labels, k=args.k)
     
-    print(f"ConvNeXtV2 mAP@{args.k}: {map_convnext:.4f}")
-    print(f"ConceptCLIP mAP@{args.k}: {map_conceptclip:.4f}")
+    print(f"{args.model1_name} mAP@{args.k}: {map_model1:.4f}")
+    print(f"{args.model2_name} mAP@{args.k}: {map_model2:.4f}")
     
     # 5. Compute retrieval overlap
     print("\n" + "="*70)
     print(f"STEP 5: COMPUTING RETRIEVAL OVERLAP@{args.k}")
     print("="*70)
     
-    overlaps, mean_overlap = compute_retrieval_overlap(topk_convnext, topk_conceptclip, k=args.k)
+    overlaps, mean_overlap = compute_retrieval_overlap(topk_model1, topk_model2, k=args.k)
     pct_low_overlap = np.sum(overlaps <= 2) / len(overlaps) * 100
     
     print(f"Mean overlap@{args.k}: {mean_overlap:.4f}")
     print(f"Percentage with overlap ≤ 2: {pct_low_overlap:.2f}%")
     
     # Plot overlap histogram
-    plot_overlap_histogram(overlaps, save_path=os.path.join(args.save_dir, 'overlap_histogram.png'))
+    plot_overlap_histogram(overlaps, args.model1_name, args.model2_name,
+                          save_path=os.path.join(args.save_dir, 'overlap_histogram.png'))
     
     # 6. Compute rank correlation
     print("\n" + "="*70)
     print("STEP 6: COMPUTING RANK CORRELATION")
     print("="*70)
     
-    correlations, mean_spearman, std_spearman = compute_rank_correlation(sim_convnext, sim_conceptclip)
+    correlations, mean_spearman, std_spearman = compute_rank_correlation(sim_model1, sim_model2)
     
     print(f"Mean Spearman ρ: {mean_spearman:.4f} ± {std_spearman:.4f}")
     
@@ -505,7 +517,7 @@ def main(args):
     for alpha in args.fusion_alphas:
         print(f"\nTesting α = {alpha:.1f}...")
         
-        sim_fused = late_fusion_retrieval(sim_convnext, sim_conceptclip, alpha=alpha)
+        sim_fused = late_fusion_retrieval(sim_model1, sim_model2, alpha=alpha)
         topk_fused, scores_fused = retrieve_topk(sim_fused, k=args.k, exclude_self=True)
         map_fused, _ = compute_map_at_k(topk_fused, labels, labels, k=args.k)
         
@@ -548,13 +560,15 @@ def main(args):
             
             visualize_retrieval_comparison(
                 query_idx,
-                topk_convnext[query_idx],
-                scores_convnext[query_idx],
-                topk_conceptclip[query_idx],
-                scores_conceptclip[query_idx],
+                topk_model1[query_idx],
+                scores_model1[query_idx],
+                topk_model2[query_idx],
+                scores_model2[query_idx],
                 labels,
                 image_ids,
                 args.image_dir,
+                args.model1_name,
+                args.model2_name,
                 class_names=args.class_names,
                 k=args.k,
                 save_path=os.path.join(args.save_dir, f'query_{query_idx}_comparison.png')
@@ -562,8 +576,8 @@ def main(args):
     
     # 9. Compile and print summary
     results = {
-        'convnext_map': map_convnext,
-        'conceptclip_map': map_conceptclip,
+        'model1_map': map_model1,
+        'model2_map': map_model2,
         'mean_overlap': mean_overlap,
         'pct_low_overlap': pct_low_overlap,
         'mean_spearman': mean_spearman,
@@ -572,14 +586,16 @@ def main(args):
         'n_queries': n_samples
     }
     
-    print_summary_table(results)
+    print_summary_table(results, args.model1_name, args.model2_name)
     
     # Save results
     results_path = os.path.join(args.save_dir, 'backbone_comparison_results.npz')
     np.savez(
         results_path,
-        convnext_map=map_convnext,
-        conceptclip_map=map_conceptclip,
+        model1_name=args.model1_name,
+        model2_name=args.model2_name,
+        model1_map=map_model1,
+        model2_map=map_model2,
         overlaps=overlaps,
         mean_overlap=mean_overlap,
         correlations=correlations,
@@ -587,8 +603,8 @@ def main(args):
         std_spearman=std_spearman,
         fusion_alphas=list(fusion_results.keys()),
         fusion_maps=list(fusion_results.values()),
-        aps_convnext=aps_convnext,
-        aps_conceptclip=aps_conceptclip
+        aps_model1=aps_model1,
+        aps_model2=aps_model2
     )
     print(f"Results saved to {results_path}")
     
@@ -603,25 +619,41 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Example usage:
+    # Compare ConvNeXtV2 vs ConceptCLIP
     python test_backbone.py \\
-        --convnext-embeddings data/convnext_embeddings.npy \\
-        --conceptclip-embeddings data/conceptclip_embeddings.npy \\
+        --model1-embeddings data/convnext_embeddings.npy \\
+        --model2-embeddings data/conceptclip_embeddings.npy \\
+        --model1-name ConvNeXtV2 --model2-name ConceptCLIP \\
         --labels data/labels.npy \\
         --image-ids data/image_ids.npy \\
         --image-dir /path/to/images \\
         --save-dir results/backbone_comparison \\
         --k 5 \\
         --visualize-samples 5
+    
+    # Compare MedCLIP vs MedSigLIP
+    python test_backbone.py \\
+        --model1-embeddings data/medclip_embeddings.npy \\
+        --model2-embeddings data/medsiglip_embeddings.npy \\
+        --model1-name MedCLIP --model2-name MedSigLIP \\
+        --labels data/labels.npy \\
+        --save-dir results/medclip_vs_medsiglip
         """
     )
     
     # Required arguments
-    parser.add_argument('--convnext-embeddings', required=True,
-                       help='Path to ConvNeXtV2 embeddings (.npy)')
-    parser.add_argument('--conceptclip-embeddings', required=True,
-                       help='Path to ConceptCLIP embeddings (.npy)')
+    parser.add_argument('--model1-embeddings', required=True,
+                       help='Path to first model embeddings (.npy)')
+    parser.add_argument('--model2-embeddings', required=True,
+                       help='Path to second model embeddings (.npy)')
     parser.add_argument('--labels', required=True,
                        help='Path to class labels (.npy)')
+    
+    # Model names
+    parser.add_argument('--model1-name', default='Model1',
+                       help='Display name for first model (default: Model1)')
+    parser.add_argument('--model2-name', default='Model2',
+                       help='Display name for second model (default: Model2)')
     
     # Optional arguments
     parser.add_argument('--image-ids', default=None,

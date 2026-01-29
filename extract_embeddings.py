@@ -73,6 +73,117 @@ def extract_convnext_embeddings(model, loader, device):
 
 
 @torch.no_grad()
+def extract_medclip_embeddings(loader, device, batch_size=8):
+    """Extract embeddings from MedCLIP model."""
+    from transformers import AutoModel, AutoTokenizer, CLIPVisionModel
+    
+    print("Loading MedCLIP model...")
+    vision_model = CLIPVisionModel.from_pretrained("flaviagiammarino/pubmed-clip-vit-base-patch32")
+    vision_model = vision_model.to(device)
+    vision_model.eval()
+    
+    from torchvision import transforms as T
+    preprocess = T.Compose([
+        T.Normalize(mean=[0.48145466, 0.4578275, 0.40821073], 
+                   std=[0.26862954, 0.26130258, 0.27577711])
+    ])
+    
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1).to(device)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1).to(device)
+    
+    all_embeddings = []
+    all_labels = []
+    all_image_ids = []
+    
+    print("Extracting MedCLIP embeddings...")
+    for data in tqdm(loader, desc="Processing batches"):
+        images = data[0].to(device)
+        labels = data[1]
+        
+        if len(data) > 2:
+            image_ids = data[2]
+        else:
+            image_ids = list(range(len(all_labels), len(all_labels) + len(labels)))
+        
+        # Denormalize and renormalize for MedCLIP
+        images_denorm = images * std + mean
+        images_clip = preprocess(images_denorm)
+        
+        batch_embeddings = []
+        for i in range(0, len(images_clip), batch_size):
+            mini_batch = images_clip[i:i + batch_size]
+            outputs = vision_model(pixel_values=mini_batch)
+            img_features = F.normalize(outputs.pooler_output, dim=-1)
+            batch_embeddings.append(img_features.cpu())
+            torch.cuda.empty_cache()
+        
+        batch_embeddings = torch.cat(batch_embeddings, dim=0)
+        all_embeddings.append(batch_embeddings)
+        all_labels.append(labels)
+        all_image_ids.extend(image_ids)
+    
+    embeddings = torch.cat(all_embeddings, dim=0).numpy()
+    labels = torch.cat(all_labels, dim=0).numpy()
+    image_ids = np.array(all_image_ids)
+    
+    print(f"Extracted {len(embeddings)} MedCLIP embeddings with shape {embeddings.shape}")
+    return embeddings, labels, image_ids
+
+
+@torch.no_grad()
+def extract_medsiglip_embeddings(loader, device, batch_size=8):
+    """Extract embeddings from MedSigLIP model."""
+    from transformers import AutoModel, AutoProcessor
+    
+    print("Loading MedSigLIP model...")
+    model = AutoModel.from_pretrained("flaviagiammarino/medsiglip-vit-base-patch16-224").to(device)
+    processor = AutoProcessor.from_pretrained("flaviagiammarino/medsiglip-vit-base-patch16-224")
+    model.eval()
+    
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1).to(device)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1).to(device)
+    
+    all_embeddings = []
+    all_labels = []
+    all_image_ids = []
+    
+    print("Extracting MedSigLIP embeddings...")
+    for data in tqdm(loader, desc="Processing batches"):
+        images = data[0].to(device)
+        labels = data[1]
+        
+        if len(data) > 2:
+            image_ids = data[2]
+        else:
+            image_ids = list(range(len(all_labels), len(all_labels) + len(labels)))
+        
+        images_denorm = images * std + mean
+        images_denorm = torch.clamp(images_denorm, 0, 1)
+        
+        batch_embeddings = []
+        for i in range(0, len(images_denorm), batch_size):
+            mini_batch = images_denorm[i:i + batch_size]
+            inputs = processor(images=[img for img in mini_batch], return_tensors='pt', padding=True).to(device)
+            outputs = model.get_image_features(**inputs)
+            img_features = F.normalize(outputs, dim=-1)
+            batch_embeddings.append(img_features.cpu())
+            del outputs, inputs
+            torch.cuda.empty_cache()
+        
+        batch_embeddings = torch.cat(batch_embeddings, dim=0)
+        all_embeddings.append(batch_embeddings)
+        all_labels.append(labels)
+        all_image_ids.extend(image_ids)
+    
+    embeddings = torch.cat(all_embeddings, dim=0).numpy()
+    labels = torch.cat(all_labels, dim=0).numpy()
+    image_ids = np.array(all_image_ids)
+    
+    print(f"Extracted {len(embeddings)} MedSigLIP embeddings with shape {embeddings.shape}")
+    return embeddings, labels, image_ids
+
+
+@torch.no_grad()
 def extract_conceptclip_embeddings(loader, device, batch_size=8):
     """Extract embeddings from ConceptCLIP model."""
     from transformers import AutoModel, AutoProcessor
@@ -218,6 +329,14 @@ def main(args):
         embeddings, labels, image_ids = extract_conceptclip_embeddings(
             test_loader, device, batch_size=args.conceptclip_batch_size
         )
+    elif args.model == 'medclip':
+        embeddings, labels, image_ids = extract_medclip_embeddings(
+            test_loader, device, batch_size=args.conceptclip_batch_size
+        )
+    elif args.model == 'medsiglip':
+        embeddings, labels, image_ids = extract_medsiglip_embeddings(
+            test_loader, device, batch_size=args.conceptclip_batch_size
+        )
     else:
         # Load model
         if args.model == 'densenet121':
@@ -300,12 +419,12 @@ def parse_args():
     # Model arguments
     parser.add_argument('--model', required=True,
                        choices=['densenet121', 'resnet50', 'convnextv2', 
-                               'hybrid_convnext_vit', 'conceptclip'],
+                               'hybrid_convnext_vit', 'conceptclip', 'medclip', 'medsiglip'],
                        help='Model to extract embeddings from')
     parser.add_argument('--resume', default='',
-                       help='Path to model checkpoint (not needed for ConceptCLIP)')
+                       help='Path to model checkpoint (not needed for ConceptCLIP/MedCLIP/MedSigLIP)')
     parser.add_argument('--embedding-dim', default=None, type=int,
-                       help='Embedding dimension (not needed for ConceptCLIP)')
+                       help='Embedding dimension (not needed for ConceptCLIP/MedCLIP/MedSigLIP)')
     
     # Dataset arguments
     parser.add_argument('--dataset', default='covid',
