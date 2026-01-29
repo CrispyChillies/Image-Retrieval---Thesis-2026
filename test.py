@@ -226,7 +226,7 @@ def evaluate(model, loader, device, args):
     labels = torch.cat(labels, dim=0)
     if args.use_cross_encoder:
         raw_images = torch.cat(raw_images, dim=0)
-
+ 
     # Initial retrieval using embedding similarity
     dists = -torch.cdist(embeds, embeds)
     dists.fill_diagonal_(float('-inf'))
