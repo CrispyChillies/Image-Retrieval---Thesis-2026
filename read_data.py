@@ -90,8 +90,6 @@ class ChestXrayDataSet(Dataset):
             "normal": 0,
             "pneumonia": 1,
             "COVID-19": 2,
-            "negative": 1,
-            "positive": 2,
         }
 
         image_names = []
