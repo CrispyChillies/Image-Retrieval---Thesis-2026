@@ -144,12 +144,19 @@ def train_epoch(model, processor, train_loader, optimizer, device, epoch,
     model.train()
     running_loss = 0.0
     
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1).to(device)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1).to(device)
+    
     progress_bar = tqdm(train_loader, desc=f'Epoch {epoch}')
     
     for batch_idx, (images, labels) in enumerate(progress_bar):
         # Move images to device
         images = images.to(device)
         labels = labels.to(device)
+        
+        # Denormalize images for processor
+        images_denorm = images * std + mean
+        images_denorm = torch.clamp(images_denorm, 0, 1)
         
         # Create text prompts for this batch
         batch_texts = []
@@ -161,7 +168,7 @@ def train_epoch(model, processor, train_loader, optimizer, device, epoch,
         
         # Process inputs
         inputs = processor(
-            images=[img for img in images],  # Convert tensor to list
+            images=[img for img in images_denorm],
             text=batch_texts,
             return_tensors='pt',
             padding=True,
@@ -209,6 +216,9 @@ def evaluate(model, processor, test_loader, device, label_names, class_prompts):
     """
     model.eval()
     
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1).to(device)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1).to(device)
+    
     # Encode all text prompts
     all_text_features = []
     prompt_to_label = []
@@ -242,9 +252,13 @@ def evaluate(model, processor, test_loader, device, label_names, class_prompts):
     for images, labels in tqdm(test_loader, desc='Evaluating'):
         images = images.to(device)
         
+        # Denormalize images for processor
+        images_denorm = images * std + mean
+        images_denorm = torch.clamp(images_denorm, 0, 1)
+        
         # Process images
         inputs = processor(
-            images=[img for img in images],
+            images=[img for img in images_denorm],
             return_tensors='pt',
             padding=True
         )
@@ -463,7 +477,7 @@ def parse_args():
     
     # Training arguments
     parser.add_argument('--epochs', default=20, type=int,
-                       help='Number of training epochs')
+                       help='Number of training epochs')``
     parser.add_argument('--batch-size', default=32, type=int,
                        help='Training batch size')
     parser.add_argument('--eval-batch-size', default=16, type=int,
