@@ -30,7 +30,17 @@ class ConceptCLIPEmbeddingModel(nn.Module):
         self.fusion_method = fusion_method
         
         # Get embedding dimension from model config
-        self.embedding_dim = concept_clip_model.config.projection_dim
+        # Try different possible attribute names
+        if hasattr(concept_clip_model.config, 'projection_dim'):
+            self.embedding_dim = concept_clip_model.config.projection_dim
+        elif hasattr(concept_clip_model.config, 'hidden_size'):
+            self.embedding_dim = concept_clip_model.config.hidden_size
+        elif hasattr(concept_clip_model.config, 'text_config') and hasattr(concept_clip_model.config.text_config, 'hidden_size'):
+            self.embedding_dim = concept_clip_model.config.text_config.hidden_size
+        else:
+            # Default for CLIP-based models
+            self.embedding_dim = 512
+            print(f"Warning: Could not determine embedding dimension from config, using default: {self.embedding_dim}")
         
         # Fusion layer for image+text mode
         if mode == 'image_text':
