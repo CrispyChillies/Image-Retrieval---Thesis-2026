@@ -408,7 +408,7 @@ class ConceptCLIPBackbone(nn.Module):
             images_list = [img for img in x_denorm]
             inputs = self.processor(
                 images=images_list,
-                return_tensors='pt',
+                return_tensors='pt',    
                 padding=True
             ).to(x.device)
         else:
