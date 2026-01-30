@@ -61,9 +61,8 @@ class ConceptCLIPEmbeddingModel(nn.Module):
         """
         if self.mode == 'image_only':
             # Extract only image features
-            with torch.no_grad():
-                outputs = self.concept_clip(pixel_values=images)
-                image_features = outputs['image_features']
+            outputs = self.concept_clip(pixel_values=images)
+            image_features = outputs['image_features']
             # Normalize features
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
             return image_features
@@ -73,10 +72,9 @@ class ConceptCLIPEmbeddingModel(nn.Module):
                 raise ValueError("Text descriptions required for image_text mode")
             
             # Extract both image and text features
-            with torch.no_grad():
-                outputs = self.concept_clip(pixel_values=images, **texts)
-                image_features = outputs['image_features']
-                text_features = outputs['text_features']
+            outputs = self.concept_clip(pixel_values=images, **texts)
+            image_features = outputs['image_features']
+            text_features = outputs['text_features']
             
             # Normalize individual features
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
