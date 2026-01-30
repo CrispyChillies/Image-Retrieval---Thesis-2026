@@ -13,6 +13,98 @@ from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
 from model import ConvNeXtV2, ResNet50, DenseNet121, HybridConvNeXtViT
 from cross_encoder import create_cross_encoder_from_checkpoint
 
+# MedCLIP imports
+try:
+    from medclip import MedCLIPModel, MedCLIPVisionModelViT, MedCLIPVisionModel
+    from medclip import MedCLIPProcessor
+    MEDCLIP_AVAILABLE = True
+except ImportError:
+    MEDCLIP_AVAILABLE = False
+    print("Warning: MedCLIP not available. Install with: pip install medclip")
+
+
+class MedCLIPWrapper(torch.nn.Module):
+    """Wrapper for MedCLIP model to extract image embeddings for retrieval."""
+    
+    def __init__(self, vision_cls=None, embedding_dim=512):
+        super(MedCLIPWrapper, self).__init__()
+        if not MEDCLIP_AVAILABLE:
+            raise ImportError("MedCLIP is not installed. Install with: pip install medclip")
+        
+        # Default to ViT if not specified
+        if vision_cls is None:
+            vision_cls = MedCLIPVisionModelViT
+        
+        self.model = MedCLIPModel(vision_cls=vision_cls)
+        self.model.from_pretrained()
+        self.embedding_dim = embedding_dim
+        
+        # Add projection layer if needed to match desired embedding_dim
+        # MedCLIP default embedding is 512, so only add if different
+        actual_dim = 512  # MedCLIP default
+        if embedding_dim != actual_dim:
+            self.projection = torch.nn.Linear(actual_dim, embedding_dim)
+        else:
+            self.projection = None
+    
+    def forward(self, x):
+        """Extract image embeddings.
+        
+        Args:
+            x: Input images (already preprocessed by MedCLIPProcessor)
+        
+        Returns:
+            Normalized image embeddings
+        """
+        # MedCLIP expects dict with 'pixel_values' key
+        if isinstance(x, dict):
+            outputs = self.model(**x)
+        else:
+            # If tensor is passed directly
+            outputs = self.model(pixel_values=x)
+        
+        # Extract image embeddings
+        img_embeds = outputs['img_embeds']
+        
+        # Apply projection if needed
+        if self.projection is not None:
+            img_embeds = self.projection(img_embeds)
+        
+        # Normalize embeddings
+        img_embeds = torch.nn.functional.normalize(img_embeds, p=2, dim=1)
+        
+        return img_embeds
+
+
+class MedCLIPDatasetWrapper(torch.utils.data.Dataset):
+    """Wrapper to apply MedCLIP processor to existing dataset."""
+    
+    def __init__(self, base_dataset, processor):
+        self.base_dataset = base_dataset
+        self.processor = processor
+    
+    def __len__(self):
+        return len(self.base_dataset)
+    
+    def __getitem__(self, idx):
+        # Get image and label from base dataset
+        # The base dataset returns (transformed_image, label)
+        # But we need raw PIL image for MedCLIP processor
+        # So we need to get the raw image
+        img_path = self.base_dataset.images[idx]
+        label = self.base_dataset.labels[idx]
+        
+        # Load raw PIL image
+        from PIL import Image
+        image = Image.open(img_path).convert('RGB')
+        
+        # Apply MedCLIP processor
+        inputs = self.processor(images=image, return_tensors="pt")
+        # Remove batch dimension added by processor
+        pixel_values = inputs['pixel_values'].squeeze(0)
+        
+        return pixel_values, label
+
 
 def retrieval_accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
@@ -374,246 +466,6 @@ def evaluate(model, loader, device, args):
                  classification_k_values=classification_k_values,
                  **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
         
-
-# def denormalize(tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
-#     """Denormalize a tensor image with mean and standard deviation."""
-#     mean = torch.tensor(mean).view(3, 1, 1).to(tensor.device)
-#     std = torch.tensor(std).view(3, 1, 1).to(tensor.device)
-#     return tensor * std + mean
-
-# @torch.no_grad()
-# def evaluate(model, loader, device, args):
-#     """
-#     Evaluation with hypothesis:
-#     - ConvNeXtV2 = primary retriever
-#     - ConceptCLIP = semantic reranker (top-K only)
-#     - Expect mAP ↑, R@1 ~ unchanged
-
-#     OOM-safe for Kaggle 16GB GPU.
-#     """
-
-#     import torch
-#     import numpy as np
-#     import torch.nn.functional as F
-#     from transformers import AutoModel, AutoProcessor
-
-#     # ============================================================
-#     # 1. Load ConceptCLIP ONCE
-#     # ============================================================
-#     print('>> Loading ConceptCLIP...')
-#     c_model = AutoModel.from_pretrained(
-#         'JerrryNie/ConceptCLIP',
-#         trust_remote_code=True
-#     ).to(device)
-#     c_processor = AutoProcessor.from_pretrained(
-#         'JerrryNie/ConceptCLIP',
-#         trust_remote_code=True
-#     )
-#     c_model.eval()
-
-#     # ============================================================
-#     # 2. Extract ConvNeXtV2 embeddings
-#     # ============================================================
-#     model.eval()
-#     embeds, labels, raw_samples = [], [], []
-
-#     for data in loader:
-#         images = data[0].to(device)
-#         lbls = data[1].to(device)
-
-#         feats = model(images)
-
-#         embeds.append(feats)
-#         labels.append(lbls)
-#         raw_samples.append(images)
-
-#     embeds = torch.cat(embeds, dim=0)          # [N, D]
-#     labels = torch.cat(labels, dim=0)          # [N]
-#     raw_samples = torch.cat(raw_samples, dim=0)
-
-#     # ============================================================
-#     # 3. BASELINE RETRIEVAL (ConvNeXtV2)
-#     # ============================================================
-#     print('\n===== BASELINE: ConvNeXtV2 =====')
-
-#     dists_base = -torch.cdist(embeds, embeds)
-#     dists_base.fill_diagonal_(float('-inf'))
-
-#     kappas = [1, 5, 10]
-
-#     acc_base = retrieval_accuracy(dists_base, labels, topk=kappas)
-#     acc_base = torch.stack(acc_base).cpu().numpy()
-#     print(f'>> R@K{kappas}: {np.around(acc_base, 2)}%')
-
-#     ranks_base = torch.argsort(dists_base, dim=0, descending=True)
-#     mAP_base, _, pr_base, _ = compute_map(
-#         ranks_base.cpu().numpy(),
-#         labels.cpu().numpy(),
-#         kappas
-#     )
-
-#     print(f'>> mAP: {mAP_base * 100:.2f}%')
-#     print(f'>> mP@K{kappas}: {np.around(pr_base * 100, 2)}%')
-
-#     # ============================================================
-#     # 4. Free memory BEFORE ConceptCLIP
-#     # ============================================================
-#     torch.cuda.empty_cache()
-
-#     # ============================================================
-#     # 5. Extract ConceptCLIP embeddings (BATCHED, OOM-SAFE)
-#     # ============================================================
-#     print('\n>> Extracting ConceptCLIP patch-level agreement scores (batched)...')
-
-#     def compute_patch_agreement(token_features, topk=5):
-#         """
-#         token_features: [num_patches, D]
-#         returns: scalar agreement score
-#         """
-#         # L2 norm = strength of semantic activation
-#         patch_strength = token_features.norm(dim=1)   # [num_patches]
-
-#         # Focus on strongest semantic regions
-#         return patch_strength.topk(topk).values.mean()
-    
-#     @torch.no_grad()
-#     def extract_conceptclip_with_patch_scores(
-#         images, processor, model, batch_size=8
-#     ):
-#         image_embeds = []
-#         patch_scores = []
-
-#         for i in range(0, len(images), batch_size):
-#             batch = images[i:i + batch_size]
-
-#             inputs = processor(
-#                 images=batch,
-#                 return_tensors='pt',
-#                 padding=True
-#             ).to(model.device)
-
-#             outputs = model(**inputs)
-
-#             # global embedding
-#             img_feat = F.normalize(outputs["image_features"], dim=-1)
-#             image_embeds.append(img_feat)
-
-#             # patch tokens
-#             token_feats = outputs["image_token_features"]  # [B, P, D]
-
-#             for b in range(token_feats.size(0)):
-#                 score = compute_patch_agreement(token_feats[b])
-#                 patch_scores.append(score)
-
-#              # free memory
-#             del outputs, inputs
-#             torch.cuda.empty_cache()
-
-#         return (
-#             torch.cat(image_embeds, dim=0),
-#             torch.stack(patch_scores)
-#         )
-
-
-
-#     # ============================================================
-#     # 6. SEMANTIC RE-RANKING (TOP-K ONLY)
-#     # ============================================================
-
-#     print('\n>> Extracting ConceptCLIP patch-level agreement scores (batched)...')
-#     raw_images_denorm = denormalize(raw_samples)
-#     concept_embeds, patch_scores = extract_conceptclip_with_patch_scores(
-#         raw_images_denorm,    # your denormalized images
-#         c_processor,
-#         c_model,
-#         batch_size=8          # Kaggle-safe
-#     )
-#     K = 5
-#     alpha = 0.1
-#     beta = 0.05  # small on purpose
-
-#     print(f'\n>> Patch-level agreement re-ranking (K={K}, beta={beta})')
-
-#     dists_rerank = dists_base.clone()
-#     _, topk_indices = torch.topk(dists_base, K, dim=1)
-
-#     for i in range(dists_base.size(0)):
-#         candidates = topk_indices[i]
-
-#         sim_conv = dists_base[i, candidates]
-
-#          # patch agreement consistency
-#         patch_q = patch_scores[i]
-#         patch_db = patch_scores[candidates]
-
-#         patch_agreement = torch.minimum(patch_q, patch_db)
-
-#         # normalize agreement
-#         patch_agreement = (patch_agreement - patch_agreement.mean()) / (
-#             patch_agreement.std() + 1e-6
-#         )
-
-#         # apply as small bias
-#         dists_rerank[i, candidates] = sim_conv + beta * patch_agreement
-
-
-#     # ============================================================
-#     # 7. EVALUATION AFTER RE-RANKING
-#     # ============================================================
-#     print('\n===== RERANKED: ConvNeXtV2 + ConceptCLIP =====')
-
-#     acc_rerank = retrieval_accuracy(dists_rerank, labels, topk=kappas)
-#     acc_rerank = torch.stack(acc_rerank).cpu().numpy()
-#     print(f'>> R@K{kappas}: {np.around(acc_rerank, 2)}%')
-
-#     ranks_rerank = torch.argsort(dists_rerank, dim=0, descending=True)
-#     mAP_rerank, _, pr_rerank, _ = compute_map(
-#         ranks_rerank.cpu().numpy(),
-#         labels.cpu().numpy(),
-#         kappas
-#     )
-
-#     print(f'>> mAP: {mAP_rerank * 100:.2f}%')
-#     print(f'>> mP@K{kappas}: {np.around(pr_rerank * 100, 2)}%')
-
-#     # ============================================================
-#     # 8. OPTIONAL: Classification via retrieval (reranked)
-#     # ============================================================
-#     print('\n>> Classification Metrics (Majority Voting, reranked)')
-#     k_values = [1, 5, 10, 15, 20]
-#     cls_results = compute_classification_metrics(labels, dists_rerank, k_values)
-
-#     for k in k_values:
-#         m = cls_results[k]
-#         print(
-#             f'Top-{k}: '
-#             f'Acc={m["accuracy"]:.2f}% | '
-#             f'F1(macro)={m["f1_macro"]:.2f}% | '
-#             f'F1(weighted)={m["f1_weighted"]:.2f}%'
-#         )
-
-#     # ============================================================
-#     # 9. SAVE RESULTS
-#     # ============================================================
-#     if args.save_dir:
-#         os.makedirs(args.save_dir, exist_ok=True)
-#         name = os.path.basename(args.resume).split('.')[0] or 'eval'
-
-#         np.savez(
-#             os.path.join(args.save_dir, name + '_rerank'),
-#             labels=labels.cpu().numpy(),
-#             dists_base=-dists_base.cpu().numpy(),
-#             dists_rerank=-dists_rerank.cpu().numpy(),
-#             mAP_base=mAP_base,
-#             mAP_rerank=mAP_rerank,
-#             pr_base=pr_base,
-#             pr_rerank=pr_rerank,
-#             acc_base=acc_base,
-#             acc_rerank=acc_rerank
-#         )
-
-
-
 def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -626,6 +478,22 @@ def main(args):
         model = ConvNeXtV2(embedding_dim=args.embedding_dim)
     elif args.model == 'hybrid_convnext_vit':
         model = HybridConvNeXtViT(embedding_dim=args.embedding_dim)
+    elif args.model == 'medclip':
+        if not MEDCLIP_AVAILABLE:
+            raise ImportError("MedCLIP is not installed. Install with: pip install medclip")
+        # Use ViT version by default (better performance)
+        model = MedCLIPWrapper(
+            vision_cls=MedCLIPVisionModelViT,
+            embedding_dim=args.embedding_dim if args.embedding_dim else 512
+        )
+    elif args.model == 'medclip_resnet':
+        if not MEDCLIP_AVAILABLE:
+            raise ImportError("MedCLIP is not installed. Install with: pip install medclip")
+        # ResNet50 version
+        model = MedCLIPWrapper(
+            vision_cls=MedCLIPVisionModel,
+            embedding_dim=args.embedding_dim if args.embedding_dim else 512
+        )
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -641,36 +509,63 @@ def main(args):
 
     model.to(device)
 
-    normalize = transforms.Normalize([0.485, 0.456, 0.406],
-                                     [0.229, 0.224, 0.225])
-
-    # Use 384x384 for ConvNeXtV2 and Hybrid model, 224x224 for other models
-    img_size = 384 if args.model in ['convnextv2', 'hybrid_convnext_vit'] else 224
-
-    test_transform = transforms.Compose([
-        transforms.Lambda(lambda img: img.convert('RGB')),
-        transforms.Resize((img_size, img_size)),
-        transforms.ToTensor(),
-        normalize
-    ])
-
-    # Set up dataset and dataloader
-    if args.dataset == 'covid':
-        test_dataset = ChestXrayDataSet(data_dir=args.test_dataset_dir,
-                                        image_list_file=args.test_image_list,
-                                        mask_dir=args.mask_dir,
-                                        transform=test_transform)
-    elif args.dataset == 'isic':
-        test_dataset = ISICDataSet(data_dir=args.test_dataset_dir,
-                                   image_list_file=args.test_image_list,
-                                   mask_dir=args.mask_dir,
-                                   transform=test_transform)
-    elif args.dataset == 'tbx11k':
-        test_dataset = TBX11kDataSet(data_dir=args.test_dataset_dir,
-                                     csv_file=args.test_image_list,
-                                     transform=test_transform)
+    # MedCLIP uses its own processor, others use standard transforms
+    if args.model in ['medclip', 'medclip_resnet']:
+        # MedCLIP handles preprocessing internally
+        medclip_processor = MedCLIPProcessor()
+        
+        # Create base dataset without transforms
+        if args.dataset == 'covid':
+            base_dataset = ChestXrayDataSet(data_dir=args.test_dataset_dir,
+                                           image_list_file=args.test_image_list,
+                                           mask_dir=args.mask_dir,
+                                           transform=None)
+        elif args.dataset == 'isic':
+            base_dataset = ISICDataSet(data_dir=args.test_dataset_dir,
+                                      image_list_file=args.test_image_list,
+                                      mask_dir=args.mask_dir,
+                                      transform=None)
+        elif args.dataset == 'tbx11k':
+            base_dataset = TBX11kDataSet(data_dir=args.test_dataset_dir,
+                                        csv_file=args.test_image_list,
+                                        transform=None)
+        else:
+            raise NotImplementedError('Dataset not supported!')
+        
+        # Wrap with MedCLIP processor
+        test_dataset = MedCLIPDatasetWrapper(base_dataset, medclip_processor)
     else:
-        raise NotImplementedError('Dataset not supported!')
+        # Standard preprocessing for other models
+        normalize = transforms.Normalize([0.485, 0.456, 0.406],
+                                         [0.229, 0.224, 0.225])
+
+        # Use 384x384 for ConvNeXtV2 and Hybrid model, 224x224 for other models
+        img_size = 384 if args.model in ['convnextv2', 'hybrid_convnext_vit'] else 224
+
+        test_transform = transforms.Compose([
+            transforms.Lambda(lambda img: img.convert('RGB')),
+            transforms.Resize((img_size, img_size)),
+            transforms.ToTensor(),
+            normalize
+        ])
+
+        # Set up dataset and dataloader
+        if args.dataset == 'covid':
+            test_dataset = ChestXrayDataSet(data_dir=args.test_dataset_dir,
+                                            image_list_file=args.test_image_list,
+                                            mask_dir=args.mask_dir,
+                                            transform=test_transform)
+        elif args.dataset == 'isic':
+            test_dataset = ISICDataSet(data_dir=args.test_dataset_dir,
+                                       image_list_file=args.test_image_list,
+                                       mask_dir=args.mask_dir,
+                                       transform=test_transform)
+        elif args.dataset == 'tbx11k':
+            test_dataset = TBX11kDataSet(data_dir=args.test_dataset_dir,
+                                         csv_file=args.test_image_list,
+                                         transform=test_transform)
+        else:
+            raise NotImplementedError('Dataset not supported!')
 
     test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
                              shuffle=False,
@@ -693,7 +588,7 @@ def parse_args():
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, convnextv2, or hybrid_convnext_vit)')
+                        help='Model to use (densenet121, resnet50, convnextv2, hybrid_convnext_vit, medclip, or medclip_resnet)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
     parser.add_argument('--eval-batch-size', default=64, type=int)
