@@ -497,15 +497,20 @@ def main(args):
     else:
         raise NotImplementedError('Model not supported!')
 
+    # Load checkpoint (skip for MedCLIP as it uses pretrained weights)
     if os.path.isfile(args.resume):
-        print("=> loading checkpoint")
-        checkpoint = torch.load(args.resume)
-        if 'state-dict' in checkpoint:
-            checkpoint = checkpoint['state-dict']
-        model.load_state_dict(checkpoint, strict=False)
-        print("=> loaded checkpoint")
+        if args.model not in ['medclip', 'medclip_resnet']:
+            print("=> loading checkpoint")
+            checkpoint = torch.load(args.resume)
+            if 'state-dict' in checkpoint:
+                checkpoint = checkpoint['state-dict']
+            model.load_state_dict(checkpoint, strict=False)
+            print("=> loaded checkpoint")
+        else:
+            print("=> MedCLIP uses pretrained weights, skipping checkpoint loading")
     else:
-        print("=> no checkpoint found")
+        if args.model not in ['medclip', 'medclip_resnet']:
+            print("=> no checkpoint found")
 
     model.to(device)
 
