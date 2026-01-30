@@ -288,14 +288,14 @@ def main(args):
             vision_type="vit",
             embedding_dim=args.embedding_dim,
             pretrained=True,
-            freeze=args.freeze_backbone
+            freeze=False
         )
     elif args.model == 'medclip_resnet':
         model = MedCLIPBackbone(
             vision_type="resnet",
             embedding_dim=args.embedding_dim,
             pretrained=True,
-            freeze=args.freeze_backbone
+            freeze=False
         )
 
     else:
