@@ -29,18 +29,14 @@ class ConceptCLIPEmbeddingModel(nn.Module):
         self.mode = mode
         self.fusion_method = fusion_method
         
-        # Get embedding dimension from model config
-        # Try different possible attribute names
-        if hasattr(concept_clip_model.config, 'projection_dim'):
-            self.embedding_dim = concept_clip_model.config.projection_dim
-        elif hasattr(concept_clip_model.config, 'hidden_size'):
-            self.embedding_dim = concept_clip_model.config.hidden_size
-        elif hasattr(concept_clip_model.config, 'text_config') and hasattr(concept_clip_model.config.text_config, 'hidden_size'):
-            self.embedding_dim = concept_clip_model.config.text_config.hidden_size
-        else:
-            # Default for CLIP-based models
-            self.embedding_dim = 512
-            print(f"Warning: Could not determine embedding dimension from config, using default: {self.embedding_dim}")
+        # Get embedding dimension dynamically by running a forward pass
+        # Create a dummy input to infer the actual output dimension
+        dummy_image = torch.randn(1, 3, 224, 224).to(next(concept_clip_model.parameters()).device)
+        with torch.no_grad():
+            dummy_output = concept_clip_model(pixel_values=dummy_image)
+            self.embedding_dim = dummy_output['image_features'].shape[-1]
+        
+        print(f"Detected embedding dimension: {self.embedding_dim}")
         
         # Fusion layer for image+text mode
         if mode == 'image_text':
@@ -147,8 +143,7 @@ def train_epoch(model, processor, optimizer, criterion, data_loader, device, epo
             text_inputs = processor(
                 text=text_descriptions,
                 return_tensors='pt',
-                padding=True,
-                truncation=True
+                padding=True
             )
             # Move text inputs to device
             text_inputs = {k: v.to(device) for k, v in text_inputs.items()}
@@ -192,8 +187,7 @@ def evaluate(model, processor, loader, device, dataset_name, use_text):
             text_inputs = processor(
                 text=text_descriptions,
                 return_tensors='pt',
-                padding=True,
-                truncation=True
+                padding=True
             )
             text_inputs = {k: v.to(device) for k, v in text_inputs.items()}
             out = model(images, text_inputs)
