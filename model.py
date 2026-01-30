@@ -4,6 +4,8 @@ import torchvision.models as models
 import torch.nn.functional as F
 import timm
 
+from medclip import MedCLIPModel, MedCLIPVisionModelViT, MedCLIPVisionModel
+
 
 class ResNet50(nn.Module):
     def __init__(self, pretrained=True, embedding_dim=None):
@@ -254,3 +256,59 @@ class HybridConvNeXtViT(nn.Module):
         
         return fused
 
+
+class MedCLIPBackbone(nn.Module):
+    def __init__(
+        self,
+        vision_type="vit",          # "vit" or "resnet"
+        pretrained=True,
+        embedding_dim=None,         # optional projection
+        freeze=True                 # freeze MedCLIP weights by default
+    ):
+        super().__init__()
+
+        # choose vision encoder
+        if vision_type == "vit":
+            vision_cls = MedCLIPVisionModelViT
+        elif vision_type == "resnet":
+            vision_cls = MedCLIPVisionModel
+        else:
+            raise ValueError("vision_type must be 'vit' or 'resnet'")
+
+        # load MedCLIP
+        self.medclip = MedCLIPModel(vision_cls=vision_cls)
+        if pretrained:
+            self.medclip.from_pretrained()
+
+        # grab vision encoder only
+        self.vision_model = self.medclip.vision_model
+
+        # embedding dim used by MedCLIP
+        self.out_dim = self.vision_model.output_dim  # usually 512
+
+        # optional projection head (like your fc layer)
+        self.fc = (
+            nn.Linear(self.out_dim, embedding_dim)
+            if embedding_dim is not None
+            else None
+        )
+
+        # optionally freeze backbone
+        if freeze:
+            for p in self.vision_model.parameters():
+                p.requires_grad = False
+
+    def forward(self, x):
+        """
+        x: tensor [B, 3, H, W]
+        """
+        # MedCLIP vision encoder
+        x = self.vision_model(x)   # [B, 512]
+
+        if self.fc is not None:
+            x = self.fc(x)
+
+        # normalize (MedCLIP already does this, but safe)
+        x = F.normalize(x, dim=1)
+
+        return x
