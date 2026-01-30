@@ -278,7 +278,7 @@ class MedCLIPBackbone(nn.Module):
         # load MedCLIP
         self.medclip = MedCLIPModel(vision_cls=vision_cls)
         if pretrained:
-            state_dict = self.medclip.from_pretrained()
+            state_dict = self.medclip.from_pretrained(return_dict=False)
             # remove text-only keys (we don't need them)
             state_dict = {
                 k: v for k, v in state_dict.items()
