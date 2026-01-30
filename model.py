@@ -318,3 +318,118 @@ class MedCLIPBackbone(nn.Module):
         x = F.normalize(x, dim=1)
 
         return x
+
+
+class ConceptCLIPBackbone(nn.Module):
+    """
+    ConceptCLIP Backbone for Medical Image Retrieval.
+    
+    Wraps the ConceptCLIP model from HuggingFace (JerrryNie/ConceptCLIP)
+    with optional projection head for embedding learning.
+    
+    Features:
+    - Pre-trained on medical images
+    - Vision encoder based on ViT architecture
+    - Optional embedding dimension projection
+    - Supports freezing backbone for transfer learning
+    """
+    
+    def __init__(
+        self,
+        pretrained=True,
+        embedding_dim=None,         # optional projection to custom embedding dim
+        freeze=False,               # whether to freeze ConceptCLIP weights
+        processor_normalize=True    # use ConceptCLIP's processor normalization
+    ):
+        super().__init__()
+        
+        try:
+            from transformers import AutoModel, AutoProcessor
+        except ImportError:
+            raise ImportError(
+                "transformers library is required for ConceptCLIP. "
+                "Install it with: pip install transformers"
+            )
+        
+        # Load ConceptCLIP model
+        if pretrained:
+            self.model = AutoModel.from_pretrained(
+                'JerrryNie/ConceptCLIP',
+                trust_remote_code=True
+            )
+        else:
+            raise NotImplementedError("ConceptCLIP requires pretrained weights")
+        
+        self.processor_normalize = processor_normalize
+        
+        # ConceptCLIP vision encoder output dimension (usually 768 or 512)
+        # We'll determine it dynamically on first forward pass
+        self.out_dim = None
+        
+        # Optional projection head
+        self._embedding_dim = embedding_dim
+        self.fc = None  # will be initialized after first forward pass
+        
+        # Denormalization parameters for ImageNet normalization
+        # (ConceptCLIP processor expects [0, 1] range, but dataloader normalizes)
+        self.register_buffer('mean', torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer('std', torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+        
+        # Optionally freeze backbone
+        if freeze:
+            for p in self.model.parameters():
+                p.requires_grad = False
+    
+    def denormalize(self, x):
+        """Denormalize images from ImageNet normalization to [0, 1] range."""
+        return x * self.std + self.mean
+    
+    def forward(self, x):
+        """
+        Forward pass through ConceptCLIP vision encoder.
+        
+        Args:
+            x: tensor [B, 3, H, W] - normalized images from dataloader
+        
+        Returns:
+            embeddings: tensor [B, embedding_dim] - normalized feature embeddings
+        """
+        # Denormalize images for ConceptCLIP processor
+        x_denorm = self.denormalize(x)
+        
+        # Clip to [0, 1] range (safety measure)
+        x_denorm = torch.clamp(x_denorm, 0.0, 1.0)
+        
+        # ConceptCLIP expects list of tensors or processor format
+        # For efficiency, we'll process as batch
+        if self.processor_normalize:
+            # Use ConceptCLIP's processor (may apply additional normalization)
+            # Convert batch to list for processor
+            images_list = [img for img in x_denorm]
+            inputs = self.processor(
+                images=images_list,
+                return_tensors='pt',
+                padding=True
+            ).to(x.device)
+        else:
+            # Direct forward without processor (use denormalized images)
+            inputs = {'pixel_values': x_denorm}
+        
+        # Extract image features
+        outputs = self.model(**inputs)
+        features = outputs['image_features']  # [B, hidden_dim]
+        
+        # Initialize projection layer on first forward pass
+        if self.out_dim is None:
+            self.out_dim = features.shape[-1]
+            if self._embedding_dim is not None:
+                self.fc = nn.Linear(self.out_dim, self._embedding_dim).to(features.device)
+        
+        # Apply optional projection
+        if self.fc is not None:
+            features = self.fc(features)
+        
+        # Normalize features (L2 normalization)
+        features = F.normalize(features, dim=1)
+        
+        return features

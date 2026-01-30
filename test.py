@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
 
-from model import ConvNeXtV2, ResNet50, DenseNet121, HybridConvNeXtViT, MedCLIPBackbone
+from model import ConvNeXtV2, ResNet50, DenseNet121, HybridConvNeXtViT, MedCLIPBackbone, ConceptCLIPBackbone
 
 
 def retrieval_accuracy(output, target, topk=(1,)):
@@ -297,7 +297,13 @@ def main(args):
             pretrained=True,
             freeze=True
         )
-
+    elif args.model == 'conceptclip':
+        model = ConceptCLIPBackbone(
+            pretrained=True,
+            embedding_dim=args.embedding_dim,
+            freeze=True,
+            processor_normalize=True
+        )
     else:
         raise NotImplementedError(f'Model not supported: {args.model}')
 
@@ -365,7 +371,7 @@ def parse_args():
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, convnextv2, or hybrid_convnext_vit)')
+                        help='Model to use (densenet121, resnet50, convnextv2, hybrid_convnext_vit, medclip_vit, medclip_resnet, or conceptclip)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
     parser.add_argument('--eval-batch-size', default=64, type=int)

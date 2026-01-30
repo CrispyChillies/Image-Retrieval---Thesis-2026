@@ -11,7 +11,7 @@ from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
 
 from loss import TripletMarginLoss
 from sampler import PKSampler
-from model import ResNet50, DenseNet121, ConvNeXtV2, HybridConvNeXtViT
+from model import ResNet50, DenseNet121, ConvNeXtV2, HybridConvNeXtViT, ConceptCLIPBackbone
 
 def freeze_backbone(model):
     if hasattr(model, 'f1'):
@@ -169,6 +169,13 @@ def main(args):
         model = ConvNeXtV2(embedding_dim=args.embedding_dim)
     elif args.model == 'hybrid_convnext_vit':
         model = HybridConvNeXtViT(embedding_dim=args.embedding_dim)
+    elif args.model == 'conceptclip':
+        model = ConceptCLIPBackbone(
+            pretrained=True,
+            embedding_dim=args.embedding_dim,
+            freeze=args.freeze_backbone,
+            processor_normalize=True
+        )
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -187,7 +194,27 @@ def main(args):
     criterion = TripletMarginLoss(margin=args.margin)
     
     # Setup optimizer with different learning rates for different model parts
-    if hasattr(model, 'f1') and hasattr(model, 'f2') and hasattr(model, 'attention'):
+    if args.model == 'conceptclip':
+        # ConceptCLIP-specific optimizer setup
+        if args.freeze_backbone:
+            # Only train projection head
+            optimizer = Adam(model.fc.parameters() if model.fc else model.parameters(), lr=args.lr)
+        else:
+            # Train entire model with different LRs
+            backbone_params = []
+            head_params = []
+            
+            for name, param in model.named_parameters():
+                if 'fc' in name:
+                    head_params.append(param)
+                else:
+                    backbone_params.append(param)
+            
+            optimizer = Adam([
+                {'params': backbone_params, 'lr': args.lr * 0.01},  # Much lower LR for pretrained model
+                {'params': head_params, 'lr': args.lr}  # Normal LR for projection head
+            ])
+    elif hasattr(model, 'f1') and hasattr(model, 'f2') and hasattr(model, 'attention'):
         # Attention-based model with custom parameter groups
         optimizer = Adam([
             {'params': model.f1.parameters(), 'lr': args.lr * 0.1},
@@ -372,9 +399,11 @@ def parse_args():
     parser.add_argument('--anomaly', action='store_true',
                         help='Train without anomaly class')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, convnextv2, or hybrid_convnext_vit)')
+                        help='Model to use (densenet121, resnet50, convnextv2, hybrid_convnext_vit, or conceptclip)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
+    parser.add_argument('--freeze-backbone', action='store_true',
+                        help='Freeze backbone weights (useful for ConceptCLIP)')
     parser.add_argument('-p', '--labels-per-batch', default=3, type=int,
                         help='Number of unique labels/classes per batch')
     parser.add_argument('-k', '--samples-per-label', default=16, type=int,
