@@ -207,6 +207,9 @@ class VINDRDataSet(Dataset):
             for row in reader:
                 # Adjust these keys if your CSV uses different column names
                 fname = row.get("image_id") or row.get("fname") or row[list(row.keys())[0]]
+                # Ensure .png extension for VINDR images
+                if not fname.lower().endswith('.png'):
+                    fname = fname + '.png'
                 label = row.get("label") or row.get("finding") or row[list(row.keys())[1]]
                 if label not in self.label_map:
                     label = "Other diseases"

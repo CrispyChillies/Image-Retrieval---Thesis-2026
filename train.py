@@ -297,10 +297,10 @@ def main(args):
                                      csv_file=args.test_image_list,
                                      transform=test_transform)
     elif args.dataset == 'vindr':
-        train_dataset = VINDRDataSet(data_dir=os.path.join(args.dataset_dir, 'train_data'),
+        train_dataset = VINDRDataSet(data_dir=os.path.join(args.dataset_dir, 'train_data/train'),
                                      csv_file=args.train_image_list,
                                      transform=train_transform)
-        test_dataset = VINDRDataSet(data_dir=os.path.join(args.dataset_dir, 'test_data'),
+        test_dataset = VINDRDataSet(data_dir=os.path.join(args.dataset_dir, 'test_data/test'),
                                     csv_file=args.test_image_list,
                                     transform=test_transform)
     else:
