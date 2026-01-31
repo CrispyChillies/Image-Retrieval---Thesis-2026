@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 
 
 import torchvision.transforms as transforms
-from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
+from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
 
 from loss import TripletMarginLoss
 from sampler import PKSampler
@@ -296,6 +296,13 @@ def main(args):
         test_dataset = TBX11kDataSet(data_dir=os.path.join(args.dataset_dir, 'test'),
                                      csv_file=args.test_image_list,
                                      transform=test_transform)
+    elif args.dataset == 'vindr':
+        train_dataset = VINDRDataSet(data_dir=os.path.join(args.dataset_dir, 'train_data'),
+                                     csv_file=args.train_image_list,
+                                     transform=train_transform)
+        test_dataset = VINDRDataSet(data_dir=os.path.join(args.dataset_dir, 'test_data'),
+                                    csv_file=args.test_image_list,
+                                    transform=test_transform)
     else:
         raise NotImplementedError('Dataset not supported!')
 
@@ -385,7 +392,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch Embedding Learning')
 
     parser.add_argument('--dataset', default='covid',
-                        help='Dataset to use (covid or isic)')
+                        help='Dataset to use (covid, isic, tbx11k, or vindr)')
     parser.add_argument('--dataset-dir', default='/data/brian.hu/COVID/data/',
                         help='Dataset directory path')
     parser.add_argument('--train-image-list', default='./train_split.txt',

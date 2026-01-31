@@ -139,8 +139,6 @@ class ChestXrayDataSet(Dataset):
 
 
 # TBX11k Dataset for retrieval (classification/retrieval only, no bbox)
-
-# TBX11k Dataset for retrieval (classification/retrieval only, no bbox)
 class TBX11kDataSet(Dataset):
     def __init__(self, data_dir, csv_file, transform=None):
         """
@@ -182,19 +180,64 @@ class TBX11kDataSet(Dataset):
         return len(self.image_names)
 
 
+# VINDR Dataset for 4-class classification
+class VINDRDataSet(Dataset):
+    def __init__(self, data_dir, csv_file, transform=None):
+        """
+        Args:
+            data_dir: path to image directory.
+            csv_file: path to the csv file (should have image file names and labels).
+            transform: optional transform to be applied on a sample.
+        """
+        self.image_names = []
+        self.labels = []
+        self.transform = transform
+
+        # Map label string to integer
+        self.label_map = {
+            "Pneumonia": 0,
+            "Tuberculosis": 1,
+            "Other diseases": 2,
+            "No finding": 3
+        }
+
+        import csv
+        with open(csv_file, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Adjust these keys if your CSV uses different column names
+                fname = row.get("image_id") or row.get("fname") or row[list(row.keys())[0]]
+                label = row.get("label") or row.get("finding") or row[list(row.keys())[1]]
+                if label not in self.label_map:
+                    label = "Other diseases"
+                img_path = os.path.join(data_dir, fname)
+                self.image_names.append(img_path)
+                self.labels.append(self.label_map[label])
+
+    def __getitem__(self, index):
+        image_name = self.image_names[index]
+        image = Image.open(image_name).convert('RGB')
+        label = self.labels[index]
+        if self.transform is not None:
+            image = self.transform(image)
+        return image, torch.tensor(label, dtype=torch.long)
+
+    def __len__(self):
+        return len(self.image_names)
+
 # Test main function for ChestXrayDataSet
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    # Example usage: update these paths as needed
-    data_dir = "./samples"  # directory containing images
-    image_list_file = "./train_split.txt"  # file listing images and labels
-    dataset = ChestXrayDataSet(data_dir, image_list_file, use_covid=True, mask_dir=None, transform=None)
-    print(f"Total images in dataset: {len(dataset)}")
-    # Load a sample image
-    img, label = dataset[0]
-    print(f"Sample label: {label}")
-    # Show the image
-    plt.imshow(img)
-    plt.title(f"Label: {label}")
-    plt.axis('off')
-    plt.show()
+# if __name__ == "__main__":
+#     import matplotlib.pyplot as plt
+#     # Example usage: update these paths as needed
+#     data_dir = "./samples"  # directory containing images
+#     image_list_file = "./train_split.txt"  # file listing images and labels
+#     dataset = ChestXrayDataSet(data_dir, image_list_file, use_covid=True, mask_dir=None, transform=None)
+#     print(f"Total images in dataset: {len(dataset)}")
+#     # Load a sample image
+#     img, label = dataset[0]
+#     print(f"Sample label: {label}")
+#     # Show the image
+#     plt.imshow(img)
+#     plt.title(f"Label: {label}")
+#     plt.axis('off')
+#     plt.show()
