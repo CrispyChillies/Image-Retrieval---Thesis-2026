@@ -241,7 +241,7 @@ def evaluate_conceptclip_concept_retrieval(model, processor, loader, device, arg
     
     # Step 1: Get text embeddings for all concepts
     print("Step 1: Extracting concept embeddings from text encoder...")
-    import numpy as np
+    
     
     # Create concept prompts
     concept_texts = [f'a medical image showing {concept}' for concept in concept_list]

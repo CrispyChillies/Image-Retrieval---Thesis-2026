@@ -3,6 +3,7 @@ import torch.nn as nn
 import torchvision.models as models
 import torch.nn.functional as F
 import timm
+from transformers import AutoModel, AutoProcessor
 
 
 class ResNet50(nn.Module):
@@ -126,3 +127,14 @@ class SwinV2(nn.Module):
         # normalize features
         x = F.normalize(x, dim=1)
         return x
+    
+
+# Use transformer Automodel for ConceptCLIP using JerrryNie/ConceptCLI
+# Image Encoder: SigLIP-ViT-400M-16
+# Text Encoder: PubMedBERT
+class conceptCLIP(nn.Module):
+    def __init__(self, model_name='JerrryNie/ConceptCLIP', embedding_dim=None):
+        super(conceptCLIP, self).__init__()
+        # load pretrained model from transformers
+        self.model = AutoModel.from_pretrained(model_name)
+        self.processor = AutoProcessor.from_pretrained(model_name)
