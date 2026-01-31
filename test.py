@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
 
-from model import ConvNeXtV2, ResNet50, DenseNet121, HybridConvNeXtViT, MedCLIPBackbone, ConceptCLIPBackbone
+from model import ConvNeXtV2, ResNet50, DenseNet121, HybridConvNeXtViT, ConceptCLIPBackbone, Resnet50_with_Attention
 
 
 def retrieval_accuracy(output, target, topk=(1,)):
@@ -210,7 +210,10 @@ def evaluate(model, loader, device, args):
         samples = data[0].to(device)
         _labels = data[1].to(device)
         out = model(samples)
-        embeds.append(out)
+        if isinstance(out, tuple):
+            embeds.append(out[0])
+        else:
+            embeds.append(out)
         labels.append(_labels)
 
     embeds = torch.cat(embeds, dim=0)
@@ -218,12 +221,6 @@ def evaluate(model, loader, device, args):
 
     dists = -torch.cdist(embeds, embeds)
     dists.fill_diagonal_(float('-inf'))
-
-    covid_labels = ['No Finding', 'Pneumonia', 'COVID-19'] 
-    prompts = [f'a radiographic representation assessing for {l}' for l in covid_labels]
-
-    K = 50 # Number of rerank candidates
-    alpha = 0.7 # Combination weights: alpha * ConvNeXt + (1-alpha) * ConceptCLIP
 
     # top-k accuracy (i.e. R@K)
     kappas = [1, 5, 10]
@@ -283,20 +280,6 @@ def main(args):
         model = ConvNeXtV2(embedding_dim=args.embedding_dim)
     elif args.model == 'hybrid_convnext_vit':
         model = HybridConvNeXtViT(embedding_dim=args.embedding_dim)
-    elif args.model == 'medclip_vit':
-        model = MedCLIPBackbone(
-            vision_type="vit",
-            embedding_dim=args.embedding_dim,
-            pretrained=True,
-            freeze=True
-        )
-    elif args.model == 'medclip_resnet':
-        model = MedCLIPBackbone(
-            vision_type="resnet",
-            embedding_dim=args.embedding_dim,
-            pretrained=True,
-            freeze=True
-        )
     elif args.model == 'conceptclip':
         model = ConceptCLIPBackbone(
             pretrained=True,
@@ -304,6 +287,8 @@ def main(args):
             freeze=True,
             processor_normalize=True
         )
+    elif args.model == 'resnet50_attention':
+        model = Resnet50_with_Attention(embedding_dim=args.embedding_dim)
     else:
         raise NotImplementedError(f'Model not supported: {args.model}')
 
