@@ -49,11 +49,18 @@ def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_f
         samples, targets = data[0].to(device), data[1].to(device)
 
         # Check if model supports attention output
-        try:
-            embeddings, attn = model(samples, return_attention=True)
+        # try:
+        #     embeddings, attn = model(samples, return_attention=True)
+        #     has_attention = True
+        # except (TypeError, AttributeError):
+        #     embeddings = model(samples)
+        #     has_attention = False
+        output = model(samples)
+        if isinstance(output, tuple) and len(output) == 2:
+            embeddings, attn = output
             has_attention = True
-        except (TypeError, AttributeError):
-            embeddings = model(samples)
+        else:
+            embeddings = output
             has_attention = False
 
         # Metric Loss 
