@@ -247,7 +247,7 @@ class VINDRDataSet(Dataset):
 
 if __name__ == "__main__":
     # Example usage for VINDRDataSet
-    data_dir = "/kaggle/input/vindr-cxr-physionet"  # Update to your images directory
+    data_dir = "/kaggle/input/vindr-cxr-physionet/train_data/train"  # Update to your images directory
     csv_file = "/kaggle/input/labeling-files-for-vindr/image_labels_test.csv"  # Update to your CSV path
     dataset = VINDRDataSet(data_dir, csv_file)
     print(f"Total images in dataset: {len(dataset)}")
