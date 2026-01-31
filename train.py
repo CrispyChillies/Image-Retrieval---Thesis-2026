@@ -11,7 +11,7 @@ from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
 
 from loss import TripletMarginLoss
 from sampler import PKSampler
-from model import ResNet50, DenseNet121, ConvNeXtV2, HybridConvNeXtViT, ConceptCLIPBackbone
+from model import ResNet50, DenseNet121, ConvNeXtV2, HybridConvNeXtViT, ConceptCLIPBackbone, Resnet50_with_Attention
 
 def freeze_backbone(model):
     if hasattr(model, 'f1'):
@@ -176,6 +176,8 @@ def main(args):
             freeze=args.freeze_backbone,
             processor_normalize=True
         )
+    elif args.model == 'resnet50_attention':
+        model = Resnet50_with_Attention(embedding_dim=args.embedding_dim)
     else:
         raise NotImplementedError('Model not supported!')
 

@@ -3,6 +3,10 @@ import torch.nn as nn
 import torchvision.models as models
 import torch.nn.functional as F
 import timm
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision.models import resnet50
 
 
 class ResNet50(nn.Module):
@@ -367,3 +371,70 @@ class ConceptCLIPBackbone(nn.Module):
         features = F.normalize(features, dim=1)
         
         return features
+
+class SEBlock(nn.Module):
+    def __init__(self, channels, reduction=16):
+        super(SEBlock, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channels, channels // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(channels // reduction, channels, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avg_pool(x).view(b, c)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y.expand_as(x)
+
+class ChannelWiseAverage(nn.Module):
+    def forward(self, x):
+        # Average over channel dimension, keep spatial
+        return torch.mean(x, dim=1, keepdim=True)
+
+class L2Norm(nn.Module):
+    def forward(self, x):
+        return F.normalize(x, dim=1)
+
+class Resnet50_with_Attention(nn.Module):
+    def __init__(self, embedding_dim=64):
+        super(Resnet50_with_Attention, self).__init__()
+        resnet = resnet50(pretrained=True)
+        # f1: up to layer3 (conv3_4)
+        self.f1 = nn.Sequential(
+            resnet.conv1, resnet.bn1, resnet.relu, resnet.maxpool,
+            resnet.layer1, resnet.layer2, resnet.layer3
+        )
+        # f2: layer4
+        self.f2 = resnet.layer4
+
+        # Attention branch
+        # Use a bottleneck block (from ResNet), SE, channel-wise avg, sigmoid
+        # Use the last block of layer3 for bottleneck
+        bottleneck_channels = 1024  # layer3 output channels
+        self.attention_module = nn.Sequential(
+            resnet.layer3[-1],  # bottleneck block
+            SEBlock(bottleneck_channels),
+            ChannelWiseAverage(),
+            nn.Sigmoid()
+        )
+
+        # Projection head
+        self.g = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(2048, 256),
+            nn.ReLU(inplace=True),
+            nn.Linear(256, embedding_dim),
+            L2Norm()
+        )
+
+    def forward(self, x):
+        feat_mid = self.f1(x)  # [B, 1024, H, W]
+        mask = self.attention_module(feat_mid)  # [B, 1, H, W]
+        feat_deep = self.f2(feat_mid)           # [B, 2048, H, W]
+        localized_feat = feat_deep * mask       # broadcast mask
+        final_embedding = self.g(localized_feat)
+        return final_embedding, mask
