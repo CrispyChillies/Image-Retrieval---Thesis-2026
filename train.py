@@ -324,23 +324,21 @@ def main(args):
     # Track best model
     best_accuracy = 0.0
     best_epoch = 0
-    
-    freeze_epochs = 10
     for epoch in range(1, args.epochs + 1):
 
         # ---- Unfreeze backbone ----
-        if epoch == 1:
-            freeze_backbone(model)
-            freeze_attention(model)
-            print("Stage 1: Warm-up (freeze backbone + attention)")
+        # if epoch == 1:
+        #     freeze_backbone(model)
+        #     freeze_attention(model)
+        #     print("Stage 1: Warm-up (freeze backbone + attention)")
 
-        if epoch == 11:
-            unfreeze_attention(model)
-            print("Stage 2: Attention learning")
+        # if epoch == 11:
+        #     unfreeze_attention(model)
+        #     print("Stage 2: Attention learning")
 
-        if epoch == 21:
-            unfreeze_backbone(model)
-            print("Stage 3: Full fine-tuning")
+        # if epoch == 21:
+        #     unfreeze_backbone(model)
+        #     print("Stage 3: Full fine-tuning")
 
         print(f'\n{"="*60}')
         print(f'Training epoch {epoch}/{args.epochs}...')
