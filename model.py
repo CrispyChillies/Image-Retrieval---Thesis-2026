@@ -3,10 +3,9 @@ import torch.nn as nn
 import torchvision.models as models
 import torch.nn.functional as F
 import timm
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+
 from torchvision.models import resnet50
+from torchvision.models.resnet import Bottleneck
 
 
 class ResNet50(nn.Module):
@@ -415,7 +414,7 @@ class Resnet50_with_Attention(nn.Module):
         # Use the last block of layer3 for bottleneck
         bottleneck_channels = 1024  # layer3 output channels
         self.attention_module = nn.Sequential(
-            resnet.layer3[-1],  # bottleneck block
+            Bottleneck(1024, 256),
             SEBlock(bottleneck_channels),
             ChannelWiseAverage(),
             nn.Sigmoid()
