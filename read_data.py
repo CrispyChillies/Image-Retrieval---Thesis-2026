@@ -241,3 +241,28 @@ class VINDRDataSet(Dataset):
 #     plt.title(f"Label: {label}")
 #     plt.axis('off')
 #     plt.show()
+
+if __name__ == "__main__":
+    # Example usage for VINDRDataSet
+    data_dir = "/kaggle/input/vindr-cxr-physionet"  # Update to your images directory
+    csv_file = "/kaggle/input/labeling-files-for-vindr/image_labels_test.csv"  # Update to your CSV path
+    dataset = VINDRDataSet(data_dir, csv_file)
+    print(f"Total images in dataset: {len(dataset)}")
+
+    # Count samples per class
+    from collections import Counter
+    label_counts = Counter(dataset.labels)
+    class_names = ["Pneumonia", "Tuberculosis", "Other diseases", "No finding"]
+    for idx, name in enumerate(class_names):
+        print(f"{name}: {label_counts[idx]} samples")
+
+    # Show a few samples
+    for i in range(3):
+        img, label = dataset[i]
+        print(f"Sample {i}: label={label} ({class_names[label]})")
+
+    # Check for PKSampler compatibility
+    k = 8  # Set your intended k
+    for idx, name in enumerate(class_names):
+        if label_counts[idx] < k:
+            print(f"Warning: Class '{name}' has fewer than {k} samples ({label_counts[idx]} found).")
