@@ -118,7 +118,11 @@ def evaluate(model, loader, device):
         samples = data[0].to(device)
         _labels = data[1].to(device)
         out = model(samples)
-        embeds.append(out)
+        # If model returns a tuple (embeddings, mask), use only embeddings
+        if isinstance(out, tuple):
+            embeds.append(out[0])
+        else:
+            embeds.append(out)
         labels.append(_labels)
 
     embeds = torch.cat(embeds, dim=0)
