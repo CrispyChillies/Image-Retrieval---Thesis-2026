@@ -434,6 +434,10 @@ class Resnet50_with_Attention(nn.Module):
         feat_mid = self.f1(x)  # [B, 1024, H, W]
         mask = self.attention_module(feat_mid)  # [B, 1, H, W]
         feat_deep = self.f2(feat_mid)           # [B, 2048, H, W]
-        localized_feat = feat_deep * mask       # broadcast mask
+
+        if mask.shape[-2:] != feat_deep.shape[-2:]:
+            mask = F.interpolate(mask, size=feat_deep.shape[-2:], mode='bilinear', align_corners=False)
+        localized_feat = feat_deep * mask
+
         final_embedding = self.g(localized_feat)
         return final_embedding, mask
