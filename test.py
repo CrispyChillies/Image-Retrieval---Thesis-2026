@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 
 
 import torchvision.transforms as transforms
-from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
+from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
 
 from model import ConvNeXtV2, ResNet50, DenseNet121, HybridConvNeXtViT, ConceptCLIPBackbone, Resnet50_with_Attention
 
@@ -123,6 +123,51 @@ def compute_map(ranks, gnd, kappas=[]):
 
     return mAP, aps, pr, prs
 
+def compute_map_multilabel(dists, labels, threshold=0.5):
+    """
+    Tính mAP cho dữ liệu đa nhãn.
+    Args:
+        dists: Ma trận khoảng cách (batch_size, batch_size)
+        labels: Ma trận nhãn multi-hot (batch_size, num_classes)
+        threshold: Ngưỡng Jaccard để coi là một kết quả 'đúng'
+    """
+    labels = labels.cpu().numpy()
+    dists = dists.cpu().numpy()
+    nq = labels.shape[0]
+    aps = []
+
+    # Tính toán ma trận Jaccard cho toàn bộ tập test
+    # Intersection / Union
+    intersection = np.dot(labels, labels.T)
+    row_sums = labels.sum(axis=1).reshape(-1, 1)
+    union = row_sums + row_sums.T - intersection
+    jaccard_matrix = intersection / (union + 1e-8)
+
+    # Lấy thứ tự ưu tiên từ khoảng cách (giá trị càng lớn càng gần)
+    ranks = np.argsort(-dists, axis=0) 
+
+    for i in range(nq):
+        # Định nghĩa các ảnh liên quan là những ảnh có Jaccard > threshold
+        # Loại bỏ chính nó (i)
+        binary_relevance = (jaccard_matrix[i] > threshold).astype(float)
+        binary_relevance[i] = 0 
+        
+        if np.sum(binary_relevance) > 0:
+            # Sử dụng hàm chuẩn của sklearn để tính AP cho query i
+            # ranks[:, i] là danh sách các index ảnh được sắp xếp theo độ gần với query i
+            sorted_relevance = binary_relevance[ranks[:, i]]
+            
+            # Tính AP
+            count_pos = 0
+            ap = 0
+            for rank, is_rel in enumerate(sorted_relevance):
+                if is_rel > 0:
+                    count_pos += 1
+                    precision_at_rank = count_pos / (rank + 1)
+                    ap += precision_at_rank
+            aps.append(ap / np.sum(binary_relevance))
+
+    return np.mean(aps) if aps else 0
 
 def majority_vote(retrieved_labels):
     """Get the majority label from retrieved images.
@@ -200,6 +245,60 @@ def compute_classification_metrics(labels, dists, k_values=[1, 5, 10, 15, 20]):
     
     return results
 
+@torch.no_grad()
+def evaluate_multilabels(model, loader, device, args):
+    model.eval()
+    embeds, labels = [], []
+
+    for data in loader:
+        samples = data[0].to(device)
+        _labels = data[1].to(device) # Đây là multi-hot vector [0, 1, 0...]
+        out = model(samples)
+        
+        embedding = out[0] if isinstance(out, tuple) else out
+        embeds.append(embedding)
+        labels.append(_labels)
+
+    embeds = torch.cat(embeds, dim=0)
+    labels = torch.cat(labels, dim=0)
+
+    # Sử dụng Cosine Similarity thay vì Euclidean cho Retrieval
+    embeds_norm = torch.nn.functional.normalize(embeds, p=2, dim=1)
+    dists = torch.mm(embeds_norm, embeds_norm.t())
+    
+    # Loại bỏ đường chéo
+    dists.fill_diagonal_(-float('inf'))
+
+    print('\n--- VinDr-CXR Retrieval Results ---')
+    
+    # 1. Tính mAP với các ngưỡng Jaccard khác nhau
+    for t in [0.25, 0.5]:
+        mAP_val = compute_map_multilabel(dists, labels, threshold=t)
+        print(f'>> mAP (Jaccard > {t}): {mAP_val * 100.0:.2f}%')
+
+    # 2. Tính Recall@K (Truyền thống)
+    # Với đa nhãn, R@K thường được tính là: Có ít nhất 1 nhãn trùng trong Top-K
+    kappas = [1, 5, 10]
+    ranks = torch.argsort(dists, dim=1, descending=True)
+    
+    for k in kappas:
+        top_k_idx = ranks[:, :k]
+        # Kiểm tra xem top K có ảnh nào chung ít nhất 1 nhãn với Query không
+        correct = 0
+        for i in range(len(labels)):
+            query_label = labels[i]
+            retrieved_labels = labels[top_k_idx[i]]
+            # Nếu tổng tích vô hướng > 0 nghĩa là có ít nhất 1 nhãn trùng
+            if (retrieved_labels * query_label).sum() > 0:
+                correct += 1
+        print(f'>> Recall@{k} (At least 1 match): {correct/len(labels)*100.0:.2f}%')
+
+    # Lưu kết quả
+    if args.save_dir:
+        os.makedirs(args.save_dir, exist_ok=True)
+        save_path = os.path.join(args.save_dir, 'evaluation_results.npz')
+        np.savez(save_path, embeds=embeds.cpu().numpy(), labels=labels.cpu().numpy())
+        print(f'>> Results saved to {save_path}')
 
 @torch.no_grad()
 def evaluate(model, loader, device, args):
@@ -332,6 +431,10 @@ def main(args):
         test_dataset = TBX11kDataSet(data_dir=args.test_dataset_dir,
                                      csv_file=args.test_image_list,
                                      transform=test_transform)
+    elif args.dataset == 'vindr':
+        test_dataset = VINDRDataSet(data_dir=args.test_dataset_dir,
+                                   csv_file=args.test_image_list,
+                                   transform=test_transform)
     else:
         raise NotImplementedError('Dataset not supported!')
 
@@ -340,15 +443,17 @@ def main(args):
                              num_workers=args.workers)
 
     print('Evaluating...')
-    evaluate(model, test_loader, device, args)
-
+    if args.dataset == 'vindr':
+        evaluate_multilabels(model, test_loader, device, args)
+    else:   
+        evaluate(model, test_loader, device, args)
 
 def parse_args():
     import argparse
     parser = argparse.ArgumentParser(description='PyTorch Embedding Learning')
 
     parser.add_argument('--dataset', default='covid',
-                        help='Dataset to use (covid or isic)')
+                        help='Dataset to use (covid, isic, tbx11k, or vindr)')
     parser.add_argument('--test-dataset-dir', default='/data/brian.hu/COVID/data/test',
                         help='Test dataset directory path')
     parser.add_argument('--test-image-list', default='./test_COVIDx4.txt',
