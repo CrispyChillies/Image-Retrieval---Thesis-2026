@@ -3,7 +3,7 @@ import random
 
 import torch
 from torch.optim import Adam
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 
 
 import torchvision.transforms as transforms
@@ -204,7 +204,7 @@ def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     p = args.labels_per_batch if not args.anomaly else args.labels_per_batch - 1
     k = args.samples_per_label
-    batch_size = p * k
+    batch_size = args.batch_size
 
     # Choose model
     if args.model == 'densenet121':
@@ -316,7 +316,7 @@ def main(args):
     if args.dataset == 'covid':
         train_dataset = ChestXrayDataSet(data_dir=os.path.join(args.dataset_dir, 'train'),
                                          image_list_file=args.train_image_list,
-                                         use_covid=not args.anomaly,  # whether or not to use COVID in training
+                                         use_covid=not args.anomaly, 
                                          mask_dir=os.path.join(
                                              args.mask_dir, 'train') if args.mask_dir else None,
                                          transform=train_transform)
@@ -361,7 +361,7 @@ def main(args):
     targets = train_dataset.labels
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size,
-                              sampler=PKSampler(targets, p, k),
+                              sampler=RandomSampler(train_dataset),
                               num_workers=args.workers)
     test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
                              shuffle=False,
@@ -467,6 +467,8 @@ def parse_args():
                         help='Model save directory')
     parser.add_argument('--resume', default='',
                         help='Resume from checkpoint')
+    parser.add_argument('--batch-size', default=64, type=int,
+                        help='Batch size for training')
 
     return parser.parse_args()
 
