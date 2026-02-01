@@ -4,18 +4,21 @@ import random
 import torch
 from torch.optim import Adam
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
-from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
-from loss import TripletMarginLoss
+from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
+from loss import TripletMarginLoss, WeightedMultiLabelTripletLoss
 from sampler import PKSampler
 
-from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2, SwinV2
+from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2, HybridConvNeXtViT, ConceptCLIPBackbone, Resnet50_with_Attention
+
+from sklearn.metrics import average_precision_score
+import numpy as np
 
 
-def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_freq, rank=0):
+def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_freq, rank=0, lambda_area=0.1, lambda_sparse=0.01):
     model.train()
     running_loss = 0
     running_frac_pos_triplets = 0
@@ -23,10 +26,26 @@ def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_f
         optimizer.zero_grad()
         samples, targets = data[0].to(device), data[1].to(device)
 
-        embeddings = model(samples)
+        output = model(samples)
+        if isinstance(output, tuple) and len(output) == 2:
+            embeddings, attn = output
+            has_attention = True
+        else:
+            embeddings = output
+            has_attention = False
 
+        # Metric Loss
         loss, frac_pos_triplets = criterion(embeddings, targets)
+        
+        # Attention Loss (only if model supports it)
+        if has_attention:
+            loss_area = attn.mean()
+            loss_sparse = torch.mean(attn * torch.log(attn + 1e-8))
+            loss = loss + lambda_area * loss_area + lambda_sparse * loss_sparse
+
         loss.backward()
+        
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         optimizer.step()
 
         running_loss += loss.item()
@@ -50,7 +69,9 @@ def retrieval_accuracy(output, target, topk=(1,)):
         batch_size = target.size(0)
 
         _, pred = output.topk(maxk, 1, True, True)
-        pred = target[pred.cpu()].t()
+        pred = pred.cpu()
+        target = target.cpu()
+        pred = target[pred].t()
         correct = pred.eq(target[None])
 
         res = []
@@ -69,15 +90,17 @@ def evaluate(model, loader, device, rank=0, world_size=1):
         samples = data[0].to(device)
         _labels = data[1].to(device)
         out = model(samples)
-        embeds.append(out)  # Keep on GPU for gathering
-        labels.append(_labels.to(device))  # Move labels to GPU for gathering
+        
+        # If model returns a tuple (embeddings, attention), use only embeddings
+        embedding = out[0] if isinstance(out, tuple) else out
+        embeds.append(embedding.cpu())
+        labels.append(_labels.cpu())
 
     embeds = torch.cat(embeds, dim=0)
     labels = torch.cat(labels, dim=0)
 
     # Gather embeddings and labels from all processes if using DDP
     if world_size > 1:
-        # Move back to GPU temporarily for gathering
         embeds = embeds.to(device)
         labels = labels.to(device)
         embeds_list = [torch.zeros_like(embeds) for _ in range(world_size)]
@@ -86,20 +109,42 @@ def evaluate(model, loader, device, rank=0, world_size=1):
         dist.all_gather(labels_list, labels)
         embeds = torch.cat(embeds_list, dim=0).cpu()
         labels = torch.cat(labels_list, dim=0).cpu()
-    
-    # Already on CPU from per-batch moves
 
-    dists = -torch.cdist(embeds, embeds)
-    dists.fill_diagonal_(torch.tensor(float('-inf')))
+    # Check if multi-label dataset (labels have multiple dimensions)
+    if labels.dim() > 1 and labels.size(1) > 1:
+        # Multi-label mAP evaluation
+        embeds_norm = torch.nn.functional.normalize(embeds, p=2, dim=1)
+        sim_matrix = torch.mm(embeds_norm, embeds_norm.t())
+        sim_matrix.fill_diagonal_(-1)
 
-    # top-k accuracy (i.e. R@K)
-    accuracy = retrieval_accuracy(dists, labels)[0].item()
+        aps = []
+        for i in range(len(embeds)):
+            intersect = (labels[i] * labels).sum(dim=1)
+            union = (labels[i] + labels).clamp(max=1).sum(dim=1)
+            jaccard = intersect / (union + 1e-8)
 
-    if rank == 0:
-        print('accuracy: {:.3f}%'.format(accuracy))
+            binary_relevance = (jaccard > 0.4).float().numpy()
+            
+            if np.sum(binary_relevance) > 0:
+                ap = average_precision_score(binary_relevance, sim_matrix[i].numpy())
+                aps.append(ap)
+
+        mean_ap = np.mean(aps) * 100
+        if rank == 0:
+            print(f'>> Mean Average Precision (mAP): {mean_ap:.3f}%')
+        return mean_ap
+    else:
+        # Single-label R@1 evaluation
+        dists = -torch.cdist(embeds, embeds)
+        dists.fill_diagonal_(torch.tensor(float('-inf')))
+
+        accuracy = retrieval_accuracy(dists, labels)[0].item()
+        if rank == 0:
+            print('>> R@1 accuracy: {:.3f}%'.format(accuracy))
+        return accuracy
 
 
-def save(model, epoch, save_dir, args):
+def save(model, epoch, save_dir, args, is_best=False):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     file_name = args.dataset+'_'+args.model
@@ -109,10 +154,17 @@ def save(model, epoch, save_dir, args):
         file_name += '_anomaly'
     if args.rand_resize:
         file_name += '_randresize'
-    file_name += '_seed_'+str(args.seed)+'_epoch_'+str(epoch)+'_ckpt.pth'
+    file_name += '_seed_'+str(args.seed)
+    
+    if is_best:
+        file_name += '_best_ckpt.pth'
+    else:
+        file_name += '_epoch_'+str(epoch)+'_ckpt.pth'
 
     save_path = os.path.join(save_dir, file_name)
     torch.save(model.state_dict(), save_path)
+    print(f'>> Checkpoint saved: {save_path}')
+    return save_path
 
 
 def main(args):
@@ -153,6 +205,17 @@ def main(args):
         model = ConvNeXtV2(embedding_dim=args.embedding_dim)
     elif args.model == 'swinv2':
         model = SwinV2(embedding_dim=args.embedding_dim)
+    elif args.model == 'hybrid_convnext_vit':
+        model = HybridConvNeXtViT(embedding_dim=args.embedding_dim)
+    elif args.model == 'conceptclip':
+        model = ConceptCLIPBackbone(
+            pretrained=True,
+            embedding_dim=args.embedding_dim,
+            freeze=args.freeze_backbone,
+            processor_normalize=True
+        )
+    elif args.model == 'resnet50_attention':
+        model = Resnet50_with_Attention(embedding_dim=args.embedding_dim)
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -177,34 +240,85 @@ def main(args):
                     find_unused_parameters=False, 
                     gradient_as_bucket_view=False)  # Avoids stride mismatch warning
 
-    criterion = TripletMarginLoss(margin=args.margin)
-    optimizer = Adam(model.parameters(), lr=args.lr)
+    # Use WeightedMultiLabelTripletLoss for multi-label datasets (vindr), otherwise standard TripletMarginLoss
+    if args.dataset == 'vindr':
+        criterion = WeightedMultiLabelTripletLoss(margin=args.margin)
+    else:
+        criterion = TripletMarginLoss(margin=args.margin)
+    
+    # Setup optimizer with different learning rates for different model parts
+    if args.model == 'conceptclip':
+        # ConceptCLIP-specific optimizer setup
+        model_without_ddp = model.module if args.use_ddp else model
+        if args.freeze_backbone:
+            # Only train projection head
+            optimizer = Adam(model_without_ddp.fc.parameters() if model_without_ddp.fc else model_without_ddp.parameters(), lr=args.lr)
+        else:
+            # Train entire model with different LRs
+            backbone_params = []
+            head_params = []
+            
+            for name, param in model_without_ddp.named_parameters():
+                if 'fc' in name:
+                    head_params.append(param)
+                else:
+                    backbone_params.append(param)
+            
+            optimizer = Adam([
+                {'params': backbone_params, 'lr': args.lr * 0.01},  # Much lower LR for pretrained model
+                {'params': head_params, 'lr': args.lr}  # Normal LR for projection head
+            ])
+    elif hasattr(model.module if args.use_ddp else model, 'f1') and hasattr(model.module if args.use_ddp else model, 'f2') and hasattr(model.module if args.use_ddp else model, 'attention'):
+        # Attention-based model with custom parameter groups
+        model_without_ddp = model.module if args.use_ddp else model
+        optimizer = Adam([
+            {'params': model_without_ddp.f1.parameters(), 'lr': args.lr * 0.1},
+            {'params': model_without_ddp.f2.parameters(), 'lr': args.lr * 0.1},
+            {'params': model_without_ddp.attention.parameters(), 'lr': args.lr * 0.01},
+            {'params': model_without_ddp.bnneck.parameters(), 'lr': args.lr},
+            {'params': model_without_ddp.fc.parameters(), 'lr': args.lr},
+        ])
+    elif args.model in ['convnextv2', 'hybrid_convnext_vit']:
+        # ConvNeXt or Hybrid model - use different LR for backbone vs head
+        model_without_ddp = model.module if args.use_ddp else model
+        backbone_params = []
+        head_params = []
+        
+        for name, param in model_without_ddp.named_parameters():
+            if 'fc' in name or 'fusion' in name:
+                head_params.append(param)
+            else:
+                backbone_params.append(param)
+        
+        optimizer = Adam([
+            {'params': backbone_params, 'lr': args.lr * 0.1},  # Lower LR for pretrained backbone
+            {'params': head_params, 'lr': args.lr}  # Higher LR for new head
+        ])
+    else:
+        # Simple optimizer for other models
+        optimizer = Adam(model.parameters(), lr=args.lr)
 
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
 
-    # Use 384x384 for ConvNeXtV2 and SwinV2, 224x224 for other models
-    img_size = 384 if args.model in ['convnextv2', 'swinv2'] else 224
-
-    # train_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-    #                                       transforms.Resize(256),
-    #                                       transforms.RandomResizedCrop(
-    #                                           224) if args.rand_resize else transforms.CenterCrop(224),
-    #                                       transforms.RandomHorizontalFlip(),
-    #                                       transforms.ToTensor(),
-    #                                       normalize])
+    # Use 384x384 for ConvNeXtV2, SwinV2 and Hybrid models, 224x224 for other models
+    img_size = 384 if args.model in ['convnextv2', 'swinv2', 'hybrid_convnext_vit'] else 224
+    resize_size = 432 if img_size == 384 else 256
 
     train_transform = transforms.Compose([
-        transforms.Lambda(lambda img: img.convert("RGB")),
-        transforms.Resize((img_size, img_size)),
+        transforms.Lambda(lambda image: image.convert('RGB')),
+        transforms.Resize(resize_size),
+        transforms.RandomCrop(img_size, padding=4) if args.rand_resize else transforms.CenterCrop(img_size),
         transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ColorJitter(brightness=0.1, contrast=0.1),
         transforms.ToTensor(),
         normalize
     ])
 
     test_transform = transforms.Compose([
-        transforms.Lambda(lambda img: img.convert("RGB")),
-        transforms.Resize((img_size, img_size)),
+        transforms.Lambda(lambda image: image.convert('RGB')),
+        transforms.Resize(resize_size),
+        transforms.CenterCrop(img_size),
         transforms.ToTensor(),
         normalize
     ])
@@ -223,13 +337,13 @@ def main(args):
                                             args.mask_dir, 'test') if args.mask_dir else None,
                                         transform=test_transform)
     elif args.dataset == 'isic':
-        train_dataset = ISICDataSet(data_dir=os.path.join(args.dataset_dir, 'ISIC-2017_Training_Data/ISIC-2017_Training_Data'),
+        train_dataset = ISICDataSet(data_dir=os.path.join(args.dataset_dir, 'ISIC-2017_Training_Data'),
                                     image_list_file=args.train_image_list,
                                     use_melanoma=not args.anomaly,  # whether or not to use melanoma in training
                                     mask_dir=os.path.join(
                                         args.mask_dir, 'train') if args.mask_dir else None,
                                     transform=train_transform)
-        test_dataset = ISICDataSet(data_dir=os.path.join(args.dataset_dir, 'ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data'),
+        test_dataset = ISICDataSet(data_dir=os.path.join(args.dataset_dir, 'ISIC-2017_Test_v2_Data'),
                                    image_list_file=args.test_image_list,
                                    mask_dir=os.path.join(
                                        args.mask_dir, 'test') if args.mask_dir else None,
@@ -241,6 +355,13 @@ def main(args):
         test_dataset = TBX11kDataSet(data_dir=os.path.join(args.dataset_dir, 'test'),
                                      csv_file=args.test_image_list,
                                      transform=test_transform)
+    elif args.dataset == 'vindr':
+        train_dataset = VINDRDataSet(data_dir=os.path.join(args.dataset_dir, 'train_data/train'),
+                                     csv_file=args.train_image_list,
+                                     transform=train_transform)
+        test_dataset = VINDRDataSet(data_dir=os.path.join(args.dataset_dir, 'test_data/test'),
+                                    csv_file=args.test_image_list,
+                                    transform=test_transform)
     else:
         raise NotImplementedError('Dataset not supported!')
 
@@ -249,6 +370,11 @@ def main(args):
     # construct targets while building your dataset. Some datasets (such as ImageFolder) have a
     # targets attribute with the same format.
     targets = train_dataset.labels
+
+    # Override batch_size if explicitly provided
+    if args.batch_size:
+        batch_size = args.batch_size
+        per_gpu_batch_size = batch_size
 
     # Setup samplers and dataloaders
     if args.use_ddp:
@@ -274,37 +400,44 @@ def main(args):
             persistent_workers=True if args.workers > 0 else False
         )
     else:
-        # Initialize hardness scores (all zeros at first)
-        hardness_scores = [0.0] * len(train_dataset)
-        num_hard = batch_size // 2  # e.g., half batch from hard samples
-        base_sampler = PKSampler(targets, p, k)
+        # Use RandomSampler or PKSampler based on use_random_sampler flag
+        if args.use_random_sampler:
+            train_sampler = RandomSampler(train_dataset)
+        else:
+            train_sampler = PKSampler(targets, p, k)
+        
         train_loader = DataLoader(
             train_dataset,
             batch_size=batch_size,
-            sampler=base_sampler,
+            sampler=train_sampler,
             num_workers=args.workers
         )
-        test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
-                                 shuffle=False,
-                                 num_workers=args.workers)
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=args.eval_batch_size,
+            shuffle=False,
+            num_workers=args.workers
+        )
 
+    # Track best model
+    best_metric = 0.0
+    best_epoch = 0
+    
     for epoch in range(1, args.epochs + 1):
         if args.use_ddp:
             train_loader.sampler.set_epoch(epoch)
+        
         if rank == 0:
-            print('Training...')
+            print(f'\n{"="*60}')
+            print(f'Training epoch {epoch}/{args.epochs}...')
+            print(f'{"="*60}')
+        
         train_epoch(model, optimizer, criterion, train_loader,
                     device, epoch, args.print_freq, rank=rank)
-
-        # Save only from rank 0
-        if rank == 0:
-            print('Saving...')
-            # Unwrap DDP model before saving
-            model_to_save = model.module if args.use_ddp else model
-            save(model_to_save, epoch, args.save_dir, args)
         
-        # Evaluate every 2 epochs
-        if epoch % 2 == 0:
+        # Evaluate every N epochs
+        eval_freq = args.eval_freq if hasattr(args, 'eval_freq') else 2
+        if epoch % eval_freq == 0:
             # Clear CUDA cache before evaluation to avoid OOM
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -314,12 +447,39 @@ def main(args):
                 dist.barrier()
             
             if rank == 0:
-                print('Evaluating...')
-            evaluate(model, test_loader, device, rank=rank, world_size=world_size)
+                print(f'\n{"="*60}')
+                print(f'Evaluating epoch {epoch}...')
+                print(f'{"="*60}')
+            
+            current_metric = evaluate(model, test_loader, device, rank=rank, world_size=world_size)
+            
+            # Save best model (only from rank 0)
+            if rank == 0:
+                model_to_save = model.module if args.use_ddp else model
+                
+                if current_metric > best_metric:
+                    best_metric = current_metric
+                    best_epoch = epoch
+                    print(f'\n🎯 New best model! Metric: {current_metric:.3f}% (epoch {epoch})')
+                    save(model_to_save, epoch, args.save_dir, args, is_best=True)
+                else:
+                    print(f'\nCurrent: {current_metric:.3f}%, Best: {best_metric:.3f}% (epoch {best_epoch})')
+                
+                # Also save periodic checkpoint every 10 epochs
+                if epoch % 10 == 0:
+                    save(model_to_save, epoch, args.save_dir, args, is_best=False)
             
             # Clear cache after evaluation
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+    
+    if rank == 0:
+        print(f'\n{"="*60}')
+        print('Training completed!')
+        print(f'{"="*60}')
+        print(f'Best model: Epoch {best_epoch} with metric: {best_metric:.3f}%')
+        print(f'Best model saved in: {args.save_dir}')
+        print(f'{"="*60}')
     
     # Cleanup DDP
     if args.use_ddp:
@@ -331,7 +491,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch Embedding Learning')
 
     parser.add_argument('--dataset', default='covid',
-                        help='Dataset to use (covid or isic)')
+                        help='Dataset to use (covid, isic, tbx11k, or vindr)')
     parser.add_argument('--dataset-dir', default='/data/brian.hu/COVID/data/',
                         help='Dataset directory path')
     parser.add_argument('--train-image-list', default='./train_split.txt',
@@ -345,9 +505,11 @@ def parse_args():
     parser.add_argument('--anomaly', action='store_true',
                         help='Train without anomaly class')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, convnextv2, or swinv2)')
+                        help='Model to use (densenet121, resnet50, convnextv2, swinv2, hybrid_convnext_vit, conceptclip, or resnet50_attention)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
+    parser.add_argument('--freeze-backbone', action='store_true',
+                        help='Freeze backbone weights (useful for ConceptCLIP)')
     parser.add_argument('-p', '--labels-per-batch', default=3, type=int,
                         help='Number of unique labels/classes per batch')
     parser.add_argument('-k', '--samples-per-label', default=16, type=int,
@@ -355,6 +517,8 @@ def parse_args():
     parser.add_argument('--eval-batch-size', default=64, type=int)
     parser.add_argument('--epochs', default=20, type=int, metavar='N',
                         help='Number of training epochs to run')
+    parser.add_argument('--eval-freq', default=2, type=int,
+                        help='Evaluate model every N epochs')
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                         help='Number of data loading workers')
     parser.add_argument('--lr', default=0.0001,
@@ -369,6 +533,10 @@ def parse_args():
                         help='Model save directory')
     parser.add_argument('--resume', default='',
                         help='Resume from checkpoint')
+    parser.add_argument('--batch-size', default=None, type=int,
+                        help='Batch size for training (overrides p*k calculation)')
+    parser.add_argument('--use-random-sampler', action='store_true',
+                        help='Use RandomSampler instead of PKSampler (for non-DDP training)')
     parser.add_argument('--use-ddp', action='store_true',
                         help='Use Distributed Data Parallel training')
 

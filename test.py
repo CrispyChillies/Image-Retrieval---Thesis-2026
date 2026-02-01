@@ -806,6 +806,195 @@ def evaluate_conceptclip(model, processor, loader, device, args):
                  **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
         print(f'\n>> Results saved to {save_path}.npz')
 
+def compute_map_multilabel(dists, labels, threshold=0.5):
+    """
+    Tính mAP cho dữ liệu đa nhãn.
+    Args:
+        dists: Ma trận khoảng cách (batch_size, batch_size)
+        labels: Ma trận nhãn multi-hot (batch_size, num_classes)
+        threshold: Ngưỡng Jaccard để coi là một kết quả 'đúng'
+    """
+    labels = labels.cpu().numpy()
+    dists = dists.cpu().numpy()
+    nq = labels.shape[0]
+    aps = []
+
+    # Tính toán ma trận Jaccard cho toàn bộ tập test
+    # Intersection / Union
+    intersection = np.dot(labels, labels.T)
+    row_sums = labels.sum(axis=1).reshape(-1, 1)
+    union = row_sums + row_sums.T - intersection
+    jaccard_matrix = intersection / (union + 1e-8)
+
+    # Lấy thứ tự ưu tiên từ khoảng cách (giá trị càng lớn càng gần)
+    ranks = np.argsort(-dists, axis=0) 
+
+    for i in range(nq):
+        # Định nghĩa các ảnh liên quan là những ảnh có Jaccard > threshold
+        # Loại bỏ chính nó (i)
+        binary_relevance = (jaccard_matrix[i] > threshold).astype(float)
+        binary_relevance[i] = 0 
+        
+        if np.sum(binary_relevance) > 0:
+            # Sử dụng hàm chuẩn của sklearn để tính AP cho query i
+            # ranks[:, i] là danh sách các index ảnh được sắp xếp theo độ gần với query i
+            sorted_relevance = binary_relevance[ranks[:, i]]
+            
+            # Tính AP
+            count_pos = 0
+            ap = 0
+            for rank, is_rel in enumerate(sorted_relevance):
+                if is_rel > 0:
+                    count_pos += 1
+                    precision_at_rank = count_pos / (rank + 1)
+                    ap += precision_at_rank
+            aps.append(ap / np.sum(binary_relevance))
+
+    return np.mean(aps) if aps else 0        
+
+@torch.no_grad()
+def evaluate_multilabels(model, loader, device, args):
+    model.eval()
+    embeds, labels = [], []
+
+    for data in loader:
+        samples = data[0].to(device)
+        _labels = data[1].to(device) 
+        out = model(samples)
+        
+        embedding = out[0] if isinstance(out, tuple) else out
+        embeds.append(embedding)
+        labels.append(_labels)
+
+    embeds = torch.cat(embeds, dim=0)
+    labels = torch.cat(labels, dim=0)
+
+    # Sử dụng Cosine Similarity
+    embeds_norm = torch.nn.functional.normalize(embeds, p=2, dim=1)
+    dists = torch.mm(embeds_norm, embeds_norm.t())
+    dists.fill_diagonal_(-float('inf'))
+
+    print('\n--- VinDr-CXR Retrieval Results ---')
+    
+    # 1. Tính mAP (Giữ nguyên từ code trước)
+    for t in [0.25, 0.5]:
+        mAP_val = compute_map_multilabel(dists, labels, threshold=t)
+        print(f'>> mAP (Jaccard > {t}): {mAP_val * 100.0:.2f}%')
+
+    # 2. Tính Precision@K và Recall@K chuyên sâu
+    k_values = [1, 5, 10, 15, 20]
+    ranks = torch.argsort(dists, dim=1, descending=True)
+    
+    # Chuyển sang CPU numpy để tính toán nhanh hơn
+    labels_np = labels.cpu().numpy()
+    ranks_np = ranks.cpu().numpy()
+    num_queries = labels_np.shape[0]
+
+    print(f'\n{"K":<5} | {"Precision@K":<15} | {"Recall@K":<15}')
+    print("-" * 40)
+
+    for k in k_values:
+        total_precision = 0
+        total_recall = 0
+        
+        for i in range(num_queries):
+            query_label = labels_np[i]
+            # Lấy nhãn của top K ảnh được truy vấn
+            top_k_labels = labels_np[ranks_np[i, :k]]
+            
+            # Trong đa nhãn:
+            # - Precision@K: Tỉ lệ ảnh trong top K có ít nhất 1 nhãn trùng với Query
+            # - Recall@K: Khả năng tìm thấy ít nhất 1 ảnh trùng nhãn trong top K (như code cũ)
+            
+            # Kiểm tra từng ảnh trong top K xem có "liên quan" không (chung ít nhất 1 nhãn)
+            # (top_k_labels * query_label).sum(axis=1) > 0 trả về mảng Boolean [k]
+            matches = (top_k_labels * query_label).sum(axis=1) > 0
+            num_matches = np.sum(matches)
+            
+            # Precision@K cho query i
+            total_precision += (num_matches / k)
+            
+            # Recall@K cho query i: 1 nếu có ít nhất 1 match, 0 nếu không
+            if num_matches > 0:
+                total_recall += 1
+
+        avg_precision = (total_precision / num_queries) * 100
+        avg_recall = (total_recall / num_queries) * 100
+        
+        print(f"{k:<5} | {avg_precision:<15.2f}% | {avg_recall:<15.2f}%")
+
+    if args.save_dir:
+        os.makedirs(args.save_dir, exist_ok=True)
+        save_path = os.path.join(args.save_dir, 'evaluation_results.npz')
+        np.savez(save_path, embeds=embeds.cpu().numpy(), labels=labels.cpu().numpy())
+        print(f'\n>> Results saved to {save_path}')
+
+
+@torch.no_grad()
+def evaluate(model, loader, device, args):
+    model.eval()
+    embeds, labels = [], []
+
+    for data in loader:
+        samples = data[0].to(device)
+        _labels = data[1].to(device)
+        out = model(samples)
+        if isinstance(out, tuple):
+            embeds.append(out[0])
+        else:
+            embeds.append(out)
+        labels.append(_labels)
+
+    embeds = torch.cat(embeds, dim=0)
+    labels = torch.cat(labels, dim=0)
+
+    dists = -torch.cdist(embeds, embeds)
+    dists.fill_diagonal_(float('-inf'))
+
+    # top-k accuracy (i.e. R@K)
+    kappas = [1, 5, 10]
+    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = torch.stack(accuracy).cpu().numpy()
+    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+
+    # mean average precision and mean precision (i.e. mAP and pr)
+    ranks = torch.argsort(dists, dim=0, descending=True)
+    mAP, _, pr, _ = compute_map(ranks.cpu().numpy(),  labels.cpu().numpy(), kappas)
+    print('>> mAP: {:.2f}%'.format(mAP * 100.0))
+    print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
+    
+    # Classification metrics with majority voting
+    print('\n>> Classification Metrics (Majority Voting):')
+    k_values = [1, 5, 10, 15, 20]
+    classification_results = compute_classification_metrics(labels, dists, k_values)
+    
+    for k in k_values:
+        metrics = classification_results[k]
+        print(f'\n>> Top-{k} Retrieved Images:')
+        print(f'   Accuracy: {metrics["accuracy"]:.2f}%')
+        print(f'   Precision (macro): {metrics["precision_macro"]:.2f}%')
+        print(f'   Recall (macro): {metrics["recall_macro"]:.2f}%')
+        print(f'   F1 (macro): {metrics["f1_macro"]:.2f}%')
+        print(f'   Precision (weighted): {metrics["precision_weighted"]:.2f}%')
+        print(f'   Recall (weighted): {metrics["recall_weighted"]:.2f}%')
+        print(f'   F1 (weighted): {metrics["f1_weighted"]:.2f}%')
+
+    # Save results
+    if args.save_dir:
+        if not os.path.exists(args.save_dir):
+            os.makedirs(args.save_dir)
+        file_name = args.resume.split('/')[-1].split('.')[0]
+
+        save_path = os.path.join(args.save_dir, file_name)
+        # Convert classification_results dict to numpy arrays for saving
+        classification_k_values = list(classification_results.keys())
+        classification_metrics = {k: v for k, v in classification_results.items()}
+        
+        np.savez(save_path, embeds=embeds.cpu().numpy(),
+                 labels=labels.cpu().numpy(), dists=-dists.cpu().numpy(),
+                 kappas=kappas, acc=accuracy, mAP=mAP, pr=pr,
+                 classification_k_values=classification_k_values,
+                 **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
 
 @torch.no_grad()
 def evaluate(model, loader, device, args):
