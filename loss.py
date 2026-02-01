@@ -4,6 +4,7 @@
 '''
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class TripletMarginLoss(nn.Module):
@@ -107,3 +108,78 @@ def _get_anchor_positive_triplet_mask(labels):
 
 def _get_anchor_negative_triplet_mask(labels):
     return labels.unsqueeze(0) != labels.unsqueeze(1)
+
+class WeightedMultiLabelTripletLoss(nn.Module):
+    def __init__(self, margin=0.3):
+        super(WeightedMultiLabelTripletLoss, self).__init__()
+        self.margin = margin
+
+    def compute_jaccard_sim(self, labels):
+        """
+        Tính toán ma trận Jaccard Similarity cho toàn bộ batch.
+        labels shape: (batch_size, num_classes)
+        """
+        # Giao (Intersection): sum of element-wise min
+        intersection = torch.matmul(labels, labels.t())
+        
+        # Tổng số nhãn của mỗi ảnh
+        label_sums = labels.sum(dim=1).view(-1, 1)
+        
+        # Hợp (Union): |A| + |B| - |A \cap B|
+        union = label_sums + label_sums.t() - intersection
+        
+        # Jaccard similarity
+        jaccard = intersection / (union + 1e-8)
+        return jaccard
+
+    def forward(self, embeddings, labels):
+        # 1. Chuẩn hóa embedding về unit sphere (giúp tính khoảng cách ổn định hơn)
+        embeddings = F.normalize(embeddings, p=2, dim=1)
+        
+        # 2. Tính ma trận khoảng cách Pairwise Euclidean
+        # dist(i,j) = sqrt(2 - 2 * cos_sim) khi đã normalize L2
+        dist_matrix = torch.cdist(embeddings, embeddings, p=2)
+        
+        # 3. Tính ma trận Jaccard Similarity
+        jaccard_matrix = self.compute_jaccard_sim(labels)
+        
+        loss = 0
+        count = 0
+        batch_size = embeddings.size(0)
+
+        # 4. Triplet Mining dựa trên độ tương đồng nhãn
+        # Với mỗi anchor i, ta tìm positive p và negative n
+        for i in range(batch_size):
+            # Positive là những ảnh có Jaccard similarity > 0
+            # Negative là những ảnh có Jaccard similarity thấp hơn hoặc bằng 0
+            
+            # Để đơn giản và hiệu quả, ta lấy:
+            # Anchor-Positive: Cặp có Jaccard cao nhất (khác chính nó)
+            # Anchor-Negative: Cặp có Jaccard thấp nhất
+            
+            # Lấy các index có độ tương đồng lớn hơn 0 (trừ chính nó)
+            pos_mask = (jaccard_matrix[i] > 0)
+            pos_mask[i] = False # Loại bỏ chính mình
+            
+            neg_mask = (jaccard_matrix[i] == 0)
+
+            if not pos_mask.any() or not neg_mask.any():
+                continue
+
+            # Tính trọng số: Càng giống nhau về nhãn, weight càng cao
+            # Giúp kéo các ca bệnh cực kỳ giống nhau lại gần nhau mạnh mẽ hơn
+            weight_p = jaccard_matrix[i][pos_mask]
+            
+            d_p = dist_matrix[i][pos_mask]
+            d_n = dist_matrix[i][neg_mask]
+
+            # Hard Negative Mining: Lấy d_n nhỏ nhất (ca dễ nhầm nhất)
+            hard_d_n = d_n.min()
+            
+            # Tính loss có trọng số
+            # d_p - hard_d_n + margin
+            current_loss = F.relu(d_p - hard_d_n + self.margin)
+            loss += (current_loss * weight_p).mean()
+            count += 1
+
+        return loss / (count + 1e-8), torch.tensor(0.0) 

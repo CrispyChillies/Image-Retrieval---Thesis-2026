@@ -12,6 +12,7 @@ from torch.utils.data import Dataset
 # from segmentation import segment_and_mask
 import numpy as np
 import cv2
+import pandas as pd
 
 
 class ISICDataSet(Dataset):
@@ -180,92 +181,49 @@ class TBX11kDataSet(Dataset):
         return len(self.image_names)
 
 
-# VINDR Dataset for 4-class classification
 class VINDRDataSet(Dataset):
     def __init__(self, data_dir, csv_file, transform=None):
         """
         Args:
-            data_dir: path to image directory.
-            csv_file: path to the csv file (should have image file names and labels).
-            transform: optional transform to be applied on a sample.
+            data_dir: Đường dẫn đến thư mục chứa ảnh (.png).
+            csv_file: Đường dẫn đến file CSV (chứa image_id và các cột label).
+            transform: Các phép biến đổi ảnh (Augmentation).
         """
-        self.image_names = []
-        self.labels = []
+        self.data_dir = data_dir
         self.transform = transform
-
-        # Map label string to integer
-        self.label_map = {
-            "Pneumonia": 0,
-            "Tuberculosis": 1,
-            "Other diseases": 2,
-            "No finding": 3
-        }
-
-        import csv
-        with open(csv_file, newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                # Adjust these keys if your CSV uses different column names
-                fname = row.get("image_id") or row.get("fname") or row[list(row.keys())[0]]
-                # Ensure .png extension for VINDR images
-                if not fname.lower().endswith('.png'):
-                    fname = fname + '.png'
-                label = row.get("label") or row.get("finding") or row[list(row.keys())[1]]
-                if label not in self.label_map:
-                    label = "Other diseases"
-                img_path = os.path.join(data_dir, fname)
-                self.image_names.append(img_path)
-                self.labels.append(self.label_map[label])
+        
+        self.labels = [
+            "Aortic enlargement", "Cardiomegaly", 
+            "Pleural effusion", "Pleural thickening", 
+            "Lung Opacity", "No finding"
+        ]
+        
+        df = pd.read_csv(csv_file)
+        self.data = df.groupby("image_id")[self.labels].max().reset_index()
+        
+        self.image_ids = self.data["image_id"].tolist()
+        self.labels = self.data[self.labels].values
 
     def __getitem__(self, index):
-        image_name = self.image_names[index]
-        image = Image.open(image_name).convert('RGB')
+        img_id = self.image_ids[index]
+        img_path = os.path.join(self.data_dir, f"{img_id}.png")
+        
+        image = Image.open(img_path).convert('RGB')
+        
         label = self.labels[index]
+        
         if self.transform is not None:
             image = self.transform(image)
-        return image, torch.tensor(label, dtype=torch.long)
+
+        return image, torch.tensor(label, dtype=torch.float32)
 
     def __len__(self):
-        return len(self.image_names)
+        return len(self.image_ids)
 
-# Test main function for ChestXrayDataSet
 # if __name__ == "__main__":
-#     import matplotlib.pyplot as plt
-#     # Example usage: update these paths as needed
-#     data_dir = "./samples"  # directory containing images
-#     image_list_file = "./train_split.txt"  # file listing images and labels
-#     dataset = ChestXrayDataSet(data_dir, image_list_file, use_covid=True, mask_dir=None, transform=None)
-#     print(f"Total images in dataset: {len(dataset)}")
-#     # Load a sample image
-#     img, label = dataset[0]
-#     print(f"Sample label: {label}")
-#     # Show the image
-#     plt.imshow(img)
-#     plt.title(f"Label: {label}")
-#     plt.axis('off')
-#     plt.show()
+#     dataset = VINDRDataSet(data_dir='', csv_file='/home/aaronpham5504/Coding/Image-Retrieval---Thesis-2026/vindr/image_labels_train.csv')
+#     img, target = dataset[0]
 
-if __name__ == "__main__":
-    # Example usage for VINDRDataSet
-    data_dir = "/kaggle/input/vindr-cxr-physionet/train_data/train"  # Update to your images directory
-    csv_file = "/kaggle/input/labeling-files-for-vindr/image_labels_train.csv"  # Update to your CSV path
-    dataset = VINDRDataSet(data_dir, csv_file)
-    print(f"Total images in dataset: {len(dataset)}")
-
-    # Count samples per class
-    from collections import Counter
-    label_counts = Counter(dataset.labels)
-    class_names = ["Pneumonia", "Tuberculosis", "Other diseases", "No finding"]
-    for idx, name in enumerate(class_names):
-        print(f"{name}: {label_counts[idx]} samples")
-
-    # Show a few samples
-    for i in range(3):
-        img, label = dataset[i]
-        print(f"Sample {i}: label={label} ({class_names[label]})")
-
-    # Check for PKSampler compatibility
-    k = 8  # Set your intended k
-    for idx, name in enumerate(class_names):
-        if label_counts[idx] < k:
-            print(f"Warning: Class '{name}' has fewer than {k} samples ({label_counts[idx]} found).")
+#     print(f"Image shape: {img.size}")
+#     print(f"Target vector: {target}")
+#     print(f"Labels mapping: {dataset.target_columns}")

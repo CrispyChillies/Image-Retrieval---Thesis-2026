@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
 
-from loss import TripletMarginLoss
+from loss import TripletMarginLoss, WeightedMultiLabelTripletLoss
 from sampler import PKSampler
 from model import ResNet50, DenseNet121, ConvNeXtV2, HybridConvNeXtViT, ConceptCLIPBackbone, Resnet50_with_Attention
 
@@ -48,13 +48,6 @@ def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_f
         optimizer.zero_grad()
         samples, targets = data[0].to(device), data[1].to(device)
 
-        # Check if model supports attention output
-        # try:
-        #     embeddings, attn = model(samples, return_attention=True)
-        #     has_attention = True
-        # except (TypeError, AttributeError):
-        #     embeddings = model(samples)
-        #     has_attention = False
         output = model(samples)
         if isinstance(output, tuple) and len(output) == 2:
             embeddings, attn = output
@@ -109,6 +102,38 @@ def retrieval_accuracy(output, target, topk=(1,)):
     return res
 
 
+# @torch.no_grad()
+# def evaluate(model, loader, device):
+#     model.eval()
+#     embeds, labels = [], []
+
+#     for data in loader:
+#         samples = data[0].to(device)
+#         _labels = data[1].to(device)
+#         out = model(samples)
+#         # If model returns a tuple (embeddings, mask), use only embeddings
+#         if isinstance(out, tuple):
+#             embeds.append(out[0])
+#         else:
+#             embeds.append(out)
+#         labels.append(_labels)
+
+#     embeds = torch.cat(embeds, dim=0)
+#     labels = torch.cat(labels, dim=0)
+
+#     dists = -torch.cdist(embeds, embeds)
+#     dists.fill_diagonal_(float('-inf'))
+
+#     # top-k accuracy (i.e. R@K)
+    
+#     accuracy = retrieval_accuracy(dists, labels)[0].item()
+
+#     print('>> R@1 accuracy: {:.3f}%'.format(accuracy))
+#     return accuracy
+
+from sklearn.metrics import average_precision_score
+import numpy as np
+
 @torch.no_grad()
 def evaluate(model, loader, device):
     model.eval()
@@ -118,24 +143,34 @@ def evaluate(model, loader, device):
         samples = data[0].to(device)
         _labels = data[1].to(device)
         out = model(samples)
-        # If model returns a tuple (embeddings, mask), use only embeddings
-        if isinstance(out, tuple):
-            embeds.append(out[0])
-        else:
-            embeds.append(out)
-        labels.append(_labels)
+        
+        embedding = out[0] if isinstance(out, tuple) else out
+        embeds.append(embedding.cpu())
+        labels.append(_labels.cpu())
 
     embeds = torch.cat(embeds, dim=0)
     labels = torch.cat(labels, dim=0)
 
-    dists = -torch.cdist(embeds, embeds)
-    dists.fill_diagonal_(float('-inf'))
+    embeds_norm = torch.nn.functional.normalize(embeds, p=2, dim=1)
+    sim_matrix = torch.mm(embeds_norm, embeds_norm.t())
+    
+    sim_matrix.fill_diagonal_(-1)
 
-    # top-k accuracy (i.e. R@K)
-    accuracy = retrieval_accuracy(dists, labels)[0].item()
+    aps = []
+    for i in range(len(embeds)):
+        intersect = (labels[i] * labels).sum(dim=1)
+        union = (labels[i] + labels).clamp(max=1).sum(dim=1)
+        jaccard = intersect / (union + 1e-8)
 
-    print('>> R@1 accuracy: {:.3f}%'.format(accuracy))
-    return accuracy
+        binary_relevance = (jaccard > 0.4).float().numpy()
+        
+        if np.sum(binary_relevance) > 0:
+            ap = average_precision_score(binary_relevance, sim_matrix[i].numpy())
+            aps.append(ap)
+
+    mean_ap = np.mean(aps) * 100
+    print(f'>> Mean Average Precision (mAP): {mean_ap:.3f}%')
+    return mean_ap
 
 
 def save(model, epoch, save_dir, args, is_best=False):
@@ -204,7 +239,7 @@ def main(args):
 
     model.to(device)
 
-    criterion = TripletMarginLoss(margin=args.margin)
+    criterion = WeightedMultiLabelTripletLoss(margin=args.margin)
     
     # Setup optimizer with different learning rates for different model parts
     if args.model == 'conceptclip':
@@ -264,12 +299,12 @@ def main(args):
     resize_size = 432 if img_size == 384 else 256
 
     train_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-                                          transforms.Resize(resize_size),
-                                          transforms.RandomResizedCrop(
-                                              img_size) if args.rand_resize else transforms.CenterCrop(img_size),
-                                          transforms.RandomHorizontalFlip(),
-                                          transforms.ToTensor(),
-                                          normalize])
+                                        transforms.Resize(resize_size),
+                                        transforms.RandomCrop(img_size, padding=4) if args.rand_resize else transforms.CenterCrop(img_size),
+                                        transforms.RandomHorizontalFlip(p=0.5),
+                                        transforms.ColorJitter(brightness=0.1, contrast=0.1), 
+                                        transforms.ToTensor(),
+                                        normalize])
 
     test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
                                          transforms.Resize(resize_size),
@@ -333,24 +368,9 @@ def main(args):
                              num_workers=args.workers)
     
     # Track best model
-    best_accuracy = 0.0
+    best_mAP = 0.0
     best_epoch = 0
     for epoch in range(1, args.epochs + 1):
-
-        # ---- Unfreeze backbone ----
-        # if epoch == 1:
-        #     freeze_backbone(model)
-        #     freeze_attention(model)
-        #     print("Stage 1: Warm-up (freeze backbone + attention)")
-
-        # if epoch == 11:
-        #     unfreeze_attention(model)
-        #     print("Stage 2: Attention learning")
-
-        # if epoch == 21:
-        #     unfreeze_backbone(model)
-        #     print("Stage 3: Full fine-tuning")
-
         print(f'\n{"="*60}')
         print(f'Training epoch {epoch}/{args.epochs}...')
         print(f'{"="*60}')
@@ -369,17 +389,19 @@ def main(args):
             print(f'\n{"="*60}')
             print(f'Evaluating epoch {epoch}...')
             print(f'{"="*60}')
-            accuracy = evaluate(model, test_loader, device)
+            # accuracy = evaluate(model, test_loader, device)
+            current_mAP = evaluate(model, test_loader, device)
             
             # Save if best model
-            if accuracy > best_accuracy:
-                best_accuracy = accuracy
+            if current_mAP > best_mAP:
+                best_mAP = current_mAP
                 best_epoch = epoch
-                print(f'\n🎯 New best model! Accuracy: {accuracy:.3f}% (epoch {epoch})')
+                print(f'\n🎯 New best model! mAP: {current_mAP:.3f}% (epoch {epoch})')
+                
+                # Lưu checkpoint tốt nhất
                 save(model, epoch, args.save_dir, args, is_best=True)
             else:
-                print(f'\nCurrent: {accuracy:.3f}%, Best: {best_accuracy:.3f}% (epoch {best_epoch})')
-            
+                print(f'\nCurrent: {current_mAP:.3f}%, Best: {best_mAP:.3f}% (epoch {best_epoch})')
             # Also save periodic checkpoint
             if epoch % 10 == 0:
                 save(model, epoch, args.save_dir, args, is_best=False)
@@ -393,7 +415,7 @@ def main(args):
     print(f'\n{"="*60}')
     print('Training completed!')
     print(f'{"="*60}')
-    print(f'Best model: Epoch {best_epoch} with R@1 accuracy: {best_accuracy:.3f}%')
+    print(f'Best model: Epoch {best_epoch} with mAP: {best_mAP:.3f}%')
     print(f'Best model saved in: {args.save_dir}')
     print(f'{"="*60}')
 
