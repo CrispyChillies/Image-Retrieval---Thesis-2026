@@ -252,7 +252,7 @@ def evaluate_multilabels(model, loader, device, args):
 
     for data in loader:
         samples = data[0].to(device)
-        _labels = data[1].to(device) # Đây là multi-hot vector [0, 1, 0...]
+        _labels = data[1].to(device) 
         out = model(samples)
         
         embedding = out[0] if isinstance(out, tuple) else out
@@ -262,43 +262,66 @@ def evaluate_multilabels(model, loader, device, args):
     embeds = torch.cat(embeds, dim=0)
     labels = torch.cat(labels, dim=0)
 
-    # Sử dụng Cosine Similarity thay vì Euclidean cho Retrieval
+    # Sử dụng Cosine Similarity
     embeds_norm = torch.nn.functional.normalize(embeds, p=2, dim=1)
     dists = torch.mm(embeds_norm, embeds_norm.t())
-    
-    # Loại bỏ đường chéo
     dists.fill_diagonal_(-float('inf'))
 
     print('\n--- VinDr-CXR Retrieval Results ---')
     
-    # 1. Tính mAP với các ngưỡng Jaccard khác nhau
+    # 1. Tính mAP (Giữ nguyên từ code trước)
     for t in [0.25, 0.5]:
         mAP_val = compute_map_multilabel(dists, labels, threshold=t)
         print(f'>> mAP (Jaccard > {t}): {mAP_val * 100.0:.2f}%')
 
-    # 2. Tính Recall@K (Truyền thống)
-    # Với đa nhãn, R@K thường được tính là: Có ít nhất 1 nhãn trùng trong Top-K
-    kappas = [1, 5, 10]
+    # 2. Tính Precision@K và Recall@K chuyên sâu
+    k_values = [1, 5, 10, 15, 20]
     ranks = torch.argsort(dists, dim=1, descending=True)
     
-    for k in kappas:
-        top_k_idx = ranks[:, :k]
-        # Kiểm tra xem top K có ảnh nào chung ít nhất 1 nhãn với Query không
-        correct = 0
-        for i in range(len(labels)):
-            query_label = labels[i]
-            retrieved_labels = labels[top_k_idx[i]]
-            # Nếu tổng tích vô hướng > 0 nghĩa là có ít nhất 1 nhãn trùng
-            if (retrieved_labels * query_label).sum() > 0:
-                correct += 1
-        print(f'>> Recall@{k} (At least 1 match): {correct/len(labels)*100.0:.2f}%')
+    # Chuyển sang CPU numpy để tính toán nhanh hơn
+    labels_np = labels.cpu().numpy()
+    ranks_np = ranks.cpu().numpy()
+    num_queries = labels_np.shape[0]
 
-    # Lưu kết quả
+    print(f'\n{"K":<5} | {"Precision@K":<15} | {"Recall@K":<15}')
+    print("-" * 40)
+
+    for k in k_values:
+        total_precision = 0
+        total_recall = 0
+        
+        for i in range(num_queries):
+            query_label = labels_np[i]
+            # Lấy nhãn của top K ảnh được truy vấn
+            top_k_labels = labels_np[ranks_np[i, :k]]
+            
+            # Trong đa nhãn:
+            # - Precision@K: Tỉ lệ ảnh trong top K có ít nhất 1 nhãn trùng với Query
+            # - Recall@K: Khả năng tìm thấy ít nhất 1 ảnh trùng nhãn trong top K (như code cũ)
+            
+            # Kiểm tra từng ảnh trong top K xem có "liên quan" không (chung ít nhất 1 nhãn)
+            # (top_k_labels * query_label).sum(axis=1) > 0 trả về mảng Boolean [k]
+            matches = (top_k_labels * query_label).sum(axis=1) > 0
+            num_matches = np.sum(matches)
+            
+            # Precision@K cho query i
+            total_precision += (num_matches / k)
+            
+            # Recall@K cho query i: 1 nếu có ít nhất 1 match, 0 nếu không
+            if num_matches > 0:
+                total_recall += 1
+
+        avg_precision = (total_precision / num_queries) * 100
+        avg_recall = (total_recall / num_queries) * 100
+        
+        print(f"{k:<5} | {avg_precision:<15.2f}% | {avg_recall:<15.2f}%")
+
     if args.save_dir:
         os.makedirs(args.save_dir, exist_ok=True)
         save_path = os.path.join(args.save_dir, 'evaluation_results.npz')
         np.savez(save_path, embeds=embeds.cpu().numpy(), labels=labels.cpu().numpy())
-        print(f'>> Results saved to {save_path}')
+        print(f'\n>> Results saved to {save_path}')
+
 
 @torch.no_grad()
 def evaluate(model, loader, device, args):
