@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
 
-from model import ConvNeXtV2, ResNet50, DenseNet121, HybridConvNeXtViT, ConceptCLIPBackbone, Resnet50_with_Attention
+from model import ConvNeXtV2, ResNet50, DenseNet121, HybridConvNeXtViT, ConceptCLIPBackbone, Resnet50_with_Attention, MedSigLIPRetrieval
 
 
 def retrieval_accuracy(output, target, topk=(1,)):
@@ -471,7 +471,11 @@ def main(args):
             processor_normalize=True
         )
     elif args.model == 'medsiglip':
-        model = MedSigLip(embedding_dim=args.embedding_dim)
+        model = MedSigLIPRetrieval(
+            model_name="google/medsiglip-448",
+            embed_dim=args.embedding_dim,
+            zero_shot=args.zero_shot if hasattr(args, 'zero_shot') else True
+        )
     elif args.model == 'resnet50_attention':
         model = Resnet50_with_Attention(embedding_dim=args.embedding_dim)
     else:
@@ -495,8 +499,13 @@ def main(args):
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
 
-    # Use 384x384 for ConvNeXtV2, MedSigLip and Hybrid model, 224x224 for other models
-    img_size = 384 if args.model in ['convnextv2', 'hybrid_convnext_vit', 'medsiglip'] else 224
+    # Use 448x448 for MedSigLIP, 384x384 for ConvNeXtV2 and Hybrid model, 224x224 for other models
+    if args.model == 'medsiglip':
+        img_size = 448
+    elif args.model in ['convnextv2', 'hybrid_convnext_vit']:
+        img_size = 384
+    else:
+        img_size = 224
 
     test_transform = transforms.Compose([
         transforms.Lambda(lambda img: img.convert('RGB')),

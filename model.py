@@ -6,6 +6,7 @@ import timm
 
 from torchvision.models import resnet50
 from torchvision.models.resnet import Bottleneck
+from transformers import AutoProcessor, AutoModel
 
 
 class ResNet50(nn.Module):
@@ -441,3 +442,55 @@ class Resnet50_with_Attention(nn.Module):
 
         final_embedding = self.g(localized_feat)
         return final_embedding, mask
+    
+
+class MedSigLIPRetrieval(nn.Module):
+    def __init__(self, model_name="google/medsiglip-448", embed_dim=None, unfreeze_layers=0, zero_shot=False):
+        super().__init__()
+        full_model = AutoModel.from_pretrained(model_name)
+        self.backbone = full_model.vision_model 
+        self.zero_shot = zero_shot
+        
+        if not zero_shot:
+            # --- Fine-tuning mode: Freeze backbone, unfreeze some layers ---
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+                
+            if unfreeze_layers > 0:
+                for layer in self.backbone.encoder.layers[-unfreeze_layers:]:
+                    for param in layer.parameters():
+                        param.requires_grad = True
+                
+                for param in self.backbone.post_layernorm.parameters():
+                    param.requires_grad = True
+
+            # Projection head for fine-tuning
+            hidden_size = self.backbone.config.hidden_size
+            self.projection = nn.Sequential(
+                nn.Linear(hidden_size, 512),
+                nn.LayerNorm(512),
+                nn.ReLU(),
+                nn.Linear(512, embed_dim if embed_dim else 512)
+            )
+        else:
+            # --- Zero-shot mode: Use pretrained features only ---
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+            
+            # Optional: add simple projection if embed_dim is specified
+            if embed_dim is not None:
+                hidden_size = self.backbone.config.hidden_size
+                self.projection = nn.Linear(hidden_size, embed_dim)
+            else:
+                self.projection = None
+
+    def forward(self, x):
+        outputs = self.backbone(pixel_values=x)
+        features = outputs.pooler_output 
+        
+        if self.projection is not None:
+            embeddings = self.projection(features)
+        else:
+            embeddings = features
+            
+        return torch.nn.functional.normalize(embeddings, p=2, dim=1)
