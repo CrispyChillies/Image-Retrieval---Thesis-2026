@@ -185,7 +185,7 @@ class HybridConvNeXtViT(nn.Module):
     
     Features:
     - ConvNeXtV2-Base backbone with MXA Block (Channel + Spatial Attention)
-    - ViT-B/16 backbone with Token Pooling
+    - ViT-B/16 backbone with Token Pooling  
     - Feature Fusion module
     - Global Average Pooling for final feature extraction
     """

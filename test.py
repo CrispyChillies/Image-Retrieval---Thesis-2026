@@ -262,23 +262,19 @@ def evaluate_multilabels(model, loader, device, args):
     embeds = torch.cat(embeds, dim=0)
     labels = torch.cat(labels, dim=0)
 
-    # Sử dụng Cosine Similarity
     embeds_norm = torch.nn.functional.normalize(embeds, p=2, dim=1)
     dists = torch.mm(embeds_norm, embeds_norm.t())
     dists.fill_diagonal_(-float('inf'))
 
     print('\n--- VinDr-CXR Retrieval Results ---')
     
-    # 1. Tính mAP (Giữ nguyên từ code trước)
     for t in [0.25, 0.5]:
         mAP_val = compute_map_multilabel(dists, labels, threshold=t)
         print(f'>> mAP (Jaccard > {t}): {mAP_val * 100.0:.2f}%')
 
-    # 2. Tính Precision@K và Recall@K chuyên sâu
     k_values = [1, 5, 10, 15, 20]
     ranks = torch.argsort(dists, dim=1, descending=True)
-    
-    # Chuyển sang CPU numpy để tính toán nhanh hơn
+
     labels_np = labels.cpu().numpy()
     ranks_np = ranks.cpu().numpy()
     num_queries = labels_np.shape[0]
@@ -292,22 +288,12 @@ def evaluate_multilabels(model, loader, device, args):
         
         for i in range(num_queries):
             query_label = labels_np[i]
-            # Lấy nhãn của top K ảnh được truy vấn
             top_k_labels = labels_np[ranks_np[i, :k]]
-            
-            # Trong đa nhãn:
-            # - Precision@K: Tỉ lệ ảnh trong top K có ít nhất 1 nhãn trùng với Query
-            # - Recall@K: Khả năng tìm thấy ít nhất 1 ảnh trùng nhãn trong top K (như code cũ)
-            
-            # Kiểm tra từng ảnh trong top K xem có "liên quan" không (chung ít nhất 1 nhãn)
-            # (top_k_labels * query_label).sum(axis=1) > 0 trả về mảng Boolean [k]
             matches = (top_k_labels * query_label).sum(axis=1) > 0
             num_matches = np.sum(matches)
-            
-            # Precision@K cho query i
+
             total_precision += (num_matches / k)
             
-            # Recall@K cho query i: 1 nếu có ít nhất 1 match, 0 nếu không
             if num_matches > 0:
                 total_recall += 1
 
@@ -374,8 +360,7 @@ def evaluate(model, loader, device, args):
 
     # Save results
     if args.save_dir:
-        if not os.path.exists(args.save_dir):
-            os.makedirs(args.save_dir)
+        os.makedirs(args.save_dir, exist_ok=True)
         file_name = args.resume.split('/')[-1].split('.')[0]
 
         save_path = os.path.join(args.save_dir, file_name)
@@ -388,6 +373,82 @@ def evaluate(model, loader, device, args):
                  kappas=kappas, acc=accuracy, mAP=mAP, pr=pr,
                  classification_k_values=classification_k_values,
                  **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
+        
+
+@torch.no_grad()
+def evaluate_zeroshot(model, loader, device, args):
+    """Evaluate model in zero-shot setting (no fine-tuning)"""
+    model.eval()
+    embeds, labels = [], []
+
+    print('\n>> Extracting embeddings for zero-shot retrieval...')
+    
+    for data in loader:
+        samples = data[0].to(device)
+        _labels = data[1].to(device)
+        out = model(samples)
+        if isinstance(out, tuple):
+            embeds.append(out[0])
+        else:
+            embeds.append(out)
+        labels.append(_labels)
+
+    embeds = torch.cat(embeds, dim=0)
+    labels = torch.cat(labels, dim=0)
+
+    # Compute similarity matrix
+    dists = -torch.cdist(embeds, embeds)
+    dists.fill_diagonal_(float('-inf'))
+
+    print('\n' + '='*60)
+    print(f'Zero-Shot Retrieval Results ({args.model.upper()})')
+    print('='*60)
+
+    # top-k accuracy (i.e. R@K)
+    kappas = [1, 5, 10]
+    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = torch.stack(accuracy).cpu().numpy()
+    print('\n>> Retrieval Accuracy:')
+    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+
+    # mean average precision and mean precision (i.e. mAP and pr)
+    ranks = torch.argsort(dists, dim=0, descending=True)
+    mAP, _, pr, _ = compute_map(ranks.cpu().numpy(), labels.cpu().numpy(), kappas)
+    print('>> mAP: {:.2f}%'.format(mAP * 100.0))
+    print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
+    
+    # Classification metrics with majority voting
+    print('\n>> Classification Metrics (Majority Voting):')
+    k_values = [1, 5, 10, 15, 20]
+    classification_results = compute_classification_metrics(labels, dists, k_values)
+    
+    for k in k_values:
+        metrics = classification_results[k]
+        print(f'\n>> Top-{k} Retrieved Images:')
+        print(f'   Accuracy: {metrics["accuracy"]:.2f}%')
+        print(f'   Precision (macro): {metrics["precision_macro"]:.2f}%')
+        print(f'   Recall (macro): {metrics["recall_macro"]:.2f}%')
+        print(f'   F1 (macro): {metrics["f1_macro"]:.2f}%')
+
+    # Save results
+    if args.save_dir:
+        os.makedirs(args.save_dir, exist_ok=True)
+        file_name = f'zeroshot_{args.model}'
+        save_path = os.path.join(args.save_dir, file_name)
+        
+        np.savez(save_path, 
+                 embeds=embeds.cpu().numpy(),
+                 labels=labels.cpu().numpy(), 
+                 dists=-dists.cpu().numpy(),
+                 kappas=kappas, 
+                 acc=accuracy, 
+                 mAP=mAP, 
+                 pr=pr,
+                 classification_k_values=k_values,
+                 **{f'classification_k{k}': np.array(list(v.values())) 
+                    for k, v in classification_results.items()})
+        print(f'\n>> Results saved to {save_path}.npz')
+        print('='*60)
         
 
 def main(args):
@@ -409,28 +470,33 @@ def main(args):
             freeze=True,
             processor_normalize=True
         )
+    elif args.model == 'medsiglip':
+        model = MedSigLip(embedding_dim=args.embedding_dim)
     elif args.model == 'resnet50_attention':
         model = Resnet50_with_Attention(embedding_dim=args.embedding_dim)
     else:
         raise NotImplementedError(f'Model not supported: {args.model}')
 
-    if os.path.isfile(args.resume):
+    # Load checkpoint if provided (for fine-tuned models)
+    if args.resume and os.path.isfile(args.resume):
         print("=> loading checkpoint")
         checkpoint = torch.load(args.resume)
         if 'state-dict' in checkpoint:
             checkpoint = checkpoint['state-dict']
         model.load_state_dict(checkpoint, strict=False)
         print("=> loaded checkpoint")
+    elif args.zero_shot:
+        print("=> running zero-shot evaluation with pretrained weights")
     else:
-        print("=> no checkpoint found")
+        print("=> no checkpoint found, using pretrained weights")
 
     model.to(device)
 
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
 
-    # Use 384x384 for ConvNeXtV2 and Hybrid model, 224x224 for other models
-    img_size = 384 if args.model in ['convnextv2', 'hybrid_convnext_vit'] else 224
+    # Use 384x384 for ConvNeXtV2, MedSigLip and Hybrid model, 224x224 for other models
+    img_size = 384 if args.model in ['convnextv2', 'hybrid_convnext_vit', 'medsiglip'] else 224
 
     test_transform = transforms.Compose([
         transforms.Lambda(lambda img: img.convert('RGB')),
@@ -466,7 +532,11 @@ def main(args):
                              num_workers=args.workers)
 
     print('Evaluating...')
-    if args.dataset == 'vindr':
+    
+    # Use zero-shot evaluation if flag is set
+    if args.zero_shot:
+        evaluate_zeroshot(model, test_loader, device, args)
+    elif args.dataset == 'vindr':
         evaluate_multilabels(model, test_loader, device, args)
     else:   
         evaluate(model, test_loader, device, args)
@@ -484,9 +554,11 @@ def parse_args():
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, convnextv2, hybrid_convnext_vit, medclip_vit, medclip_resnet, or conceptclip)')
+                        help='Model to use (densenet121, resnet50, convnextv2, medsiglip, hybrid_convnext_vit, medclip_vit, medclip_resnet, or conceptclip)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
+    parser.add_argument('--zero-shot', action='store_true',
+                        help='Run zero-shot evaluation with pretrained weights only')
     parser.add_argument('--eval-batch-size', default=64, type=int)
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                         help='Number of data loading workers')
