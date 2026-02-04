@@ -654,91 +654,203 @@ class SimAtt(nn.Module):
         return M
 
 
+# class SimCAM(nn.Module):
+#     """
+#     Adapted from: https://github.com/Jeff-Zilence/Explain_Metric_Learning/blob/master/Face_Verification/demo.py
+#     """
+
+#     def __init__(self, model, feature_module, target_layers, fc=None):
+#         super(SimCAM, self).__init__()
+#         self.model = model
+#         self.feature_module = feature_module
+#         self.fc = fc
+
+#         self.extractor = ModelOutputs(
+#             self.model, self.feature_module, target_layers, return_gradients=False)
+
+
+#     def Point_Specific(self, decom, point=[0, 0], size=(224, 224)):
+#         """
+#             Generate the point-specific activation map
+#             We assume the query point is always on the query image (image 1)
+#         """
+#         decom_padding = nn.functional.pad(decom.permute(
+#             2, 3, 0, 1), (1, 1, 1, 1), mode='replicate').permute(2, 3, 0, 1)
+
+#         # Compute the transformed coordinates
+#         x = (point[0] + 0.5) / size[0] * (decom_padding.shape[0]-2)
+#         y = (point[1] + 0.5) / size[1] * (decom_padding.shape[1]-2)
+#         x = x + 0.5
+#         y = y + 0.5
+#         x_min = int(np.floor(x))
+#         y_min = int(np.floor(y))
+#         x_max = x_min + 1
+#         y_max = y_min + 1
+#         dx = x - x_min
+#         dy = y - y_min
+#         interpolation = decom_padding[x_min, y_min]*(1-dx)*(1-dy) + \
+#             decom_padding[x_max, y_min]*dx*(1-dy) + \
+#             decom_padding[x_min, y_max]*(1-dx)*dy + \
+#             decom_padding[x_max, y_max]*dx*dy
+
+#         return interpolation.clamp(min=0)
+
+#     def forward(self, x_q, x, point=None):
+#         _, _, H, W = x_q.size()
+
+#         with torch.no_grad():
+#             # Concatenate all inputs
+#             x = torch.cat((x_q, x))
+
+#             # Extract intermediate activations and outputs
+#             A, _ = self.extractor(x)
+#             print("Extracted features shape:", [a.shape for a in A])
+
+#             # Reshape dimensions
+#             x = A[-1].permute(0, 2, 3, 1)
+
+#             if self.fc is not None:
+#                 x = torch.matmul(x, self.fc.weight.data.transpose(
+#                     1, 0)) + self.fc.bias.data / (x.shape[1] * x.shape[2])
+
+#             Decomposition = torch.zeros(
+#                 [x.shape[1], x.shape[2], x.shape[1], x.shape[2]], device=x_q.device)
+#             for i in range(x.shape[1]):
+#                 for j in range(x.shape[2]):
+#                     for k in range(x.shape[1]):
+#                         for l in range(x.shape[2]):
+#                             Decomposition[i, j, k, l] = torch.sum(
+#                                 x[0, i, j]*x[1, k, l])
+#             Decomposition = Decomposition / torch.max(Decomposition)
+
+#             # Apply ReLU
+#             Decomposition = Decomposition.clamp(min=0)
+
+#             # Map for query image
+#             decom_1 = torch.sum(Decomposition, dim=(2, 3))
+
+#             # Map for retrieval image
+#             # Do point specific calculation here if needed
+#             if point is not None:
+#                 decom_2 = self.Point_Specific(
+#                     Decomposition, point, size=(H, W))
+#             else:
+#                 decom_2 = torch.sum(Decomposition, dim=(0, 1))
+
+#             # Upsample
+#             Decomposition = nn.functional.interpolate(torch.stack(
+#                 (decom_1, decom_2)).unsqueeze(1), size=(H, W), mode='bilinear').squeeze(1)
+
+#         return Decomposition
+
+
 class SimCAM(nn.Module):
     """
-    Adapted from: https://github.com/Jeff-Zilence/Explain_Metric_Learning/blob/master/Face_Verification/demo.py
+    SimCAM with forward-hook feature extraction (robust for any model).
     """
 
-    def __init__(self, model, feature_module, target_layers, fc=None):
+    def __init__(self, model, target_layer, fc=None):
+        """
+        model: full model
+        target_layer: nn.Module (the exact layer you want feature map from)
+        fc: optional (ONLY if it maps channels -> embedding_dim per spatial position)
+        """
         super(SimCAM, self).__init__()
         self.model = model
-        self.feature_module = feature_module
+        self.target_layer = target_layer
         self.fc = fc
 
-        self.extractor = ModelOutputs(
-            self.model, self.feature_module, target_layers, return_gradients=False)
-
-
     def Point_Specific(self, decom, point=[0, 0], size=(224, 224)):
-        """
-            Generate the point-specific activation map
-            We assume the query point is always on the query image (image 1)
-        """
-        decom_padding = nn.functional.pad(decom.permute(
-            2, 3, 0, 1), (1, 1, 1, 1), mode='replicate').permute(2, 3, 0, 1)
+        decom_padding = nn.functional.pad(
+            decom.permute(2, 3, 0, 1),
+            (1, 1, 1, 1),
+            mode="replicate"
+        ).permute(2, 3, 0, 1)
 
-        # Compute the transformed coordinates
-        x = (point[0] + 0.5) / size[0] * (decom_padding.shape[0]-2)
-        y = (point[1] + 0.5) / size[1] * (decom_padding.shape[1]-2)
+        x = (point[0] + 0.5) / size[0] * (decom_padding.shape[0] - 2)
+        y = (point[1] + 0.5) / size[1] * (decom_padding.shape[1] - 2)
+
         x = x + 0.5
         y = y + 0.5
+
         x_min = int(np.floor(x))
         y_min = int(np.floor(y))
         x_max = x_min + 1
         y_max = y_min + 1
+
         dx = x - x_min
         dy = y - y_min
-        interpolation = decom_padding[x_min, y_min]*(1-dx)*(1-dy) + \
-            decom_padding[x_max, y_min]*dx*(1-dy) + \
-            decom_padding[x_min, y_max]*(1-dx)*dy + \
-            decom_padding[x_max, y_max]*dx*dy
+
+        interpolation = (
+            decom_padding[x_min, y_min] * (1 - dx) * (1 - dy) +
+            decom_padding[x_max, y_min] * dx * (1 - dy) +
+            decom_padding[x_min, y_max] * (1 - dx) * dy +
+            decom_padding[x_max, y_max] * dx * dy
+        )
 
         return interpolation.clamp(min=0)
 
     def forward(self, x_q, x, point=None):
         _, _, H, W = x_q.size()
 
+        feats = []
+
+        def hook_fn(module, inp, out):
+            feats.append(out)
+
+        handle = self.target_layer.register_forward_hook(hook_fn)
+
         with torch.no_grad():
-            # Concatenate all inputs
-            x = torch.cat((x_q, x))
+            x = torch.cat((x_q, x), dim=0)
 
-            # Extract intermediate activations and outputs
-            A, _ = self.extractor(x)
-            print("Extracted features shape:", [a.shape for a in A])
+            _ = self.model(x)  # trigger hook
+            handle.remove()
 
-            # Reshape dimensions
-            x = A[-1].permute(0, 2, 3, 1)
+            if len(feats) == 0:
+                raise RuntimeError("SimCAM hook failed: no features captured.")
 
+            # [2, C, h, w]
+            fmap = feats[0]
+            print("Extracted fmap:", fmap.shape)
+
+            # [2, h, w, C]
+            x = fmap.permute(0, 2, 3, 1)
+
+            # ⚠️ Usually you should NOT apply fc here for metric learning ResNet
             if self.fc is not None:
-                x = torch.matmul(x, self.fc.weight.data.transpose(
-                    1, 0)) + self.fc.bias.data / (x.shape[1] * x.shape[2])
+                x = torch.matmul(x, self.fc.weight.data.transpose(1, 0)) + \
+                    self.fc.bias.data / (x.shape[1] * x.shape[2])
 
+            # Decomposition: [h, w, h, w]
             Decomposition = torch.zeros(
-                [x.shape[1], x.shape[2], x.shape[1], x.shape[2]], device=x_q.device)
+                [x.shape[1], x.shape[2], x.shape[1], x.shape[2]],
+                device=x_q.device
+            )
+
             for i in range(x.shape[1]):
                 for j in range(x.shape[2]):
                     for k in range(x.shape[1]):
                         for l in range(x.shape[2]):
                             Decomposition[i, j, k, l] = torch.sum(
-                                x[0, i, j]*x[1, k, l])
-            Decomposition = Decomposition / torch.max(Decomposition)
+                                x[0, i, j] * x[1, k, l]
+                            )
 
-            # Apply ReLU
+            Decomposition = Decomposition / (torch.max(Decomposition) + 1e-8)
             Decomposition = Decomposition.clamp(min=0)
 
-            # Map for query image
             decom_1 = torch.sum(Decomposition, dim=(2, 3))
 
-            # Map for retrieval image
-            # Do point specific calculation here if needed
             if point is not None:
-                decom_2 = self.Point_Specific(
-                    Decomposition, point, size=(H, W))
+                decom_2 = self.Point_Specific(Decomposition, point, size=(H, W))
             else:
                 decom_2 = torch.sum(Decomposition, dim=(0, 1))
 
-            # Upsample
-            Decomposition = nn.functional.interpolate(torch.stack(
-                (decom_1, decom_2)).unsqueeze(1), size=(H, W), mode='bilinear').squeeze(1)
+            Decomposition = nn.functional.interpolate(
+                torch.stack((decom_1, decom_2)).unsqueeze(1),
+                size=(H, W),
+                mode="bilinear",
+                align_corners=False
+            ).squeeze(1)
 
         return Decomposition
+

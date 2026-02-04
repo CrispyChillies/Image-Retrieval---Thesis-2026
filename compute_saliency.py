@@ -171,13 +171,12 @@ def main(args):
         elif args.model == 'resnet50':
             backbone = model.resnet50
             feature_module = backbone[7]      # layer4 (Sequential of 3 bottlenecks)
-            target_layers = ["2"]
+            target_layer = model.resnet50[7][2] 
             
             explainer = SimCAM(
-                model=model,                 
-                feature_module=feature_module,
-                target_layers=target_layers,
-                fc=None                       
+                model=model,
+                target_layer=target_layer,
+                fc=None
             )
         elif args.model == 'convnextv2':
             feature_module = model.convnext.stages[-1]  # Last stage
