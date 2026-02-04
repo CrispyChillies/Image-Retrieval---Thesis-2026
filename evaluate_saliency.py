@@ -150,7 +150,7 @@ def main():
                 label = parts[2]
                 if label not in valid_class:
                     label = 'covid'
-                img_name = parts[1]8888888
+                img_name = parts[1]
                 class_labels[img_name] = label
                 image_list.append(img_name)
 
