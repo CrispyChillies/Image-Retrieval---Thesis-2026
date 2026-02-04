@@ -667,6 +667,7 @@ class SimCAM(nn.Module):
 
         self.extractor = ModelOutputs(
             self.model, self.feature_module, target_layers, return_gradients=False)
+        print(self.extractor)
 
     def Point_Specific(self, decom, point=[0, 0], size=(224, 224)):
         """
