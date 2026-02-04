@@ -38,6 +38,9 @@ class ModelOutputs():
         self.feature_module = feature_module
         self.feature_extractor = FeatureExtractor(
             self.feature_module, target_layers, return_gradients)
+        
+        print("feature_module:", self.feature_module)
+        print("target_layers:", target_layers)
 
     def get_gradients(self):
         return self.feature_extractor.gradients
@@ -45,6 +48,7 @@ class ModelOutputs():
     def __call__(self, x):
         target_activations = []
         for name, module in self.model._modules.items():
+            print("inside feature_module sublayer:", name)
             if module == self.feature_module:
                 target_activations, x = self.feature_extractor(x)
             elif isinstance(module, nn.AdaptiveAvgPool2d):
