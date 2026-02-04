@@ -5,7 +5,7 @@ import torch
 import numpy as np
 from PIL import Image
 import torch.nn as nn
-from model import DenseNet121, ResNet50
+from model import DenseNet121, ResNet50, ConvNeXtV2
 from torchvision import transforms
 from evaluation import CausalMetric, gkern
 import argparse
@@ -117,6 +117,8 @@ def main():
         model = DenseNet121()
     elif args.model_type == 'resnet50':
         model = ResNet50()
+    elif args.model_type == 'convnextv2':
+        model = ConvNeXtV2()
     else:
         raise ValueError(f"Unsupported model type: {args.model_type}")
     

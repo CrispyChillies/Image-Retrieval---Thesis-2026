@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet
 
-from model import ResNet50, DenseNet121
+from model import ResNet50, DenseNet121, ConvNeXtV2
 from explanations import SBSMBatch, SimAtt, SimCAM
 
 from PIL import Image
@@ -122,11 +122,22 @@ def process(explainer, loader, device, args):
 def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    # Choose model
+    # Choose model and define target layers for SimCAM
     if args.model == 'densenet121':
         model = DenseNet121(embedding_dim=args.embedding_dim)
+        feature_module = model.densenet121[0]  # The features module
+        target_layer_name = "relu"  # relu layer at the end of features
+        
     elif args.model == 'resnet50':
         model = ResNet50(embedding_dim=args.embedding_dim)
+        feature_module = model.resnet50  # resnet50 module
+        target_layer_name = model.resnet50[7]  # Layer4 of ResNet50
+        
+    elif args.model == 'convnextv2':
+        model = ConvNeXtV2(embedding_dim=args.embedding_dim)
+        feature_module = model.convnext  # convnext module
+        target_layer_name = model.convnext.stages[3]  # Stage 3 (last stage)
+        
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -157,14 +168,15 @@ def main(args):
     elif args.explainer == 'simatt':
         model = nn.Sequential(*list(model.children())
                               [0], *list(model.children())[1:])
-        # TODO: Currently DenseNet121-specific
         explainer = SimAtt(model, model[0], target_layers=["relu"])
     elif args.explainer == 'simcam':
-        model = nn.Sequential(*list(model.children())
-                              [0], *list(model.children())[1:])
-        # TODO: Currently DenseNet121-specific
-        explainer = SimCAM(model, model[0], target_layers=[
-                           "relu"], fc=model[2] if args.embedding_dim else None)
+        # SimCAM needs proper target_layers based on model architecture
+        explainer = SimCAM(
+            model,
+            feature_module,
+            target_layers=[target_layer_name],
+            fc=model.fc if args.embedding_dim else None
+        )
     else:
         raise NotImplementedError('Explainer not supported!')
 
@@ -220,7 +232,7 @@ def parse_args():
     parser.add_argument('--results', default=None,
                         help='Results file to load')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121 or resnet50)')
+                        help='Model to use (densenet121, resnet50, or convnextv2)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
     parser.add_argument('--explainer', default='sbsm',
