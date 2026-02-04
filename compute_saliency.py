@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet
 
-from model import ResNet50, DenseNet121, ConvNeXtV2
+from model import ResNet50, DenseNet121
 from explanations import SBSMBatch, SimAtt, SimCAM
 
 from PIL import Image
@@ -120,15 +120,13 @@ def process(explainer, loader, device, args):
 
 
 def main(args):
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Choose model and define target layers for SimCAM
+    # Choose model
     if args.model == 'densenet121':
         model = DenseNet121(embedding_dim=args.embedding_dim)
     elif args.model == 'resnet50':
         model = ResNet50(embedding_dim=args.embedding_dim)
-    elif args.model == 'convnextv2':
-        model = ConvNeXtV2(embedding_dim=args.embedding_dim)
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -157,18 +155,27 @@ def main(args):
             explainer.load_masks(maskspath)
             print('Masks are loaded.')
     elif args.explainer == 'simatt':
-        model = nn.Sequential(*list(model.children())[0], *list(model.children())[1:])
-        explainer = SimAtt(model, model[0], target_layers=["relu"])
-    elif args.explainer == 'simcam':
+        # model = nn.Sequential(*list(model.children())
+        #                       [0], *list(model.children())[1:])
+        # # TODO: Currently DenseNet121-specific
+        # explainer = SimAtt(model, model[0], target_layers=["relu"])
         if args.model == 'densenet121':
-            model = nn.Sequential(*list(model.children())[0], *list(model.children())[1:])
-            explainer = SimCAM(model, model[0], target_layers=["relu"], fc=model[2] if args.embedding_dim else None)
+            model = nn.Sequential(*list(model.children()))
+            explainer = SimAtt(model, model[0], target_layers=["relu"])
+
         elif args.model == 'resnet50':
-           pass
-        elif args.model == 'convnextv2':
-            pass
-        else:
-            raise NotImplementedError('SimCAM not supported for this model!')
+            target_layer = model.resnet50[7][-1].conv3
+            explainer = SimAtt(
+                model,
+                target_layer,
+                target_layers=None
+            )
+    elif args.explainer == 'simcam':
+        model = nn.Sequential(*list(model.children())
+                              [0], *list(model.children())[1:])
+        # TODO: Currently DenseNet121-specific
+        explainer = SimCAM(model, model[0], target_layers=[
+                           "relu"], fc=model[2] if args.embedding_dim else None)
     else:
         raise NotImplementedError('Explainer not supported!')
 
@@ -179,29 +186,11 @@ def main(args):
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
 
-    if args.model == 'medsiglip':
-        img_size = 448
-        resize_size = 480
-    elif args.model in ['convnextv2', 'hybrid_convnext_vit']:
-        img_size = 384
-        resize_size = 416
-    else:
-        img_size = 224
-        resize_size = 256
-
-    test_transform = transforms.Compose([
-        transforms.Lambda(lambda img: img.convert('RGB')),
-        transforms.Resize(resize_size),
-        transforms.CenterCrop(img_size),
-        transforms.ToTensor(),
-        normalize
-    ])
-
     test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-                                            transforms.Resize(resize_size),
-                                            transforms.CenterCrop(img_size),
-                                            transforms.ToTensor(),
-                                            normalize])
+                                         transforms.Resize(256),
+                                         transforms.CenterCrop(224),
+                                         transforms.ToTensor(),
+                                         normalize])
 
     # Set up dataset and dataloader
     if args.dataset == 'covid':
@@ -225,6 +214,7 @@ def main(args):
     print('Evaluating...')
     with torch.set_grad_enabled(args.explainer != 'sbsm'):
         process(explainer, test_loader, device, args)
+    print('Done!')
 
 
 def parse_args():
@@ -242,7 +232,7 @@ def parse_args():
     parser.add_argument('--results', default=None,
                         help='Results file to load')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, or convnextv2)')
+                        help='Model to use (densenet121 or resnet50)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
     parser.add_argument('--explainer', default='sbsm',
