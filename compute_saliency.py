@@ -160,11 +160,26 @@ def main(args):
         # TODO: Currently DenseNet121-specific
         explainer = SimAtt(model, model[0], target_layers=["relu"])
     elif args.explainer == 'simcam':
-        model = nn.Sequential(*list(model.children())
-                              [0], *list(model.children())[1:])
-        # TODO: Currently DenseNet121-specific
-        explainer = SimCAM(model, model[0], target_layers=[
-                           "relu"], fc=model[2] if args.embedding_dim else None)
+        if args.model == 'densenet121':
+            model = nn.Sequential(*list(model.children())
+                                [0], *list(model.children())[1:])
+            # TODO: Currently DenseNet121-specific
+            explainer = SimCAM(model, model[0], target_layers=[
+                            "relu"], fc=model[2] if args.embedding_dim else None)
+        elif args.model == 'resnet50':
+            model = nn.Sequential(*list(model.children())
+                                [0], *list(model.children())[1:])
+            fc_layer = None
+            if len(model) > 9: # ResNet gốc có 9 phần (0-8), nếu có FC thì sẽ là phần tử thứ 10 (index 9)
+                fc_layer = model[9] 
+
+            # 2. Khởi tạo SimCAM
+            explainer = SimCAM(
+                model=model,            
+                feature_module=model,   
+                target_layers=["7"],    
+                fc=fc_layer
+            )
     else:
         raise NotImplementedError('Explainer not supported!')
 
