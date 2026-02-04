@@ -181,8 +181,8 @@ def main(args):
         raise NotImplementedError('Explainer not supported!')
 
     # DataParallel over multiple GPUs
-    explainer = nn.DataParallel(explainer)
-    explainer.to(device)
+    # explainer = nn.DataParallel(explainer)
+    explainer = explainer.to(device)
 
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
