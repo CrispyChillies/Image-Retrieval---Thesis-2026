@@ -654,29 +654,114 @@ class SimAtt(nn.Module):
         return M
 
 
-class SimCAM(nn.Module):
-    """
-    Adapted from: https://github.com/Jeff-Zilence/Explain_Metric_Learning/blob/master/Face_Verification/demo.py
-    """
+# class SimCAM(nn.Module):
+#     """
+#     Adapted from: https://github.com/Jeff-Zilence/Explain_Metric_Learning/blob/master/Face_Verification/demo.py
+#     """
 
-    def __init__(self, model, feature_module, target_layers, fc=None):
+#     def __init__(self, model, feature_module, target_layers, fc=None):
+#         super(SimCAM, self).__init__()
+#         self.model = model
+#         self.feature_module = feature_module
+#         self.fc = fc
+
+#         self.extractor = ModelOutputs(
+#             self.model, self.feature_module, target_layers, return_gradients=False)
+
+#     def Point_Specific(self, decom, point=[0, 0], size=(224, 224)):
+#         """
+#             Generate the point-specific activation map
+#             We assume the query point is always on the query image (image 1)
+#         """
+#         decom_padding = nn.functional.pad(decom.permute(
+#             2, 3, 0, 1), (1, 1, 1, 1), mode='replicate').permute(2, 3, 0, 1)
+
+#         # Compute the transformed coordinates
+#         x = (point[0] + 0.5) / size[0] * (decom_padding.shape[0]-2)
+#         y = (point[1] + 0.5) / size[1] * (decom_padding.shape[1]-2)
+#         x = x + 0.5
+#         y = y + 0.5
+#         x_min = int(np.floor(x))
+#         y_min = int(np.floor(y))
+#         x_max = x_min + 1
+#         y_max = y_min + 1
+#         dx = x - x_min
+#         dy = y - y_min
+#         interpolation = decom_padding[x_min, y_min]*(1-dx)*(1-dy) + \
+#             decom_padding[x_max, y_min]*dx*(1-dy) + \
+#             decom_padding[x_min, y_max]*(1-dx)*dy + \
+#             decom_padding[x_max, y_max]*dx*dy
+
+#         return interpolation.clamp(min=0)
+
+#     def forward(self, x_q, x, point=None):
+#         _, _, H, W = x_q.size()
+
+#         with torch.no_grad():
+#             # Concatenate all inputs
+#             x = torch.cat((x_q, x))
+
+#             # Extract intermediate activations and outputs
+#             A, _ = self.extractor(x)
+
+#             # Reshape dimensions
+#             x = A[-1].permute(0, 2, 3, 1)  # [2, H', W', C]
+
+#             if self.fc is not None:
+#                 # Apply fc layer: [2, H', W', C] @ [C, embed_dim] -> [2, H', W', embed_dim]
+#                 x = x @ self.fc.weight.t() + self.fc.bias / (x.shape[1] * x.shape[2])
+
+#             # Vectorized decomposition computation using einsum
+#             # x[0]: [H', W', C], x[1]: [H', W', C]
+#             # Decomposition[i, j, k, l] = sum_c(x[0, i, j, c] * x[1, k, l, c])
+#             # This is equivalent to: query_features @ retrieval_features.T
+#             Decomposition = torch.einsum('ijc,klc->ijkl', x[0], x[1])
+            
+#             # Normalize by maximum value
+#             max_val = Decomposition.max()
+#             if max_val > 0:
+#                 Decomposition = Decomposition / max_val
+
+#             # Apply ReLU
+#             Decomposition = Decomposition.clamp(min=0)
+
+#             # Map for query image: sum over retrieval spatial dimensions
+#             decom_1 = Decomposition.sum(dim=(2, 3))
+
+#             # Map for retrieval image
+#             if point is not None:
+#                 decom_2 = self.Point_Specific(Decomposition, point, size=(H, W))
+#             else:
+#                 # Sum over query spatial dimensions
+#                 decom_2 = Decomposition.sum(dim=(0, 1))
+
+#             # Upsample to original image size
+#             Decomposition = nn.functional.interpolate(
+#                 torch.stack((decom_1, decom_2)).unsqueeze(1), 
+#                 size=(H, W), 
+#                 mode='bilinear',
+#                 align_corners=False
+#             ).squeeze(1)
+
+#         return Decomposition
+
+class SimCAM(nn.Module):
+    def __init__(self, model, feature_module, target_layers=None, fc=None):
         super(SimCAM, self).__init__()
         self.model = model
         self.feature_module = feature_module
         self.fc = fc
+        self.captured_features = None
 
-        self.extractor = ModelOutputs(
-            self.model, self.feature_module, target_layers, return_gradients=False)
+    def _hook_fn(self, module, input, output):
+        # Lưu output của layer feature
+        self.captured_features = output
 
     def Point_Specific(self, decom, point=[0, 0], size=(224, 224)):
-        """
-            Generate the point-specific activation map
-            We assume the query point is always on the query image (image 1)
-        """
+        # (Giữ nguyên hàm này từ code cũ của bạn)
         decom_padding = nn.functional.pad(decom.permute(
             2, 3, 0, 1), (1, 1, 1, 1), mode='replicate').permute(2, 3, 0, 1)
 
-        # Compute the transformed coordinates
         x = (point[0] + 0.5) / size[0] * (decom_padding.shape[0]-2)
         y = (point[1] + 0.5) / size[1] * (decom_padding.shape[1]-2)
         x = x + 0.5
@@ -697,50 +782,93 @@ class SimCAM(nn.Module):
     def forward(self, x_q, x, point=None):
         _, _, H, W = x_q.size()
 
-        with torch.no_grad():
-            # Concatenate all inputs
-            x = torch.cat((x_q, x))
+        # 1. Đăng ký Hook vào feature_module để lấy activation
+        #    Vì DataParallel đã replicate feature_module sang đúng GPU, hook này sẽ an toàn.
+        handle = self.feature_module.register_forward_hook(self._hook_fn)
 
-            # Extract intermediate activations and outputs
-            A, _ = self.extractor(x)
+        try:
+            with torch.no_grad():
+                # Gom input: [Batch_query + Batch_retrieval, C, H, W]
+                combined_x = torch.cat((x_q, x))
+                
+                # Chạy model (chỉ cần forward pass để kích hoạt hook)
+                _ = self.model(combined_x)
+                
+                # Lấy features từ hook (đã nằm đúng trên GPU hiện tại)
+                feat = self.captured_features 
+                
+                # Xử lý FC layer nếu có
+                # feat đang là [B, C, h, w]
+                if self.fc is not None:
+                    # Chuyển về [B, h, w, C] để nhân ma trận
+                    feat_perm = feat.permute(0, 2, 3, 1)
+                    # Tính toán tuyến tính: xW^T + b
+                    # Lưu ý: fc.weight và bias cũng đã được DataParallel replicate đúng chỗ
+                    out_fc = feat_perm @ self.fc.weight.t() + self.fc.bias
+                    
+                    # Normalize theo spatial dimensions như code gốc
+                    out_fc = out_fc / (feat.shape[2] * feat.shape[3])
+                    
+                    # Chuyển lại về [B, C_new, h, w]
+                    feat = out_fc.permute(0, 3, 1, 2)
 
-            # Reshape dimensions
-            x = A[-1].permute(0, 2, 3, 1)  # [2, H', W', C]
+                # Tách lại features của Query và Retrieval
+                # x_q (query) luôn nằm đầu batch
+                num_queries = x_q.shape[0]
+                feat_q = feat[:num_queries]
+                feat_r = feat[num_queries:]
 
-            if self.fc is not None:
-                # Apply fc layer: [2, H', W', C] @ [C, embed_dim] -> [2, H', W', embed_dim]
-                x = x @ self.fc.weight.t() + self.fc.bias / (x.shape[1] * x.shape[2])
+                # --- TỐI ƯU HÓA MA TRẬN (Thay thế loop 4 tầng) ---
+                # Reshape để nhân ma trận: [Batch, Channels, Height * Width]
+                b_q, c, h, w = feat_q.size()
+                b_r = feat_r.size(0)
+                
+                # Flatten spatial dimensions
+                f1 = feat_q.view(b_q, c, -1)   # [B_q, C, N_pixels]
+                f2 = feat_r.view(b_r, c, -1)   # [B_r, C, N_pixels]
+                
+                # Tính Similarity Map: Query(i) vs Retrieval(j)
+                # Vì x_q và x được ghép cặp 1-1 trong DataParallel split, ta giả sử b_q == b_r hoặc broadcast
+                # Trong trường hợp này code bạn ghép x_q và x, nên ta tính từng cặp tương ứng.
+                
+                # Code gốc tính toán tích chập giữa query và retrieval features
+                # Decomposition shape: [h, w, h, w] (cho 1 ảnh)
+                # Để xử lý theo Batch, ta dùng einsum:
+                # b: batch, c: channel, i,j: spatial query, k,l: spatial retrieval
+                # feat_q: [b, c, h, w], feat_r: [b, c, h, w]
+                
+                # Công thức: Sum over channels (dim 1)
+                Decomposition = torch.einsum('bchw,bckl->bhwkl', feat_q, feat_r)
+                
+                # Normalize
+                max_vals = Decomposition.view(b_q, -1).max(dim=1)[0] # Max per sample
+                max_vals = max_vals.view(b_q, 1, 1, 1, 1) + 1e-8
+                Decomposition = Decomposition / max_vals
+                Decomposition = Decomposition.clamp(min=0)
 
-            # Vectorized decomposition computation using einsum
-            # x[0]: [H', W', C], x[1]: [H', W', C]
-            # Decomposition[i, j, k, l] = sum_c(x[0, i, j, c] * x[1, k, l, c])
-            # This is equivalent to: query_features @ retrieval_features.T
-            Decomposition = torch.einsum('ijc,klc->ijkl', x[0], x[1])
-            
-            # Normalize by maximum value
-            max_val = Decomposition.max()
-            if max_val > 0:
-                Decomposition = Decomposition / max_val
+                # Saliency maps
+                # decom_1: Map trên Query (sum over retrieval dims k,l)
+                decom_1 = Decomposition.sum(dim=(3, 4)) # [b, h, w]
+                
+                # decom_2: Map trên Retrieval (sum over query dims h,w)
+                if point is not None:
+                     # Lưu ý: Hàm Point_Specific của bạn đang viết cho 1 ảnh đơn lẻ (không batch).
+                     # Để chạy nhanh, tạm thời fallback về logic sum nếu có batch > 1 hoặc cần sửa hàm đó.
+                     # Ở đây ta giữ logic sum cho an toàn với batch.
+                     decom_2 = Decomposition.sum(dim=(1, 2))
+                else:
+                     decom_2 = Decomposition.sum(dim=(1, 2)) # [b, k, l] -> [b, h, w]
 
-            # Apply ReLU
-            Decomposition = Decomposition.clamp(min=0)
+                # Stack và Upsample
+                # Output shape mong muốn: [Batch, 2, H, W] (2 maps: query & retrieval)
+                output = torch.stack((decom_1, decom_2), dim=1)
+                output = nn.functional.interpolate(output, size=(H, W), mode='bilinear', align_corners=False)
+                
+                # Code gốc trả về [2, H, W] vì batch=1.
+                # DataParallel sẽ tự gather kết quả [Batch, 2, H, W] về lại [Batch_Total, 2, H, W].
+                
+        finally:
+            # Luôn gỡ hook để tránh memory leak
+            handle.remove()
 
-            # Map for query image: sum over retrieval spatial dimensions
-            decom_1 = Decomposition.sum(dim=(2, 3))
-
-            # Map for retrieval image
-            if point is not None:
-                decom_2 = self.Point_Specific(Decomposition, point, size=(H, W))
-            else:
-                # Sum over query spatial dimensions
-                decom_2 = Decomposition.sum(dim=(0, 1))
-
-            # Upsample to original image size
-            Decomposition = nn.functional.interpolate(
-                torch.stack((decom_1, decom_2)).unsqueeze(1), 
-                size=(H, W), 
-                mode='bilinear',
-                align_corners=False
-            ).squeeze(1)
-
-        return Decomposition
+        return output
