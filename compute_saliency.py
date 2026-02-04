@@ -183,11 +183,14 @@ def main(args):
             )
         elif args.model == 'resnet50':
             # ResNet50: [resnet50, fc] -> Sequential(*resnet50, fc)
+            # For ResNet, we need to use the entire resnet50 sequential as feature_module
+            # and target the last layer
             model_seq = nn.Sequential(*list(model.children())[0], *list(model.children())[1:])
+            # model_seq[7] is layer4 in ResNet50
             explainer = SimCAM(
                 model_seq,
-                model_seq,  # full sequential for ResNet
-                target_layers=[target_layer_name],
+                model_seq[7],  # layer4 of ResNet50
+                target_layers=[model_seq[7][-1]],  # last block of layer4
                 fc=model_seq[-1] if args.embedding_dim else None
             )
         elif args.model == 'convnextv2':
