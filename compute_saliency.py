@@ -179,7 +179,7 @@ def main(args):
                 target_layers=["7"],    
                 fc=fc_layer
             )
-        elif args.explainer == 'convnextv2':
+        elif args.model == 'convnextv2':
             feature_module = model.convnext.stages[-1]  # Last stage
             target_layers = ["3"]  # Choose the block index you want
 
