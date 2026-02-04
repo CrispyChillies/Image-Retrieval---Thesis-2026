@@ -510,10 +510,16 @@ def main(args):
         img_size = 224
         resize_size = 256
 
+    # test_transform = transforms.Compose([
+    #     transforms.Lambda(lambda img: img.convert('RGB')),
+    #     transforms.Resize(resize_size),
+    #     transforms.CenterCrop(img_size),
+    #     transforms.ToTensor(),
+    #     normalize
+    # ])
     test_transform = transforms.Compose([
         transforms.Lambda(lambda img: img.convert('RGB')),
-        transforms.Resize(resize_size),
-        transforms.CenterCrop(img_size),
+        transforms.Resize((img_size, img_size)),
         transforms.ToTensor(),
         normalize
     ])
