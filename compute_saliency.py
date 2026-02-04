@@ -170,14 +170,14 @@ def main(args):
                             "relu"], fc=model[2] if args.embedding_dim else None)
         elif args.model == 'resnet50':
             backbone = model.resnet50
-            fc_layer = model.fc if args.embedding_dim else None
-
-            # 2. Khởi tạo SimCAM
+            feature_module = backbone[7]      # layer4 (Sequential of 3 bottlenecks)
+            target_layers = ["2"]
+            
             explainer = SimCAM(
-                model=backbone,            
-                feature_module=backbone,   
-                target_layers=["7"],    
-                fc=fc_layer
+                model=model,                 
+                feature_module=feature_module,
+                target_layers=target_layers,
+                fc=None                       
             )
         elif args.model == 'convnextv2':
             feature_module = model.convnext.stages[-1]  # Last stage
