@@ -167,16 +167,15 @@ def main(args):
             explainer = SimCAM(model, model[0], target_layers=[
                             "relu"], fc=model[2] if args.embedding_dim else None)
         elif args.model == 'resnet50':
-            model = nn.Sequential(*list(model.children())
-                                [0], *list(model.children())[1:])
+            backbone = model.resnet50
             fc_layer = None
             if len(model) > 0 and isinstance(model[-1], nn.Linear):
                 fc_layer = model[-1]
 
             # 2. Khởi tạo SimCAM
             explainer = SimCAM(
-                model=model,            
-                feature_module=model,   
+                model=backbone,            
+                feature_module=backbone,   
                 target_layers=["7"],    
                 fc=fc_layer
             )
