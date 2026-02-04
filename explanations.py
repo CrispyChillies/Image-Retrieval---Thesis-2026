@@ -696,17 +696,16 @@ class SimCAM(nn.Module):
 
     def forward(self, x_q, x, point=None):
         _, _, H, W = x_q.size()
+        # Concatenate all inputs
+        x = torch.cat((x_q, x))
+
+        # Extract intermediate activations and outputs
+        A, _ = self.extractor(x)
+
+        # Reshape dimensions
+        x = A[-1].permute(0, 2, 3, 1)
 
         with torch.no_grad():
-            # Concatenate all inputs
-            x = torch.cat((x_q, x))
-
-            # Extract intermediate activations and outputs
-            A, _ = self.extractor(x)
-
-            # Reshape dimensions
-            x = A[-1].permute(0, 2, 3, 1)
-
             if self.fc is not None:
                 x = torch.matmul(x, self.fc.weight.data.transpose(
                     1, 0)) + self.fc.bias.data / (x.shape[1] * x.shape[2])

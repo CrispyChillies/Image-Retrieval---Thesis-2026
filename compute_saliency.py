@@ -157,7 +157,7 @@ def main(args):
     elif args.explainer == 'simatt':
         model = nn.Sequential(*list(model.children())
                               [0], *list(model.children())[1:])
-        # TODO: Currently DenseNet121-specific
+        # TODO: Currently DenseNet121-specific  
         explainer = SimAtt(model, model[0], target_layers=["relu"])
     elif args.explainer == 'simcam':
         if args.model == 'densenet121':
