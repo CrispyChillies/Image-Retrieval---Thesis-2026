@@ -125,19 +125,10 @@ def main(args):
     # Choose model and define target layers for SimCAM
     if args.model == 'densenet121':
         model = DenseNet121(embedding_dim=args.embedding_dim)
-        feature_module = model.densenet121[0]  # The features module
-        target_layer_name = "relu"  # relu layer at the end of features
-        
     elif args.model == 'resnet50':
         model = ResNet50(embedding_dim=args.embedding_dim)
-        feature_module = model.resnet50  # resnet50 module
-        target_layer_name = model.resnet50[7]  # Layer4 of ResNet50
-        
     elif args.model == 'convnextv2':
         model = ConvNeXtV2(embedding_dim=args.embedding_dim)
-        feature_module = model.convnext  # convnext module
-        target_layer_name = model.convnext.stages[3]  # Stage 3 (last stage)
-        
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -166,40 +157,16 @@ def main(args):
             explainer.load_masks(maskspath)
             print('Masks are loaded.')
     elif args.explainer == 'simatt':
-        model = nn.Sequential(*list(model.children())
-                              [0], *list(model.children())[1:])
+        model = nn.Sequential(*list(model.children())[0], *list(model.children())[1:])
         explainer = SimAtt(model, model[0], target_layers=["relu"])
     elif args.explainer == 'simcam':
-        # SimCAM needs proper target_layers based on model architecture
-        # Convert model to Sequential to access components properly
         if args.model == 'densenet121':
-            # DenseNet121: [densenet121, fc] -> Sequential(densenet121[0], densenet121[1], fc)
-            model_seq = nn.Sequential(*list(model.children())[0], *list(model.children())[1:])
-            explainer = SimCAM(
-                model_seq,
-                model_seq[0],  # features module
-                target_layers=["relu"],
-                fc=model_seq[2] if args.embedding_dim else None
-            )
+            model = nn.Sequential(*list(model.children())[0], *list(model.children())[1:])
+            explainer = SimCAM(model, model[0], target_layers=["relu"], fc=model[2] if args.embedding_dim else None)
         elif args.model == 'resnet50':
-            # ResNet50: use target layer directly without string name
-            # Keep original model structure, pass layer4's last bottleneck
-            target_conv = model.resnet50[7][-1]  # Last bottleneck block in layer4
-            explainer = SimCAM(
-                model,
-                target_conv,
-                target_layers=None,  # Use None and rely on feature_module
-                fc=model.fc if args.embedding_dim else None
-            )
+           pass
         elif args.model == 'convnextv2':
-            # ConvNeXtV2: [convnext, fc] -> Sequential(convnext, fc)
-            model_seq = nn.Sequential(*list(model.children()))
-            explainer = SimCAM(
-                model_seq,
-                model_seq[0],  # convnext module
-                target_layers=[target_layer_name],
-                fc=model_seq[1] if args.embedding_dim else None
-            )
+            pass
         else:
             raise NotImplementedError('SimCAM not supported for this model!')
     else:
