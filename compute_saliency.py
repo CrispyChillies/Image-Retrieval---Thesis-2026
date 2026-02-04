@@ -168,9 +168,7 @@ def main(args):
                             "relu"], fc=model[2] if args.embedding_dim else None)
         elif args.model == 'resnet50':
             backbone = model.resnet50
-            fc_layer = None
-            if len(model) > 0 and isinstance(model[-1], nn.Linear):
-                fc_layer = model[-1]
+            fc_layer = model.fc if args.embedding_dim else None
 
             # 2. Khởi tạo SimCAM
             explainer = SimCAM(
