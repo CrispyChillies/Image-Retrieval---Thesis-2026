@@ -801,56 +801,96 @@ class SimCAM(nn.Module):
         handle = self.target_layer.register_forward_hook(hook_fn)
 
         with torch.no_grad():
-            x = torch.cat((x_q, x), dim=0)
+            # x_q: [1,3,H,W]
+            # x:   [N,3,H,W]
+            x_all = torch.cat((x_q, x), dim=0)  # [N+1,3,H,W]
 
-            _ = self.model(x)  # trigger hook
+            _ = self.model(x_all)
             handle.remove()
 
             if len(feats) == 0:
                 raise RuntimeError("SimCAM hook failed: no features captured.")
 
-            # [2, C, h, w]
-            fmap = feats[0]
-            # print("Extracted fmap:", fmap.shape)
+            fmap = feats[0]  # [B, C, h, w]
+            B, C, h, w = fmap.shape
+            assert B >= 2, "Need at least 1 query + 1 retrieval image"
 
-            # [2, h, w, C]
-            x = fmap.permute(0, 2, 3, 1)
+            # Convert to [B, h*w, C]
+            # each pixel location becomes a token
+            tokens = fmap.permute(0, 2, 3, 1).reshape(B, h * w, C)
 
-            # ⚠️ Usually you should NOT apply fc here for metric learning ResNet
+            # Split query vs retrievals
+            q = tokens[0:1]      # [1, hw, C]
+            r = tokens[1:]       # [B-1, hw, C]
+
+            # Optional: apply fc per spatial location (rarely correct for your metric setup)
             if self.fc is not None:
-                x = torch.matmul(x, self.fc.weight.data.transpose(1, 0)) + \
-                    self.fc.bias.data / (x.shape[1] * x.shape[2])
+                # tokens @ W^T + bias/(hw)
+                W_fc = self.fc.weight.data.t()  # [inC, outC]
+                b_fc = self.fc.bias.data        # [outC]
+                q = q @ W_fc + b_fc / (h * w)
+                r = r @ W_fc + b_fc / (h * w)
 
-            # Decomposition: [h, w, h, w]
-            Decomposition = torch.zeros(
-                [x.shape[1], x.shape[2], x.shape[1], x.shape[2]],
-                device=x_q.device
-            )
+            # ---------------------------------------------------------
+            # Vectorized decomposition
+            #
+            # q: [1, hw, C]
+            # r: [B-1, hw, C]
+            #
+            # We want D: [B-1, hw_query, hw_retrieval]
+            # D[n] = q[0] @ r[n].T
+            # ---------------------------------------------------------
 
-            for i in range(x.shape[1]):
-                for j in range(x.shape[2]):
-                    for k in range(x.shape[1]):
-                        for l in range(x.shape[2]):
-                            Decomposition[i, j, k, l] = torch.sum(
-                                x[0, i, j] * x[1, k, l]
-                            )
+            # [B-1, hw, hw]
+            D = torch.matmul(q.expand(r.shape[0], -1, -1), r.transpose(1, 2))
 
-            Decomposition = Decomposition / (torch.max(Decomposition) + 1e-8)
-            Decomposition = Decomposition.clamp(min=0)
+            # Normalize each retrieval pair independently (safer)
+            D = D / (D.amax(dim=(1, 2), keepdim=True) + 1e-8)
 
-            decom_1 = torch.sum(Decomposition, dim=(2, 3))
+            # ReLU
+            D = D.clamp(min=0)
+
+            # Reshape into spatial decomposition:
+            # [B-1, h, w, h, w]
+            D = D.view(r.shape[0], h, w, h, w)
+
+            # ---------------------------------------------------------
+            # Build final maps
+            # decom_1: sum over retrieval positions -> query heatmap
+            # decom_2: sum over query positions -> retrieval heatmap
+            # ---------------------------------------------------------
+
+            # [B-1, h, w]
+            decom_1 = D.sum(dim=(3, 4))
 
             if point is not None:
-                decom_2 = self.Point_Specific(Decomposition, point, size=(H, W))
+                # point-specific decom_2
+                # We need D for ONE retrieval at a time
+                # because Point_Specific expects [h,w,h,w]
+                decom_2_list = []
+                for n in range(D.shape[0]):
+                    decom_2_list.append(
+                        self.Point_Specific(D[n], point, size=(H, W))
+                    )
+                decom_2 = torch.stack(decom_2_list, dim=0)  # [B-1, h, w]
             else:
-                decom_2 = torch.sum(Decomposition, dim=(0, 1))
+                # [B-1, h, w]
+                decom_2 = D.sum(dim=(1, 2))
 
-            Decomposition = nn.functional.interpolate(
-                torch.stack((decom_1, decom_2)).unsqueeze(1),
+            # ---------------------------------------------------------
+            # Upsample to input size
+            # Return shape: [B-1, 2, H, W]
+            # ---------------------------------------------------------
+
+            maps = torch.stack((decom_1, decom_2), dim=1)  # [B-1, 2, h, w]
+
+            maps = nn.functional.interpolate(
+                maps,
                 size=(H, W),
                 mode="bilinear",
                 align_corners=False
-            ).squeeze(1)
+            )
 
-        return Decomposition
+        return maps
+
 
