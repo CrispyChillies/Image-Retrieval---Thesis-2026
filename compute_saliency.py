@@ -170,8 +170,8 @@ def main(args):
             model = nn.Sequential(*list(model.children())
                                 [0], *list(model.children())[1:])
             fc_layer = None
-            if len(model) > 9: # ResNet gốc có 9 phần (0-8), nếu có FC thì sẽ là phần tử thứ 10 (index 9)
-                fc_layer = model[9] 
+            if len(model) > 0 and isinstance(model[-1], nn.Linear):
+                fc_layer = model[-1]
 
             # 2. Khởi tạo SimCAM
             explainer = SimCAM(
