@@ -705,38 +705,42 @@ class SimCAM(nn.Module):
             A, _ = self.extractor(x)
 
             # Reshape dimensions
-            x = A[-1].permute(0, 2, 3, 1)
+            x = A[-1].permute(0, 2, 3, 1)  # [2, H', W', C]
 
             if self.fc is not None:
-                x = torch.matmul(x, self.fc.weight.data.transpose(
-                    1, 0)) + self.fc.bias.data / (x.shape[1] * x.shape[2])
+                # Apply fc layer: [2, H', W', C] @ [C, embed_dim] -> [2, H', W', embed_dim]
+                x = x @ self.fc.weight.t() + self.fc.bias / (x.shape[1] * x.shape[2])
 
-            Decomposition = torch.zeros(
-                [x.shape[1], x.shape[2], x.shape[1], x.shape[2]], device=x_q.device)
-            for i in range(x.shape[1]):
-                for j in range(x.shape[2]):
-                    for k in range(x.shape[1]):
-                        for l in range(x.shape[2]):
-                            Decomposition[i, j, k, l] = torch.sum(
-                                x[0, i, j]*x[1, k, l])
-            Decomposition = Decomposition / torch.max(Decomposition)
+            # Vectorized decomposition computation using einsum
+            # x[0]: [H', W', C], x[1]: [H', W', C]
+            # Decomposition[i, j, k, l] = sum_c(x[0, i, j, c] * x[1, k, l, c])
+            # This is equivalent to: query_features @ retrieval_features.T
+            Decomposition = torch.einsum('ijc,klc->ijkl', x[0], x[1])
+            
+            # Normalize by maximum value
+            max_val = Decomposition.max()
+            if max_val > 0:
+                Decomposition = Decomposition / max_val
 
             # Apply ReLU
             Decomposition = Decomposition.clamp(min=0)
 
-            # Map for query image
-            decom_1 = torch.sum(Decomposition, dim=(2, 3))
+            # Map for query image: sum over retrieval spatial dimensions
+            decom_1 = Decomposition.sum(dim=(2, 3))
 
             # Map for retrieval image
-            # Do point specific calculation here if needed
             if point is not None:
-                decom_2 = self.Point_Specific(
-                    Decomposition, point, size=(H, W))
+                decom_2 = self.Point_Specific(Decomposition, point, size=(H, W))
             else:
-                decom_2 = torch.sum(Decomposition, dim=(0, 1))
+                # Sum over query spatial dimensions
+                decom_2 = Decomposition.sum(dim=(0, 1))
 
-            # Upsample
-            Decomposition = nn.functional.interpolate(torch.stack(
-                (decom_1, decom_2)).unsqueeze(1), size=(H, W), mode='bilinear').squeeze(1)
+            # Upsample to original image size
+            Decomposition = nn.functional.interpolate(
+                torch.stack((decom_1, decom_2)).unsqueeze(1), 
+                size=(H, W), 
+                mode='bilinear',
+                align_corners=False
+            ).squeeze(1)
 
         return Decomposition
