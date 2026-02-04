@@ -811,7 +811,7 @@ class SimCAM(nn.Module):
 
             # [2, C, h, w]
             fmap = feats[0]
-            print("Extracted fmap:", fmap.shape)
+            # print("Extracted fmap:", fmap.shape)
 
             # [2, h, w, C]
             x = fmap.permute(0, 2, 3, 1)
