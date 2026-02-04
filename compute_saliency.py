@@ -169,7 +169,6 @@ def main(args):
         elif args.model == 'resnet50':
             model = nn.Sequential(*list(model.children())
                                 [0], *list(model.children())[1:])
-            target_layer = model[0][7]  # Layer before avgpool
             fc_layer = None
             if len(model) > 0 and isinstance(model[-1], nn.Linear):
                 fc_layer = model[-1]
@@ -178,7 +177,7 @@ def main(args):
             explainer = SimCAM(
                 model=model,            
                 feature_module=model,   
-                target_layers=[target_layer],    
+                target_layers=["7"],    
                 fc=fc_layer
             )
     else:
