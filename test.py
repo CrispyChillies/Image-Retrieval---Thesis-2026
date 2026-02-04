@@ -502,14 +502,18 @@ def main(args):
     # Use 448x448 for MedSigLIP, 384x384 for ConvNeXtV2 and Hybrid model, 224x224 for other models
     if args.model == 'medsiglip':
         img_size = 448
+        resize_size = 480
     elif args.model in ['convnextv2', 'hybrid_convnext_vit']:
         img_size = 384
+        resize_size = 416
     else:
         img_size = 224
+        resize_size = 256
 
     test_transform = transforms.Compose([
         transforms.Lambda(lambda img: img.convert('RGB')),
-        transforms.Resize((img_size, img_size)),
+        transforms.Resize(resize_size),
+        transforms.CenterCrop(img_size),
         transforms.ToTensor(),
         normalize
     ])
