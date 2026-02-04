@@ -668,7 +668,6 @@ class SimCAM(nn.Module):
         self.extractor = ModelOutputs(
             self.model, self.feature_module, target_layers, return_gradients=False)
         print("SimCAM extractor:")
-        print(self.extractor)
 
 
     def Point_Specific(self, decom, point=[0, 0], size=(224, 224)):
@@ -706,6 +705,7 @@ class SimCAM(nn.Module):
 
             # Extract intermediate activations and outputs
             A, _ = self.extractor(x)
+            print("Extracted features shape:", [a.shape for a in A])
 
             # Reshape dimensions
             x = A[-1].permute(0, 2, 3, 1)
