@@ -185,6 +185,11 @@ def main(args):
 
             fc_layer = model.fc if model.fc is not None else None
 
+            print("Backbone:", model.resnet50)
+            print("Layer4:", model.resnet50[7])
+            print("Layer4 blocks:", model.resnet50[7][0], model.resnet50[7][1], model.resnet50[7][2])
+
+
             explainer = SimCAM(
                 model=model.convnext,
                 feature_module=feature_module,
