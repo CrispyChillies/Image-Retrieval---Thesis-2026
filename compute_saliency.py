@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet
 
-from model import ResNet50, DenseNet121
+from model import ConvNeXtV2, ResNet50, DenseNet121
 from explanations import SBSMBatch, SimAtt, SimCAM
 
 from PIL import Image
@@ -127,6 +127,8 @@ def main(args):
         model = DenseNet121(embedding_dim=args.embedding_dim)
     elif args.model == 'resnet50':
         model = ResNet50(embedding_dim=args.embedding_dim)
+    elif args.model == 'convnextv2':
+        model = ConvNeXtV2(embedding_dim=args.embedding_dim)
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -175,6 +177,18 @@ def main(args):
                 model=backbone,            
                 feature_module=backbone,   
                 target_layers=["7"],    
+                fc=fc_layer
+            )
+        elif args.explainer == 'convnextv2':
+            feature_module = model.convnext.stages[-1]  # Last stage
+            target_layers = ["3"]  # Choose the block index you want
+
+            fc_layer = model.fc if model.fc is not None else None
+
+            explainer = SimCAM(
+                model=model.convnext,
+                feature_module=feature_module,
+                target_layers=target_layers,
                 fc=fc_layer
             )
     else:
