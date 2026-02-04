@@ -171,11 +171,12 @@ def main(args):
         explainer = SimAtt(model, model[0], target_layers=["relu"])
     elif args.explainer == 'simcam':
         # SimCAM needs proper target_layers based on model architecture
+        # Note: Don't pass fc layer to avoid shape mismatch issues
         explainer = SimCAM(
             model,
             feature_module,
             target_layers=[target_layer_name],
-            fc=model.fc if args.embedding_dim else None
+            fc=None
         )
     else:
         raise NotImplementedError('Explainer not supported!')
@@ -187,11 +188,29 @@ def main(args):
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
 
+    if args.model == 'medsiglip':
+        img_size = 448
+        resize_size = 480
+    elif args.model in ['convnextv2', 'hybrid_convnext_vit']:
+        img_size = 384
+        resize_size = 416
+    else:
+        img_size = 224
+        resize_size = 256
+
+    test_transform = transforms.Compose([
+        transforms.Lambda(lambda img: img.convert('RGB')),
+        transforms.Resize(resize_size),
+        transforms.CenterCrop(img_size),
+        transforms.ToTensor(),
+        normalize
+    ])
+
     test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-                                         transforms.Resize(256),
-                                         transforms.CenterCrop(224),
-                                         transforms.ToTensor(),
-                                         normalize])
+                                            transforms.Resize(resize_size),
+                                            transforms.CenterCrop(img_size),
+                                            transforms.ToTensor(),
+                                            normalize])
 
     # Set up dataset and dataloader
     if args.dataset == 'covid':
