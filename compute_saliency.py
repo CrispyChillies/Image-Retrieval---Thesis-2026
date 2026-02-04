@@ -171,13 +171,36 @@ def main(args):
         explainer = SimAtt(model, model[0], target_layers=["relu"])
     elif args.explainer == 'simcam':
         # SimCAM needs proper target_layers based on model architecture
-        # Note: Don't pass fc layer to avoid shape mismatch issues
-        explainer = SimCAM(
-            model,
-            feature_module,
-            target_layers=[target_layer_name],
-            fc=None
-        )
+        # Convert model to Sequential to access components properly
+        if args.model == 'densenet121':
+            # DenseNet121: [densenet121, fc] -> Sequential(densenet121[0], densenet121[1], fc)
+            model_seq = nn.Sequential(*list(model.children())[0], *list(model.children())[1:])
+            explainer = SimCAM(
+                model_seq,
+                model_seq[0],  # features module
+                target_layers=["relu"],
+                fc=model_seq[2] if args.embedding_dim else None
+            )
+        elif args.model == 'resnet50':
+            # ResNet50: [resnet50, fc] -> Sequential(*resnet50, fc)
+            model_seq = nn.Sequential(*list(model.children())[0], *list(model.children())[1:])
+            explainer = SimCAM(
+                model_seq,
+                model_seq,  # full sequential for ResNet
+                target_layers=[target_layer_name],
+                fc=model_seq[-1] if args.embedding_dim else None
+            )
+        elif args.model == 'convnextv2':
+            # ConvNeXtV2: [convnext, fc] -> Sequential(convnext, fc)
+            model_seq = nn.Sequential(*list(model.children()))
+            explainer = SimCAM(
+                model_seq,
+                model_seq[0],  # convnext module
+                target_layers=[target_layer_name],
+                fc=model_seq[1] if args.embedding_dim else None
+            )
+        else:
+            raise NotImplementedError('SimCAM not supported for this model!')
     else:
         raise NotImplementedError('Explainer not supported!')
 
