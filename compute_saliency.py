@@ -179,21 +179,12 @@ def main(args):
                 fc=None
             )
         elif args.model == 'convnextv2':
-            feature_module = model.convnext.stages[-1]  # Last stage
-            target_layers = ["3"]  # Choose the block index you want
-
-            fc_layer = model.fc if model.fc is not None else None
-
-            print("Backbone:", model.resnet50)
-            print("Layer4:", model.resnet50[7])
-            print("Layer4 blocks:", model.resnet50[7][0], model.resnet50[7][1], model.resnet50[7][2])
-
-
-            explainer = SimCAM(
-                model=model.convnext,
-                feature_module=feature_module,
-                target_layers=target_layers,
-                fc=fc_layer
+           target_layer = model.convnext.stages[-1].blocks[-1]
+           
+           explainer = SimCAM(
+                model=model,            
+                target_layer=target_layer,
+                fc=None                 
             )
     else:
         raise NotImplementedError('Explainer not supported!')
