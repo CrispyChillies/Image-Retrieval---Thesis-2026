@@ -9,7 +9,7 @@ import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
 
 from model import ConvNeXtV2, ResNet50, DenseNet121
-from explanations import SBSMBatch, SimAtt, SimCAM
+from explanations import SBSMBatch, SimAtt, SimCAM, SimCAM_Densenet121
 
 from PIL import Image
 from torch.utils.data import Dataset
@@ -165,8 +165,7 @@ def main(args):
         if args.model == 'densenet121':
             model = nn.Sequential(*list(model.children())
                                 [0], *list(model.children())[1:])
-            # TODO: Currently DenseNet121-specific
-            explainer = SimCAM(model, model[0], target_layers=[
+            explainer = SimCAM_Densenet121(model, model[0], target_layers=[
                             "relu"], fc=model[2] if args.embedding_dim else None)
         elif args.model == 'resnet50':
             backbone = model.resnet50
