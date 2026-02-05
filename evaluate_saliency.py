@@ -14,10 +14,11 @@ import argparse
 class InsDel():
     def __init__(self,
                  model,
-                 device='cuda'):
+                 device='cuda',
+                 input_size=224):
         self.model = model
         self.device = device
-        net_in_size = 224
+        net_in_size = input_size
         klen = 51
         ksig = math.sqrt(50)
         kern = gkern(klen, ksig)
@@ -25,9 +26,9 @@ class InsDel():
         def blur(x): return nn.functional.conv2d(
             x, kern, padding=klen//2)
         self.insertion = CausalMetric(
-            self.model, 'ins', net_in_size, substrate_fn=blur)
+            self.model, 'ins', net_in_size, substrate_fn=blur, input_size=input_size)
         self.deletion = CausalMetric(
-            self.model, 'del', net_in_size, substrate_fn=torch.zeros_like)
+            self.model, 'del', net_in_size, substrate_fn=torch.zeros_like, input_size=input_size)
 
     def evaluate(self, new_sal, ret_image):
         """
@@ -243,7 +244,9 @@ def main():
     f2 = open('./key_list_wacv_test_simatt.json', 'w')
     ins_del_q_dict = {}
     key_dict = {}
-    get_insert_dele = InsDel(model, device)
+    # Use 384 for ConvNeXtV2 and SwinV2, 224 for other models
+    input_size = 384 if args.model_type in ['convnextv2', 'swinv2'] else 224
+    get_insert_dele = InsDel(model, device, input_size=input_size)
     for file_n in os.listdir(main_path):
         print(file_n)
         query_image_tensor = prep_image_(file_n)

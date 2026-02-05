@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 from scipy.ndimage.filters import gaussian_filter
 
 
-HW = 224 * 224  # image area
 n_classes = 1000
 
 
@@ -46,7 +45,7 @@ def auc(arr):
 
 class CausalMetric():
 
-    def __init__(self, model, mode, step, substrate_fn):
+    def __init__(self, model, mode, step, substrate_fn, input_size=224):
         r"""Create deletion/insertion metric instance.
 
         Args:
@@ -54,12 +53,14 @@ class CausalMetric():
             mode (str): 'del' or 'ins'.
             step (int): number of pixels modified per one iteration.
             substrate_fn (func): a mapping from old pixels to new pixels.
+            input_size (int): size of input image (default: 224).
         """
         assert mode in ['del', 'ins']
         self.model = model
         self.mode = mode
         self.step = step
         self.substrate_fn = substrate_fn
+        self.hw = input_size * input_size  # image area
 
     def single_run(self, img_tensor, retrieved_tensor, explanation, verbose=0, save_to=None):
         r"""Run metric on one image-saliency pair.
@@ -77,7 +78,7 @@ class CausalMetric():
             scores (nd.array): Array containing scores at every step.
         """
         q_feat = self.model(img_tensor.cuda())
-        n_steps = (HW + self.step - 1) // self.step
+        n_steps = (self.hw + self.step - 1) // self.step
 
         if self.mode == 'del':
             title = 'Deletion game'
@@ -92,7 +93,7 @@ class CausalMetric():
 
         scores = np.empty(n_steps + 1)
         # Coordinates of pixels in order of decreasing saliency
-        t_r = explanation.reshape(-1, HW)
+        t_r = explanation.reshape(-1, self.hw)
         salient_order = np.argsort(t_r, axis=1)
         salient_order = torch.flip(salient_order, [0, 1])
         zero_cntr = 0
@@ -131,8 +132,8 @@ class CausalMetric():
                     # plt.show()
             if i < n_steps:
                 coords = salient_order[:, self.step * i:self.step * (i + 1)]
-                start.cpu().numpy().reshape(1, 3, HW)[
-                    0, :, coords] = finish.cpu().numpy().reshape(1, 3, HW)[0, :, coords]
+                start.cpu().numpy().reshape(1, 3, self.hw)[
+                    0, :, coords] = finish.cpu().numpy().reshape(1, 3, self.hw)[0, :, coords]
 
         return auc(scores), zero_cntr
 
@@ -155,9 +156,9 @@ class CausalMetric():
             q_feats = self.model(
                 img_batch[i*batch_size:(i+1)*batch_size]).cpu()
             predictions[i*batch_size:((i+1)*batch_size)] = q_feats
-        n_steps = (HW + self.step - 1) // self.step
+        n_steps = (self.hw + self.step - 1) // self.step
         scores = np.empty((n_steps + 1, n_samples))
-        t_r = exp_batch.reshape(-1, HW)
+        t_r = exp_batch.reshape(-1, self.hw)
         salient_order = np.argsort(t_r, axis=1)
         salient_order = torch.flip(salient_order, [0, 1])
 
@@ -191,8 +192,8 @@ class CausalMetric():
                 scores[i, j*batch_size:(j+1)*batch_size] = c_dist
             # Change specified number of most salient pixels to substrate pixels
             coords = salient_order[:, self.step * i:self.step * (i + 1)]
-            start.cpu().numpy().reshape(n_samples, 3, HW)[
-                r, :, coords] = finish.cpu().numpy().reshape(n_samples, 3, HW)[r, :, coords]
+            start.cpu().numpy().reshape(n_samples, 3, self.hw)[
+                r, :, coords] = finish.cpu().numpy().reshape(n_samples, 3, self.hw)[r, :, coords]
         print('AUC: {}'.format(auc(scores.mean(1))))
         return scores, auc(scores.mean(1))
 
@@ -214,9 +215,9 @@ class CausalMetric():
             preds = self.model(img_batch[i*batch_size:(i+1)*batch_size]).cpu()
             predictions[i*batch_size:(i+1)*batch_size] = preds
         top = np.argmax(predictions, -1)
-        n_steps = (HW + self.step - 1) // self.step
+        n_steps = (self.hw + self.step - 1) // self.step
         scores = np.empty((n_steps + 1, n_samples))
-        t_r = exp_batch.reshape(-1, HW)
+        t_r = exp_batch.reshape(-1, self.hw)
         salient_order = np.argsort(t_r, axis=1)
         salient_order = torch.flip(salient_order, [0, 1])
 
@@ -247,7 +248,7 @@ class CausalMetric():
                 scores[i, j*batch_size:(j+1)*batch_size] = preds
             # Change specified number of most salient pixels to substrate pixels
             coords = salient_order[:, self.step * i:self.step * (i + 1)]
-            start.cpu().numpy().reshape(n_samples, 3, HW)[
-                r, :, coords] = finish.cpu().numpy().reshape(n_samples, 3, HW)[r, :, coords]
+            start.cpu().numpy().reshape(n_samples, 3, self.hw)[
+                r, :, coords] = finish.cpu().numpy().reshape(n_samples, 3, self.hw)[r, :, coords]
         print('AUC: {}'.format(auc(scores.mean(1))))
         return scores, auc(scores.mean(1))
