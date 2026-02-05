@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
-
+from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2, MedSigLIP
 
 def conceptclip_collate_fn(batch):
     """Custom collate function for ConceptCLIP that keeps PIL images as-is."""
@@ -17,7 +17,7 @@ def conceptclip_collate_fn(batch):
     labels = torch.stack([item[1] if isinstance(item[1], torch.Tensor) else torch.tensor(item[1]) for item in batch])
     return images, labels
 
-from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2
+
 
 try:
     from transformers import AutoModel, AutoProcessor
@@ -1028,6 +1028,9 @@ def main(args):
         elif args.model == 'swinv2':
             img_model = SwinV2(embedding_dim=args.embedding_dim)
             is_conceptclip_img = False
+        elif args.model == 'medsiglip':
+            img_model = MedSigLIP() 
+            is_conceptclip_img = False
         else:
             raise NotImplementedError('Model not supported!')
         
@@ -1068,8 +1071,8 @@ def main(args):
         elif args.model == 'convnextv2':
             model = ConvNeXtV2(embedding_dim=args.embedding_dim)
             is_conceptclip = False
-        elif args.model == 'swinv2':
-            model = SwinV2(embedding_dim=args.embedding_dim)
+        elif args.model == 'medsiglip':
+            model = MedSigLIP(embedding_dim=args.embedding_dim)
             is_conceptclip = False
         else:
             raise NotImplementedError('Model not supported!')

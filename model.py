@@ -127,7 +127,44 @@ class SwinV2(nn.Module):
         # normalize features
         x = F.normalize(x, dim=1)
         return x
-    
+
+class MedSigLIP(nn.Module):
+    def __init__(self, model_name="google/medsiglip-448", embed_dim=512, unfreeze_layers=2):
+        super().__init__()
+        full_model = AutoModel.from_pretrained(model_name)
+        self.backbone = full_model.vision_model 
+        
+        # --- BƯỚC 1: Đóng băng toàn bộ Backbone ---
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+            
+        # --- BƯỚC 2: Mở khóa (Unfreeze) các lớp cuối ---
+        # MedSigLIP ViT thường có 24 layers (0-23)
+        # Chúng ta sẽ mở khóa các layer cuối cùng và lớp LayerNorm sau cùng
+        if unfreeze_layers > 0:
+            # Mở khóa các transformer blocks cuối
+            for layer in self.backbone.encoder.layers[-unfreeze_layers:]:
+                for param in layer.parameters():
+                    param.requires_grad = True
+            
+            # Mở khóa post_layernorm (quan trọng để cân chỉnh embedding cuối)
+            for param in self.backbone.post_layernorm.parameters():
+                param.requires_grad = True
+
+        # --- BƯỚC 3: Projection Head luôn luôn được train ---
+        hidden_size = self.backbone.config.hidden_size
+        self.projection = nn.Sequential(
+            nn.Linear(hidden_size, 512),
+            nn.LayerNorm(512),
+            nn.ReLU(),
+            nn.Linear(512, embed_dim)
+        )
+
+    def forward(self, x):
+        outputs = self.backbone(pixel_values=x)
+        features = outputs.pooler_output 
+        embeddings = self.projection(features)
+        return torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
 # Use transformer Automodel for ConceptCLIP using JerrryNie/ConceptCLI
 # Image Encoder: SigLIP-ViT-400M-16

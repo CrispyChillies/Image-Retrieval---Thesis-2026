@@ -8,8 +8,8 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
 
-from model import ConvNeXtV2, ResNet50, DenseNet121
-from explanations import SBSMBatch, SimAtt, SimCAM, SimCAM_Densenet121
+from model import ConvNeXtV2, ResNet50, DenseNet121, MedSigLIP
+from explanations import SBSMBatch, SimAtt, SimCAM, SimCAM_Densenet121, SimCAM_MedSigLIP
 
 from PIL import Image
 from torch.utils.data import Dataset
@@ -128,7 +128,9 @@ def main(args):
     elif args.model == 'resnet50':
         model = ResNet50(embedding_dim=args.embedding_dim)
     elif args.model == 'convnextv2':
-        model = ConvNeXtV2(embedding_dim=args.embedding_dim)
+        model = ConvNeXtV2()
+    elif args.model == 'medsiglp':
+        model = MedSigLIP()
     else:
         raise NotImplementedError('Model not supported!')
 
@@ -185,7 +187,18 @@ def main(args):
                 target_layer=target_layer,
                 fc=None
             )
+        elif args.model == 'medsiglip':
+            target_layer = model.backbone.post_layernorm
+            explainer = SimCAM_MedSigLIP(model, target_layer)
+            
+            print("Testing SimCAM_MedSigLIP explainer...")
+            x_q = torch.randn(1, 3, 448, 448).cuda()
+            x = torch.randn(6, 3, 448, 448).cuda()
 
+            maps = explainer(x_q, x)
+            print(maps.shape)   # should be [6, 448, 448]
+            print(maps.min().item(), maps.max().item())
+                        
     else:
         raise NotImplementedError('Explainer not supported!')
 

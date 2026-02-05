@@ -8,6 +8,9 @@ from sklearn.linear_model import LogisticRegression
 
 from gradcam import ModelOutputs
 
+import torch.nn.functional as F
+import numpy as np
+
 
 class SBSM(nn.Module):
     def __init__(self, model, input_size, gpu_batch=100):
@@ -893,3 +896,77 @@ class SimCAM(nn.Module):
         return maps
 
 
+class SimCAM_MedSigLIP(nn.Module):
+    def __init__(self, model, target_layer):
+        super().__init__()
+        self.model = model
+        self.target_layer = target_layer
+
+    def forward(self, x_q, x):
+        """
+        x_q: [1,3,H,W]
+        x:   [K,3,H,W]
+        returns: [K, H, W]
+        """
+        Bq = x_q.shape[0]
+        assert Bq == 1, "x_q must be batch size 1"
+
+        _, _, H, W = x_q.shape
+
+        feats = []
+
+        def hook_fn(m, inp, out):
+            feats.append(out)
+
+        handle = self.target_layer.register_forward_hook(hook_fn)
+
+        with torch.no_grad():
+            x_all = torch.cat([x_q, x], dim=0)  # [1+K,3,H,W]
+            _ = self.model.backbone(pixel_values=x_all)  # IMPORTANT: call vision backbone
+            handle.remove()
+
+            if len(feats) == 0:
+                raise RuntimeError("Hook did not capture anything")
+
+            tokens = feats[0]  # expected [B, N, D]
+            if isinstance(tokens, (tuple, list)):
+                tokens = tokens[0]
+
+            if tokens.dim() != 3:
+                raise RuntimeError(f"Expected tokens [B,N,D], got {tokens.shape}")
+
+            B, N, D = tokens.shape
+
+            # remove CLS token
+            patch_tokens = tokens[:, 1:, :]  # [B, num_patches, D]
+
+            num_patches = patch_tokens.shape[1]
+            grid = int(np.sqrt(num_patches))
+            assert grid * grid == num_patches, f"num_patches={num_patches} is not square"
+
+            q = patch_tokens[0:1]    # [1, hw, D]
+            r = patch_tokens[1:]     # [K, hw, D]
+
+            # similarity decomposition
+            # -> [K, hw, hw]
+            sim = torch.matmul(q.expand(r.size(0), -1, -1), r.transpose(1, 2))
+
+            # normalize and clamp
+            sim = sim / (sim.amax(dim=(1, 2), keepdim=True) + 1e-8)
+            sim = sim.clamp(min=0)
+
+            # reshape: [K, h, w, h, w]
+            sim = sim.view(r.size(0), grid, grid, grid, grid)
+
+            # retrieval saliency: sum over query positions
+            maps = sim.sum(dim=(1, 2))  # [K, grid, grid]
+
+            # upsample to full image resolution
+            maps = F.interpolate(
+                maps.unsqueeze(1),
+                size=(H, W),
+                mode="bilinear",
+                align_corners=False
+            ).squeeze(1)  # [K,H,W]
+
+        return maps
