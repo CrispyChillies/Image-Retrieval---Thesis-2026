@@ -179,13 +179,15 @@ def main(args):
                 fc=None
             )
         elif args.model == 'convnextv2':
-           target_layer = model.convnext.stages[-1].blocks[-1]
+           backbone = model.convnext
+           target_layer = backbone.stages[3].blocks[2]
            
            explainer = SimCAM(
-                model=model,            
+                model=backbone,
                 target_layer=target_layer,
-                fc=None                 
+                fc=None
             )
+
     else:
         raise NotImplementedError('Explainer not supported!')
 
