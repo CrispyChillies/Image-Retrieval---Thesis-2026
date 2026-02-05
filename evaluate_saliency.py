@@ -100,7 +100,7 @@ def main():
     # Argument parser for configurable parameters
     parser = argparse.ArgumentParser(description='Evaluate saliency maps with configurable parameters.')
     parser.add_argument('--dataset_type', type=str, default='covid', help='Dataset type: covid or isic')
-    parser.add_argument('--model_type', type=str, default='densenet121', choices=['densenet121', 'resnet50'], help='Model architecture: densenet121 or resnet50')
+    parser.add_argument('--model_type', type=str, default='densenet121', choices=['densenet121', 'resnet50', 'convnextv2'], help='Model architecture: densenet121, resnet50, or convnextv2')
     parser.add_argument('--model_weights', type=str, default='/data/brian.hu/covid_saliency/covid_densenet121_embed_256_seed_1_epoch_20_ckpt.pth', help='Path to model weights')
     parser.add_argument('--main_path', type=str, default='/data/brian.hu/covid_saliency/simatt/', help='Path to saliency maps')
     parser.add_argument('--query_img_path', type=str, default='/data/brian.hu/COVID/data/test/', help='Path to query images')
