@@ -99,7 +99,7 @@ class AverageCounter():
 def main():
     # Argument parser for configurable parameters
     parser = argparse.ArgumentParser(description='Evaluate saliency maps with configurable parameters.')
-    parser.add_argument('--dataset_type', type=str, default='covid', help='Dataset type: covid or isic')
+    parser.add_argument('--dataset_type', type=str, default='covid', help='Dataset type: covid, isic, tbx11k, or vindr')
     parser.add_argument('--model_type', type=str, default='densenet121', choices=['densenet121', 'resnet50', 'convnextv2'], help='Model architecture: densenet121, resnet50, or convnextv2')
     parser.add_argument('--model_weights', type=str, default='/data/brian.hu/covid_saliency/covid_densenet121_embed_256_seed_1_epoch_20_ckpt.pth', help='Path to model weights')
     parser.add_argument('--main_path', type=str, default='/data/brian.hu/covid_saliency/simatt/', help='Path to saliency maps')
@@ -169,6 +169,39 @@ def main():
             else:
                 class_labels[im_name+'.jpg'] = 'nevi'
             image_list.append(im_name+'.jpg')
+
+    elif args.dataset_type == 'tbx11k':
+        import pandas as pd
+        import csv
+        valid_class = ['tb', 'healthy', 'sick_but_no_tb']
+        # Read TBX11k CSV file
+        with open(args.csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                img_name = row['fname']
+                label = row['image_type'].strip()
+                if label in valid_class:
+                    class_labels[img_name] = label
+                    image_list.append(img_name)
+
+    elif args.dataset_type == 'vindr':
+        import pandas as pd
+        valid_class = ['Aortic enlargement', 'Cardiomegaly', 'Pleural effusion', 
+                      'Pleural thickening', 'Lung Opacity', 'No finding']
+        # Read VINDr CSV file
+        df = pd.read_csv(args.csv_path)
+        df_grouped = df.groupby('image_id')[valid_class].max().reset_index()
+        
+        for idx, row in df_grouped.iterrows():
+            img_name = row['image_id'] + '.png'
+            # Find the primary class (first positive label or 'No finding')
+            label = 'No finding'
+            for cls in valid_class[:-1]:  # Check all except 'No finding'
+                if row[cls] == 1:
+                    label = cls
+                    break
+            class_labels[img_name] = label
+            image_list.append(img_name)
 
     # transform = transforms.Compose([
     #     transforms.Resize(256),

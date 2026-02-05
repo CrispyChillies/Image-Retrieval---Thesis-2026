@@ -9,9 +9,10 @@ import csv
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
-
+# from segmentation import segment_and_mask
 import numpy as np
 import cv2
+import pandas as pd
 
 
 class ISICDataSet(Dataset):
@@ -90,8 +91,6 @@ class ChestXrayDataSet(Dataset):
             "normal": 0,
             "pneumonia": 1,
             "COVID-19": 2,
-            "negative": 1,
-            "positive": 2,
         }
 
         image_names = []
@@ -118,23 +117,29 @@ class ChestXrayDataSet(Dataset):
         self.transform = transform
 
     def __getitem__(self, index):
+        """
+        Args:
+            index: the index of item
+
+        Returns:
+            image and its labels
+        """
         image_name = self.image_names[index]
         image = Image.open(image_name).convert('RGB')
         label = self.labels[index]
-        # Segmentation disabled for training
-        # # Convert PIL image to numpy array (BGR for OpenCV)
-        # image_np = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-        # # Apply lung segmentation
-        # masked_np = segment_and_mask(image_np)
-        # # Convert back to PIL Image (RGB)
-        # masked_image = Image.fromarray(cv2.cvtColor(masked_np, cv2.COLOR_BGR2RGB))
+        if self.mask_names:
+            mask_name = self.mask_names[index]
+            mask = Image.open(mask_name).resize(image.size)
+            image = Image.composite(image, Image.new('RGB', image.size), mask)
         if self.transform is not None:
             image = self.transform(image)
         return image, torch.tensor(label, dtype=torch.long)
-
+    
     def __len__(self):
         return len(self.image_names)
 
+
+# TBX11k Dataset for retrieval (classification/retrieval only, no bbox)
 class TBX11kDataSet(Dataset):
     def __init__(self, data_dir, csv_file, transform=None):
         """
@@ -176,19 +181,49 @@ class TBX11kDataSet(Dataset):
         return len(self.image_names)
 
 
-# Test main function for ChestXrayDataSet
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    # Example usage: update these paths as needed
-    data_dir = "./samples"  # directory containing images
-    image_list_file = "./train_split.txt"  # file listing images and labels
-    dataset = ChestXrayDataSet(data_dir, image_list_file, use_covid=True, mask_dir=None, transform=None)
-    print(f"Total images in dataset: {len(dataset)}")
-    # Load a sample image
-    img, label = dataset[0]
-    print(f"Sample label: {label}")
-    # Show the image
-    plt.imshow(img)
-    plt.title(f"Label: {label}")
-    plt.axis('off')
-    plt.show()
+class VINDRDataSet(Dataset):
+    def __init__(self, data_dir, csv_file, transform=None):
+        """
+        Args:
+            data_dir: Đường dẫn đến thư mục chứa ảnh (.png).
+            csv_file: Đường dẫn đến file CSV (chứa image_id và các cột label).
+            transform: Các phép biến đổi ảnh (Augmentation).
+        """
+        self.data_dir = data_dir
+        self.transform = transform
+        
+        self.labels = [
+            "Aortic enlargement", "Cardiomegaly", 
+            "Pleural effusion", "Pleural thickening", 
+            "Lung Opacity", "No finding"
+        ]
+        
+        df = pd.read_csv(csv_file)
+        self.data = df.groupby("image_id")[self.labels].max().reset_index()
+        
+        self.image_ids = self.data["image_id"].tolist()
+        self.labels = self.data[self.labels].values
+
+    def __getitem__(self, index):
+        img_id = self.image_ids[index]
+        img_path = os.path.join(self.data_dir, f"{img_id}.png")
+        
+        image = Image.open(img_path).convert('RGB')
+        
+        label = self.labels[index]
+        
+        if self.transform is not None:
+            image = self.transform(image)
+
+        return image, torch.tensor(label, dtype=torch.float32)
+
+    def __len__(self):
+        return len(self.image_ids)
+
+# if __name__ == "__main__":
+#     dataset = VINDRDataSet(data_dir='', csv_file='/home/aaronpham5504/Coding/Image-Retrieval---Thesis-2026/vindr/image_labels_train.csv')
+#     img, target = dataset[0]
+
+#     print(f"Image shape: {img.size}")
+#     print(f"Target vector: {target}")
+#     print(f"Labels mapping: {dataset.target_columns}")

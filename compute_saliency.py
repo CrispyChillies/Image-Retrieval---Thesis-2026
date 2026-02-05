@@ -6,7 +6,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 import torchvision.transforms as transforms
-from read_data import ISICDataSet, ChestXrayDataSet
+from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
 
 from model import ConvNeXtV2, ResNet50, DenseNet121
 from explanations import SBSMBatch, SimAtt, SimCAM
@@ -226,6 +226,14 @@ def main(args):
                                    image_list_file=args.test_image_list,
                                    mask_dir=args.mask_dir,
                                    transform=test_transform)
+    elif args.dataset == 'tbx11k':
+        test_dataset = TBX11kDataSet(data_dir=args.test_dataset_dir,
+                                     csv_file=args.test_image_list,
+                                     transform=test_transform)
+    elif args.dataset == 'vindr':
+        test_dataset = VINDRDataSet(data_dir=args.test_dataset_dir,
+                                    csv_file=args.test_image_list,
+                                    transform=test_transform)
     else:
         raise NotImplementedError('Dataset not supported!')
 
@@ -244,7 +252,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch Saliency Evaluation')
 
     parser.add_argument('--dataset', default='covid',
-                        help='Dataset to use (covid or isic)')
+                        help='Dataset to use (covid, isic, tbx11k, or vindr)')
     parser.add_argument('--test-dataset-dir', default='/data/brian.hu/COVID/data/test',
                         help='Test dataset directory path')
     parser.add_argument('--test-image-list', default='./test_COVIDx4.txt',
