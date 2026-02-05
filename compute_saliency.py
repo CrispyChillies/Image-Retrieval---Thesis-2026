@@ -215,12 +215,6 @@ def main(args):
                                             transforms.ToTensor(),
                                             normalize])
 
-    # test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-    #                                      transforms.Resize(256),
-    #                                      transforms.CenterCrop(224),
-    #                                      transforms.ToTensor(),
-    #                                      normalize])
-
     # Set up dataset and dataloader
     if args.dataset == 'covid':
         test_dataset = ChestXrayDataSet(data_dir=args.test_dataset_dir,

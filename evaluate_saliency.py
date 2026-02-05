@@ -5,7 +5,7 @@ import torch
 import numpy as np
 from PIL import Image
 import torch.nn as nn
-from model import DenseNet121, ResNet50
+from model import ConvNeXtV2, DenseNet121, ResNet50
 from torchvision import transforms
 from evaluation import CausalMetric, gkern
 import argparse
@@ -117,6 +117,8 @@ def main():
         model = DenseNet121()
     elif args.model_type == 'resnet50':
         model = ResNet50()
+    elif args.model_type == 'convnextv2':
+        model = ConvNeXtV2()
     else:
         raise ValueError(f"Unsupported model type: {args.model_type}")
     
@@ -168,15 +170,34 @@ def main():
                 class_labels[im_name+'.jpg'] = 'nevi'
             image_list.append(im_name+'.jpg')
 
-    transform = transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(
+    # transform = transforms.Compose([
+    #     transforms.Resize(256),
+    #     transforms.CenterCrop((224, 224)),
+    #     transforms.ToTensor(),
+    #     transforms.Normalize(
+    #         mean=[0.485, 0.456, 0.406],
+    #         std=[0.229, 0.224, 0.225]
+    #     )
+    # ])
+
+    img_size = 384 if args.model in ['convnextv2', 'swinv2'] else 224
+
+    if args.model in ['convnextv2', 'swinv2']:
+        transform = transforms.Compose([
+            transforms.Lambda(lambda img: img.convert('RGB')),
+            transforms.Resize((img_size, img_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(
             mean=[0.485, 0.456, 0.406],
             std=[0.229, 0.224, 0.225]
-        )
-    ])
+        )])
+    else:
+        transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                std=[0.229, 0.224, 0.225])])
 
     def prep_image_(file_n):
         query_image = Image.open(os.path.join(
