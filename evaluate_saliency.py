@@ -180,9 +180,9 @@ def main():
     #     )
     # ])
 
-    img_size = 384 if args.model in ['convnextv2', 'swinv2'] else 224
+    img_size = 384 if args.model_type in ['convnextv2', 'swinv2'] else 224
 
-    if args.model in ['convnextv2', 'swinv2']:
+    if args.model_type in ['convnextv2', 'swinv2']:
         transform = transforms.Compose([
             transforms.Lambda(lambda img: img.convert('RGB')),
             transforms.Resize((img_size, img_size)),
