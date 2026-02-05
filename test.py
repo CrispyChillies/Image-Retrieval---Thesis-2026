@@ -1072,7 +1072,7 @@ def main(args):
             model = ConvNeXtV2(embedding_dim=args.embedding_dim)
             is_conceptclip = False
         elif args.model == 'medsiglip':
-            model = MedSigLIP(embedding_dim=args.embedding_dim)
+            model = MedSigLIP()
             is_conceptclip = False
         else:
             raise NotImplementedError('Model not supported!')
