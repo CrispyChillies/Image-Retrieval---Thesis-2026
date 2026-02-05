@@ -209,10 +209,15 @@ def main(args):
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
     
-    # Use 384x384 for ConvNeXtV2 and SwinV2, 224x224 for other models
-    img_size = 384 if args.model in ['convnextv2', 'swinv2'] else 224
+    # Use 384x384 for ConvNeXtV2 and SwinV2, 448x448 for MedSigLIP, 224x224 for other models
+    if args.model == 'medsiglip':
+        img_size = 448
+    elif args.model in ['convnextv2', 'swinv2']:
+        img_size = 384
+    else:
+        img_size = 224
 
-    if args.model in ['convnextv2', 'swinv2']:
+    if args.model in ['convnextv2', 'swinv2', 'medsiglip']:
         test_transform = transforms.Compose([
             transforms.Lambda(lambda img: img.convert('RGB')),
             transforms.Resize((img_size, img_size)),

@@ -214,9 +214,15 @@ def main():
     #     )
     # ])
 
-    img_size = 384 if args.model_type in ['convnextv2', 'swinv2'] else 224
+    # Use 384x384 for ConvNeXtV2 and SwinV2, 448x448 for MedSigLIP, 224x224 for other models
+    if args.model_type == 'medsiglip':
+        img_size = 448
+    elif args.model_type in ['convnextv2', 'swinv2']:
+        img_size = 384
+    else:
+        img_size = 224
 
-    if args.model_type in ['convnextv2', 'swinv2']:
+    if args.model_type in ['convnextv2', 'swinv2', 'medsiglip']:
         transform = transforms.Compose([
             transforms.Lambda(lambda img: img.convert('RGB')),
             transforms.Resize((img_size, img_size)),
@@ -244,8 +250,13 @@ def main():
     f2 = open('./key_list_wacv_test_simatt.json', 'w')
     ins_del_q_dict = {}
     key_dict = {}
-    # Use 384 for ConvNeXtV2 and SwinV2, 224 for other models
-    input_size = 384 if args.model_type in ['convnextv2', 'swinv2'] else 224
+    # Use 448 for MedSigLIP, 384 for ConvNeXtV2 and SwinV2, 224 for other models
+    if args.model_type == 'medsiglip':
+        input_size = 448
+    elif args.model_type in ['convnextv2', 'swinv2']:
+        input_size = 384
+    else:
+        input_size = 224
     get_insert_dele = InsDel(model, device, input_size=input_size)
     for file_n in os.listdir(main_path):
         print(file_n)
