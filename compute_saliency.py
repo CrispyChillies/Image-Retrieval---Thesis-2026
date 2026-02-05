@@ -158,8 +158,7 @@ def main(args):
             print('Masks are loaded.')
     elif args.explainer == 'simatt':
         model = nn.Sequential(*list(model.children())
-                              [0], *list(model.children())[1:])
-        # TODO: Currently DenseNet121-specific  
+                              [0], *list(model.children())[1:]) 
         explainer = SimAtt(model, model[0], target_layers=["relu"])
     elif args.explainer == 'simcam':
         if args.model == 'densenet121':

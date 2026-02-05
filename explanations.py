@@ -704,7 +704,6 @@ class SimCAM_Densenet121(nn.Module):
 
             # Extract intermediate activations and outputs
             A, _ = self.extractor(x)
-            print("Extracted features shape:", [a.shape for a in A])
 
             # Reshape dimensions
             x = A[-1].permute(0, 2, 3, 1)
