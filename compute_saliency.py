@@ -13,6 +13,7 @@ from explanations import SBSMBatch, SimAtt, SimCAM, SimCAM_Densenet121, SimCAM_M
 
 from PIL import Image
 from torch.utils.data import Dataset
+from torchvision.transforms import InterpolationMode
 
 
 def rank_retrieval(dists, labels, topk=1):
@@ -118,6 +119,24 @@ def process(explainer, loader, device, args):
                 for s, p in zip(reversed(salmaps), reversed(paths)):
                     np.save(os.path.join(base_path, p.split('/')[-1]), s)
 
+def get_transforms_medsiglip(img_size=224):
+    normalize = transforms.Normalize([0.485, 0.456, 0.406],
+                                     [0.229, 0.224, 0.225])
+    train_transform = transforms.Compose([
+        transforms.Lambda(lambda image: image.convert('RGB')),
+        transforms.Resize(img_size + 32, interpolation=InterpolationMode.BICUBIC),
+        transforms.RandomResizedCrop(img_size, scale=(0.9, 1.0), interpolation=InterpolationMode.BICUBIC),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ToTensor(),
+        normalize,
+    ])
+    val_transform = transforms.Compose([
+        transforms.Resize(img_size + 32, interpolation=InterpolationMode.BICUBIC),
+        transforms.CenterCrop(img_size),
+        transforms.ToTensor()
+    ])
+
+    return train_transform, val_transform
 
 def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -210,9 +229,7 @@ def main(args):
                                      [0.229, 0.224, 0.225])
     
     # Use 384x384 for ConvNeXtV2 and SwinV2, 448x448 for MedSigLIP, 224x224 for other models
-    if args.model == 'medsiglip':
-        img_size = 448
-    elif args.model in ['convnextv2', 'swinv2']:
+    if args.model in ['convnextv2', 'swinv2']:
         img_size = 384
     else:
         img_size = 224
@@ -224,6 +241,8 @@ def main(args):
             transforms.ToTensor(),
             normalize
         ])
+    elif args.model == 'medsiglip':
+        _, test_transform = get_transforms_medsiglip(img_size=img_size)
     else:
         test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
                                             transforms.Resize(256),
