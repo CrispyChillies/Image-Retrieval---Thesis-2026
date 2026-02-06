@@ -209,14 +209,6 @@ def main(args):
         elif args.model == 'medsiglip':
             target_layer = model.backbone.post_layernorm
             explainer = SimCAM_MedSigLIP(model, target_layer)
-            
-            print("Testing SimCAM_MedSigLIP explainer...")
-            x_q = torch.randn(1, 3, 448, 448).cuda()
-            x = torch.randn(6, 3, 448, 448).cuda()
-
-            maps = explainer(x_q, x)
-            print(maps.shape)   # should be [6, 448, 448]
-            print(maps.min().item(), maps.max().item())
                         
     else:
         raise NotImplementedError('Explainer not supported!')
