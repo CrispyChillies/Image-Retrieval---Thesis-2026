@@ -129,7 +129,7 @@ def main(args):
         model = ResNet50(embedding_dim=args.embedding_dim)
     elif args.model == 'convnextv2':
         model = ConvNeXtV2()
-    elif args.model == 'medsiglp':
+    elif args.model == 'medsiglip':
         model = MedSigLIP()
     else:
         raise NotImplementedError('Model not supported!')
