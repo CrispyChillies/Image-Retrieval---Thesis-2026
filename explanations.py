@@ -937,8 +937,8 @@ class SimCAM_MedSigLIP(nn.Module):
 
             B, N, D = tokens.shape
 
-            # remove CLS token
-            patch_tokens = tokens[:, 1:, :]  # [B, num_patches, D]
+            # SigLIP doesn't use CLS token - all tokens are patch tokens
+            patch_tokens = tokens  # [B, num_patches, D]
 
             num_patches = patch_tokens.shape[1]
             grid = int(np.sqrt(num_patches))
