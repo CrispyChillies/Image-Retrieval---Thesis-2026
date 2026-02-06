@@ -232,6 +232,8 @@ def main(args):
     # Use 384x384 for ConvNeXtV2 and SwinV2, 448x448 for MedSigLIP, 224x224 for other models
     if args.model in ['convnextv2', 'swinv2']:
         img_size = 384
+    elif args.model == 'medsiglip':
+        img_size = 448
     else:
         img_size = 224
 
