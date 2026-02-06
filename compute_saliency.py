@@ -86,9 +86,18 @@ def process(explainer, loader, device, args):
                 np.save(os.path.join(base_path, p.split('/')[-1]), s)
     else:
         # Load results
-        results = np.load(args.results)
-        pred, idx = rank_retrieval(
-            results['dists'], results['labels'], topk=args.topk)
+        results = np.load(args.results, allow_pickle=True)
+        
+        # Handle different save formats
+        if 'classification_results' in results:
+            classification_data = results['classification_results'].item()
+            dists = classification_data.get('dists')
+            labels = classification_data.get('labels')
+        else:
+            dists = results['dists']
+            labels = results['labels']
+            
+        pred, idx = rank_retrieval(dists, labels, topk=args.topk)
         image_list = loader.dataset.image_names
 
         for img, ind in zip(image_list, idx):
