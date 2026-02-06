@@ -5,10 +5,29 @@ import torch
 import numpy as np
 from PIL import Image
 import torch.nn as nn
-from model import ConvNeXtV2, DenseNet121, ResNet50
+from model import ConvNeXtV2, DenseNet121, ResNet50, MedSigLIP
 from torchvision import transforms
 from evaluation import CausalMetric, gkern
 import argparse
+
+def get_transforms_medsiglip(img_size=224):
+    normalize = transforms.Normalize([0.485, 0.456, 0.406],
+                                     [0.229, 0.224, 0.225])
+    train_transform = transforms.Compose([
+        transforms.Lambda(lambda image: image.convert('RGB')),
+        transforms.Resize(img_size + 32, interpolation=InterpolationMode.BICUBIC),
+        transforms.RandomResizedCrop(img_size, scale=(0.9, 1.0), interpolation=InterpolationMode.BICUBIC),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ToTensor(),
+        normalize,
+    ])
+    val_transform = transforms.Compose([
+        transforms.Resize(img_size + 32, interpolation=InterpolationMode.BICUBIC),
+        transforms.CenterCrop(img_size),
+        transforms.ToTensor()
+    ])
+
+    return train_transform, val_transform
 
 
 class InsDel():
@@ -101,7 +120,7 @@ def main():
     # Argument parser for configurable parameters
     parser = argparse.ArgumentParser(description='Evaluate saliency maps with configurable parameters.')
     parser.add_argument('--dataset_type', type=str, default='covid', help='Dataset type: covid, isic, tbx11k, or vindr')
-    parser.add_argument('--model_type', type=str, default='densenet121', choices=['densenet121', 'resnet50', 'convnextv2'], help='Model architecture: densenet121, resnet50, or convnextv2')
+    parser.add_argument('--model_type', type=str, default='densenet121', choices=['densenet121', 'resnet50', 'convnextv2', 'medsiglip'], help='Model architecture: densenet121, resnet50, or convnextv2')
     parser.add_argument('--model_weights', type=str, default='/data/brian.hu/covid_saliency/covid_densenet121_embed_256_seed_1_epoch_20_ckpt.pth', help='Path to model weights')
     parser.add_argument('--main_path', type=str, default='/data/brian.hu/covid_saliency/simatt/', help='Path to saliency maps')
     parser.add_argument('--query_img_path', type=str, default='/data/brian.hu/COVID/data/test/', help='Path to query images')
@@ -120,6 +139,8 @@ def main():
         model = ResNet50()
     elif args.model_type == 'convnextv2':
         model = ConvNeXtV2()
+    elif args.model_type == 'medsiglip':
+        model = MedSigLIP()
     else:
         raise ValueError(f"Unsupported model type: {args.model_type}")
     
@@ -231,6 +252,8 @@ def main():
             mean=[0.485, 0.456, 0.406],
             std=[0.229, 0.224, 0.225]
         )])
+    elif args.model_type == 'medsiglip':
+        _, transform = get_transforms_medsiglip(img_size=img_size)
     else:
         transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
             transforms.Resize(256),
