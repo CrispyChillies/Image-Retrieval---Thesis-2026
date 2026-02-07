@@ -69,29 +69,27 @@ def encode_all_images(model, dataset, device, batch_size=32):
         pixel_values = inputs['pixel_values'].to(device)
         
         with torch.no_grad():
-            # Get both CLS and patch embeddings
+            # Call model directly to get dict output
             outputs = model.model(pixel_values=pixel_values)
             
             # Extract CLS embeddings (for retrieval)
-            if hasattr(outputs, 'image_embeds'):
-                cls_embed = outputs.image_embeds  # (B, D)
-            else:
-                # Fallback: use model.encode_image
-                cls_embed = model.encode_image(pixel_values)
+            cls_embed = outputs['image_features']  # (B, D)
             
             # Extract patch embeddings (for explanation)
-            if hasattr(outputs, 'last_hidden_state'):
-                patch_embed = outputs.last_hidden_state  # (B, N_patches+1, D)
-                # Remove CLS token, keep only patches
-                patch_embed = patch_embed[:, 1:, :]  # (B, N_patches, D)
-            else:
-                # Alternative path
-                patch_embed = outputs.get('image_features_all', None)
+            # image_token_features includes CLS token at position 0, remove it
+            patch_embed = outputs.get('image_token_features', None)  # (B, N_patches+1, D)
+            if patch_embed is not None and patch_embed.size(1) > 1:
+                patch_embed = patch_embed[:, 1:, :]  # (B, N_patches, D) - remove CLS
+            elif patch_embed is None:
+                # Fallback: use all tokens
+                patch_embed = outputs.get('last_hidden_state', None)
                 if patch_embed is not None:
                     patch_embed = patch_embed[:, 1:, :]
             
+            # Normalize
             cls_embed = F.normalize(cls_embed, dim=-1)
-            patch_embed = F.normalize(patch_embed, dim=-1)
+            if patch_embed is not None:
+                patch_embed = F.normalize(patch_embed, dim=-1)
             
             cls_embeds.append(cls_embed.cpu())
             patch_embeds.append(patch_embed.cpu())
@@ -123,10 +121,9 @@ def encode_concepts(model, device):
     inputs = {k: v.to(device) for k, v in inputs.items()}
     
     with torch.no_grad():
-        text_embeds = model.encode_text(
-            input_ids=inputs['input_ids'],
-            attention_mask=inputs['attention_mask']
-        )
+        # Call model directly to get text features
+        outputs = model.model(input_ids=inputs['input_ids'], attention_mask=inputs['attention_mask'])
+        text_embeds = outputs['text_features']  # (22, D)
         text_embeds = F.normalize(text_embeds, dim=-1)
     
     return text_embeds.cpu(), concept_names
