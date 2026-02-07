@@ -183,3 +183,182 @@ class WeightedMultiLabelTripletLoss(nn.Module):
             count += 1
 
         return loss / (count + 1e-8), torch.tensor(0.0) 
+
+
+# ============================================================================
+# ConceptCLIP Losses: IT-Align + RC-Align (from ConceptCLIP paper, arXiv:2501.15579)
+# ============================================================================
+
+class ITAlignLoss(nn.Module):
+    """Image-Text Alignment Loss (SigLIP-style sigmoid contrastive).
+    
+    From the paper Section 3.2:
+    L_IT = -1/|B| * Σ_m Σ_n log( 1 / (1 + exp(z_mn * (-t * x_m·y_n + b))) )
+    
+    where z_mn = +1 if (m,n) is a matching pair, -1 otherwise,
+    t = logit_scale (learnable temperature), b = logit_bias (learnable).
+    """
+    
+    def __init__(self):
+        super(ITAlignLoss, self).__init__()
+    
+    def forward(self, image_features, text_features, logit_scale, logit_bias=None):
+        """
+        Args:
+            image_features: (B, D) L2-normalized image CLS embeddings
+            text_features: (B, D) L2-normalized text CLS embeddings
+            logit_scale: scalar or (1,) learnable temperature (log scale)
+            logit_bias: scalar or (1,) learnable bias (optional, default 0)
+        
+        Returns:
+            loss: scalar IT-Align loss
+        """
+        # Normalize features
+        image_features = F.normalize(image_features, dim=-1)
+        text_features = F.normalize(text_features, dim=-1)
+        
+        B = image_features.size(0)
+        
+        # Compute similarity matrix: (B, B)
+        # logit_scale is typically stored as log(scale), so exp it
+        if logit_scale.dim() == 0 or logit_scale.numel() == 1:
+            t = logit_scale.exp()
+        else:
+            t = logit_scale
+        
+        logits = t * (image_features @ text_features.T)  # (B, B)
+        
+        if logit_bias is not None:
+            logits = logits + logit_bias
+        
+        # z_mn: +1 for matching pairs (diagonal), -1 for non-matching
+        # SigLIP loss: -1/B^2 * Σ_m Σ_n log(sigmoid(z_mn * logits_mn))
+        z = 2 * torch.eye(B, device=logits.device) - 1  # +1 on diag, -1 off-diag
+        
+        # log(sigmoid(z * logits)) = -log(1 + exp(-z * logits)) = -softplus(-z * logits)
+        loss = -F.logsigmoid(z * logits).sum() / (B * B)
+        
+        return loss
+
+
+class RCAlignLoss(nn.Module):
+    """Region-Concept Alignment Loss.
+    
+    From the paper Section 3.3:
+    - Build concept embeddings by encoding each concept name individually and 
+      using mean_pooling on the concept token embeddings.
+    - Compute similarity matrix A_ij = cos(patch_i, concept_j)
+    - S(I, T) = (1/w) * Σ_j max_i(A_ij)  -- max over patches for each concept
+    - L_RC = -1/|B| * Σ_m Σ_n z_mn * S(I_m, T_n)
+    
+    Uses sigmoid formulation consistent with IT-Align.
+    """
+    
+    def __init__(self):
+        super(RCAlignLoss, self).__init__()
+    
+    def forward(self, image_token_features, concept_text_features_list, 
+                logit_scale, logit_bias=None):
+        """
+        Args:
+            image_token_features: (B, N_patches, D) patch-level image embeddings
+            concept_text_features_list: list of B elements, each is (w_i, D) tensor 
+                with concept embeddings for that sample (w_i = number of active concepts).
+                Can have variable lengths; samples with 0 concepts are skipped.
+            logit_scale: learnable temperature
+            logit_bias: learnable bias (optional)
+        
+        Returns:
+            loss: scalar RC-Align loss
+        """
+        B = image_token_features.size(0)
+        device = image_token_features.device
+        
+        # Filter samples that have at least 1 concept
+        valid_indices = [i for i, c in enumerate(concept_text_features_list) 
+                         if c is not None and c.size(0) > 0]
+        
+        if len(valid_indices) == 0:
+            return torch.tensor(0.0, device=device, requires_grad=True)
+        
+        V = len(valid_indices)
+        
+        if logit_scale.dim() == 0 or logit_scale.numel() == 1:
+            t = logit_scale.exp()
+        else:
+            t = logit_scale
+        
+        # Compute S(I_m, T_n) for all valid pairs
+        # S(I, T) = (1/w) * Σ_j max_i( cos(patch_i, concept_j) )
+        similarity_scores = []
+        
+        for m_idx in valid_indices:
+            img_patches = F.normalize(image_token_features[m_idx], dim=-1)  # (N, D)
+            row_scores = []
+            
+            for n_idx in valid_indices:
+                concept_embeds = concept_text_features_list[n_idx]  # (w, D)
+                concept_embeds = F.normalize(concept_embeds, dim=-1)
+                w = concept_embeds.size(0)
+                
+                # A_ij = cos(patch_i, concept_j): (N, w)
+                A = img_patches @ concept_embeds.T
+                
+                # S(I, T) = (1/w) * Σ_j max_i(A_ij)
+                max_per_concept = A.max(dim=0).values  # (w,)
+                S = max_per_concept.mean()  # scalar
+                
+                row_scores.append(S)
+            
+            similarity_scores.append(torch.stack(row_scores))
+        
+        # similarity_scores: (V, V) matrix
+        sim_matrix = torch.stack(similarity_scores)  # (V, V)
+        
+        # Apply temperature and bias
+        logits = t * sim_matrix
+        if logit_bias is not None:
+            logits = logits + logit_bias
+        
+        # SigLIP-style loss on region-concept similarities
+        z = 2 * torch.eye(V, device=device) - 1
+        loss = -F.logsigmoid(z * logits).sum() / (V * V)
+        
+        return loss
+
+
+class ConceptCLIPLoss(nn.Module):
+    """Combined ConceptCLIP loss: IT-Align + α * RC-Align.
+    
+    Paper uses α = 0.5 (Table 2, ablation study).
+    """
+    
+    def __init__(self, alpha=0.5):
+        super(ConceptCLIPLoss, self).__init__()
+        self.alpha = alpha
+        self.it_align = ITAlignLoss()
+        self.rc_align = RCAlignLoss()
+    
+    def forward(self, image_features, text_features, image_token_features,
+                concept_text_features_list, logit_scale, logit_bias=None):
+        """
+        Args:
+            image_features: (B, D) global image CLS embeddings
+            text_features: (B, D) global text CLS embeddings
+            image_token_features: (B, N_patches, D) patch-level image embeddings
+            concept_text_features_list: list of B tensors, each (w_i, D)
+            logit_scale: learnable temperature
+            logit_bias: learnable bias
+        
+        Returns:
+            total_loss: scalar combined loss
+            it_loss: scalar IT-Align loss (for logging)
+            rc_loss: scalar RC-Align loss (for logging)
+        """
+        it_loss = self.it_align(image_features, text_features, logit_scale, logit_bias)
+        rc_loss = self.rc_align(image_token_features, concept_text_features_list,
+                                logit_scale, logit_bias)
+        
+        total_loss = it_loss + self.alpha * rc_loss
+        
+        return total_loss, it_loss, rc_loss

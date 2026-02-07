@@ -166,12 +166,117 @@ class MedSigLIP(nn.Module):
         embeddings = self.projection(features)
         return torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
-# Use transformer Automodel for ConceptCLIP using JerrryNie/ConceptCLI
+# Use transformer Automodel for ConceptCLIP using JerrryNie/ConceptCLIP
 # Image Encoder: SigLIP-ViT-400M-16
 # Text Encoder: PubMedBERT
+# Supports: IT-Align (image-text contrastive) + RC-Align (region-concept alignment)
 class conceptCLIP(nn.Module):
-    def __init__(self, model_name='JerrryNie/ConceptCLIP', embedding_dim=None):
+    def __init__(self, model_name='JerrryNie/ConceptCLIP', embedding_dim=None,
+                 unfreeze_vision_layers=4, unfreeze_text_layers=2):
         super(conceptCLIP, self).__init__()
-        # load pretrained model from transformers
-        self.model = AutoModel.from_pretrained(model_name)
-        self.processor = AutoProcessor.from_pretrained(model_name)
+        # Load the full ConceptCLIP model (OpenCLIP-based dual encoder)
+        self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        self.processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+
+        # --- Freeze strategy: freeze most, unfreeze last N layers ---
+        # Freeze all parameters first
+        for param in self.model.parameters():
+            param.requires_grad = False
+
+        # Unfreeze last N vision encoder layers
+        if hasattr(self.model, 'visual') and hasattr(self.model.visual, 'transformer'):
+            # OpenCLIP ViT structure
+            vision_layers = self.model.visual.transformer.resblocks
+            for layer in vision_layers[-unfreeze_vision_layers:]:
+                for param in layer.parameters():
+                    param.requires_grad = True
+            # Unfreeze vision ln_post and proj if present
+            if hasattr(self.model.visual, 'ln_post'):
+                for param in self.model.visual.ln_post.parameters():
+                    param.requires_grad = True
+            if hasattr(self.model.visual, 'proj') and self.model.visual.proj is not None:
+                self.model.visual.proj.requires_grad = True
+        elif hasattr(self.model, 'vision_model'):
+            # HF-style vision model
+            if hasattr(self.model.vision_model, 'encoder'):
+                vision_layers = self.model.vision_model.encoder.layers
+                for layer in vision_layers[-unfreeze_vision_layers:]:
+                    for param in layer.parameters():
+                        param.requires_grad = True
+            if hasattr(self.model.vision_model, 'post_layernorm'):
+                for param in self.model.vision_model.post_layernorm.parameters():
+                    param.requires_grad = True
+
+        # Unfreeze last N text encoder layers
+        if hasattr(self.model, 'text') and hasattr(self.model.text, 'transformer'):
+            # OpenCLIP text structure
+            text_layers = self.model.text.transformer.resblocks
+            for layer in text_layers[-unfreeze_text_layers:]:
+                for param in layer.parameters():
+                    param.requires_grad = True
+        elif hasattr(self.model, 'text_model'):
+            if hasattr(self.model.text_model, 'encoder'):
+                text_layers = self.model.text_model.encoder.layer
+                for layer in text_layers[-unfreeze_text_layers:]:
+                    for param in layer.parameters():
+                        param.requires_grad = True
+
+        # Unfreeze logit_scale and logit_bias (learnable temperature)
+        if hasattr(self.model, 'logit_scale'):
+            self.model.logit_scale.requires_grad = True
+        if hasattr(self.model, 'logit_bias'):
+            self.model.logit_bias.requires_grad = True
+
+        # Optional projection head for embedding_dim override
+        self.embedding_dim = embedding_dim
+        if embedding_dim is not None:
+            # Detect the hidden size from model config
+            if hasattr(self.model, 'config') and hasattr(self.model.config, 'projection_dim'):
+                in_features = self.model.config.projection_dim
+            elif hasattr(self.model, 'visual') and hasattr(self.model.visual, 'output_dim'):
+                in_features = self.model.visual.output_dim
+            else:
+                in_features = 768  # fallback
+            self.fc = nn.Linear(in_features, embedding_dim)
+        else:
+            self.fc = None
+
+    def encode_image(self, pixel_values):
+        """Encode images, returns (image_features [CLS], image_token_features [patches])"""
+        outputs = self.model(pixel_values=pixel_values)
+        image_features = outputs.get('image_features', None)  # (B, D) - CLS/pooled
+        image_token_features = outputs.get('image_token_features', None)  # (B, N_patches, D)
+        return image_features, image_token_features
+
+    def encode_text(self, input_ids, attention_mask=None):
+        """Encode text, returns (text_features [CLS], all token embeddings)"""
+        outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+        text_features = outputs.get('text_features', None)  # (B, D) - CLS/pooled
+        return text_features
+
+    def forward_clip(self, pixel_values, input_ids, attention_mask=None):
+        """Full CLIP forward: encode both image and text, return all features.
+        Used during ConceptCLIP fine-tuning with IT-Align + RC-Align.
+        """
+        outputs = self.model(
+            pixel_values=pixel_values,
+            input_ids=input_ids,
+            attention_mask=attention_mask
+        )
+        return {
+            'image_features': outputs['image_features'],         # (B, D)
+            'text_features': outputs['text_features'],           # (B, D) or (num_texts, D)
+            'image_token_features': outputs.get('image_token_features', None),  # (B, N, D)
+            'logit_scale': outputs.get('logit_scale', torch.tensor(1.0)),
+            'logit_bias': outputs.get('logit_bias', torch.tensor(0.0)),
+        }
+
+    def forward(self, pixel_values):
+        """Image-only forward for retrieval evaluation and compatibility with existing pipeline.
+        Returns L2-normalized image embeddings.
+        """
+        outputs = self.model(pixel_values=pixel_values)
+        image_features = outputs['image_features']  # (B, D)
+        if self.fc is not None:
+            image_features = self.fc(image_features)
+        return F.normalize(image_features, dim=1)
