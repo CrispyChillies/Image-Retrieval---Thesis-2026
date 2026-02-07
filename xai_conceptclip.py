@@ -10,7 +10,10 @@ This script demonstrates region-concept alignment visualization:
    - Spatial heatmaps showing where concepts are detected
 
 Usage:
-    # Basic usage
+    # Zero-shot (pretrained model, no fine-tuning)
+    python xai_conceptclip.py
+    
+    # With fine-tuned checkpoint
     python xai_conceptclip.py --checkpoint_path checkpoints/conceptclip_epoch1.pth
     
     # Custom query
@@ -316,8 +319,8 @@ def generate_text_explanation(query_id, retrieved_ids, similarity_scores,
 
 def parse_args():
     parser = argparse.ArgumentParser(description='ConceptCLIP xAI for Medical Image Retrieval')
-    parser.add_argument('--checkpoint_path', type=str, required=True,
-                        help='Path to trained ConceptCLIP checkpoint')
+    parser.add_argument('--checkpoint_path', type=str, default=None,
+                        help='Path to trained ConceptCLIP checkpoint (optional, uses pretrained model if not provided)')
     parser.add_argument('--csv_file', type=str, 
                         default='vindr/image_labels_test.csv',
                         help='Path to test CSV')
@@ -359,12 +362,17 @@ def main():
         unfreeze_text_layers=2
     )
     
-    checkpoint = torch.load(args.checkpoint_path, map_location='cpu')
-    if 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
-        print(f"   Loaded checkpoint from epoch {checkpoint.get('epoch', 'unknown')}")
+    if args.checkpoint_path:
+        print(f"   Loading fine-tuned checkpoint: {args.checkpoint_path}")
+        checkpoint = torch.load(args.checkpoint_path, map_location='cpu')
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+            print(f"   ✓ Loaded checkpoint from epoch {checkpoint.get('epoch', 'unknown')}")
+        else:
+            model.load_state_dict(checkpoint)
+            print(f"   ✓ Loaded checkpoint")
     else:
-        model.load_state_dict(checkpoint)
+        print("   Using pretrained ConceptCLIP model (zero-shot, no fine-tuning)")
     
     model = model.to(device)
     model.eval()
