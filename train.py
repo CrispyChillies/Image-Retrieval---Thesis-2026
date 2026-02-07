@@ -610,12 +610,12 @@ def main(args):
         if args.model == 'conceptclip':
             # Use ConceptCLIP-specific dataset (returns PIL images + concept-rich text)
             train_dataset = VINDRConceptCLIPDataSet(
-                data_dir=os.path.join(args.dataset_dir, 'train'),
+                data_dir=os.path.join(args.dataset_dir, 'train/train'),
                 csv_file=args.train_image_list,
                 return_pil=True,
             )
             test_dataset = VINDRConceptCLIPDataSet(
-                data_dir=os.path.join(args.dataset_dir, 'test'),
+                data_dir=os.path.join(args.dataset_dir, 'test/test'),
                 csv_file=args.test_image_list,
                 return_pil=True,
             )
