@@ -17,6 +17,7 @@ from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2, HybridConvNeXtViT, 
 from sklearn.metrics import average_precision_score
 import numpy as np
 import torch.nn.functional as F
+from torch.amp import autocast, GradScaler
 
 
 def train_epoch(model, optimizer, criterion, data_loader, device, epoch, print_freq, rank=0, lambda_area=0.1, lambda_sparse=0.01):
@@ -122,8 +123,7 @@ def encode_concepts_for_rc_align(model_without_ddp, concept_names_batch, device)
         text_inputs = {k: v.to(device) for k, v in text_inputs.items() 
                        if k in ['input_ids', 'attention_mask']}
         
-        with torch.cuda.amp.autocast(enabled=False):
-            concept_features = model_without_ddp.encode_text(**text_inputs)  # (w, D)
+        concept_features = model_without_ddp.encode_text(**text_inputs)  # (w, D)
         
         concept_embeds_list.append(concept_features)
     
@@ -161,7 +161,8 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
         concept_names = batch['concept_names']  # list of list[str]
         
         # Process images and text through ConceptCLIP processor
-        # The processor handles: resize to 336x336, normalize with SigLIP stats, tokenize text
+        # The processor handles: resize to 384x384 (patch_size=14 → 27×27=729 patches),
+        # normalize with SigLIP stats, tokenize text with PubMedBERT tokenizer
         inputs = processor(
             images=images,
             text=texts,
@@ -177,33 +178,36 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
         input_ids = inputs.get('input_ids')
         attention_mask = inputs.get('attention_mask')
         
-        # Forward pass: get all features
-        outputs = model_without_ddp.forward_clip(
-            pixel_values=pixel_values,
-            input_ids=input_ids,
-            attention_mask=attention_mask
-        )
-        
-        image_features = outputs['image_features']              # (B, D)
-        text_features = outputs['text_features']                # (B, D)
-        image_token_features = outputs['image_token_features']  # (B, N_patches, D)
-        logit_scale = outputs['logit_scale']
-        logit_bias = outputs.get('logit_bias', None)
-        
-        # Encode individual concept embeddings for RC-Align
-        concept_embeds_list = encode_concepts_for_rc_align(
-            model_without_ddp, concept_names, device
-        )
-        
-        # Compute combined loss
-        total_loss, it_loss, rc_loss = criterion(
-            image_features=image_features,
-            text_features=text_features,
-            image_token_features=image_token_features,
-            concept_text_features_list=concept_embeds_list,
-            logit_scale=logit_scale,
-            logit_bias=logit_bias
-        )
+        # Mixed precision forward pass
+        use_amp = scaler is not None
+        with autocast('cuda', enabled=use_amp):
+            # Forward pass: get all features
+            outputs = model_without_ddp.forward_clip(
+                pixel_values=pixel_values,
+                input_ids=input_ids,
+                attention_mask=attention_mask
+            )
+            
+            image_features = outputs['image_features']              # (B, D)
+            text_features = outputs['text_features']                # (B, D)
+            image_token_features = outputs['image_token_features']  # (B, N_patches, D)
+            logit_scale = outputs['logit_scale']
+            logit_bias = outputs.get('logit_bias', None)
+            
+            # Encode individual concept embeddings for RC-Align
+            concept_embeds_list = encode_concepts_for_rc_align(
+                model_without_ddp, concept_names, device
+            )
+            
+            # Compute combined loss
+            total_loss, it_loss, rc_loss = criterion(
+                image_features=image_features,
+                text_features=text_features,
+                image_token_features=image_token_features,
+                concept_text_features_list=concept_embeds_list,
+                logit_scale=logit_scale,
+                logit_bias=logit_bias
+            )
         
         # Backward pass
         if scaler is not None:
@@ -688,6 +692,11 @@ def main(args):
             collate_fn=collate_fn
         )
 
+    # Mixed precision scaler for ConceptCLIP
+    scaler = GradScaler('cuda') if (use_conceptclip_collate and args.amp) else None
+    if scaler is not None and rank == 0:
+        print('Using mixed precision training (AMP)')
+
     # Track best model
     best_metric = 0.0
     best_epoch = 0
@@ -703,7 +712,8 @@ def main(args):
         
         if use_conceptclip_collate:
             train_epoch_conceptclip(model, optimizer, criterion, train_loader,
-                                    device, epoch, args.print_freq, rank=rank)
+                                    device, epoch, args.print_freq, rank=rank,
+                                    scaler=scaler)
         else:
             train_epoch(model, optimizer, criterion, train_loader,
                         device, epoch, args.print_freq, rank=rank)
@@ -826,6 +836,8 @@ def parse_args():
                         help='Number of text encoder layers to unfreeze from the top')
     parser.add_argument('--weight-decay', default=0.01, type=float,
                         help='Weight decay for AdamW optimizer (ConceptCLIP)')
+    parser.add_argument('--amp', action='store_true',
+                        help='Use mixed precision training (recommended for ConceptCLIP)')
 
     return parser.parse_args()
 

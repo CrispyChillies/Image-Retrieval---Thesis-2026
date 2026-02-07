@@ -167,7 +167,7 @@ class MedSigLIP(nn.Module):
         return torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
 # Use transformer Automodel for ConceptCLIP using JerrryNie/ConceptCLIP
-# Image Encoder: SigLIP-ViT-400M-16
+# Image Encoder: SigLIP-ViT-SO400M-14 (image_size=384, patch_size=14, 27×27=729 patches)
 # Text Encoder: PubMedBERT
 # Supports: IT-Align (image-text contrastive) + RC-Align (region-concept alignment)
 class conceptCLIP(nn.Module):
@@ -236,7 +236,7 @@ class conceptCLIP(nn.Module):
             elif hasattr(self.model, 'visual') and hasattr(self.model.visual, 'output_dim'):
                 in_features = self.model.visual.output_dim
             else:
-                in_features = 768  # fallback
+                in_features = 1152  # fallback (SO400M embed_dim)
             self.fc = nn.Linear(in_features, embedding_dim)
         else:
             self.fc = None
