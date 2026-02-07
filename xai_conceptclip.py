@@ -16,6 +16,9 @@ Usage:
     # With fine-tuned checkpoint
     python xai_conceptclip.py --checkpoint_path checkpoints/conceptclip_epoch1.pth
     
+    # Quick test with limited images
+    python xai_conceptclip.py --num_images 500 --num_query_samples 3
+    
     # Custom query
     python xai_conceptclip.py --checkpoint_path checkpoint.pth --query_image_id 0a0c223c9feb91155bfb4a101362ffe9
     
@@ -39,8 +42,15 @@ from model import conceptCLIP
 from read_data import VINDRConceptCLIPDataSet
 
 
-def encode_all_images(model, dataset, device, batch_size=32):
+def encode_all_images(model, dataset, device, batch_size=32, max_images=None):
     """Encode all images in dataset to create embedding database.
+    
+    Args:
+        model: ConceptCLIP model
+        dataset: VINDRConceptCLIPDataSet
+        device: torch device
+        batch_size: batch size for encoding
+        max_images: maximum number of images to encode (None = all)
     
     Returns:
         cls_embeddings: (N, D) normalized CLS embeddings for retrieval
@@ -54,10 +64,12 @@ def encode_all_images(model, dataset, device, batch_size=32):
     patch_embeds = []
     image_ids = []
     
-    print(f"Encoding {len(dataset)} images...")
+    # Limit number of images if specified
+    num_images = len(dataset) if max_images is None else min(max_images, len(dataset))
+    print(f"Encoding {num_images} images (out of {len(dataset)} total)...")
     
-    for i in tqdm(range(0, len(dataset), batch_size)):
-        batch_indices = list(range(i, min(i + batch_size, len(dataset))))
+    for i in tqdm(range(0, num_images, batch_size)):
+        batch_indices = list(range(i, min(i + batch_size, num_images)))
         batch_data = [dataset[j] for j in batch_indices]
         
         images = [item['image'] for item in batch_data]
@@ -98,8 +110,15 @@ def encode_all_images(model, dataset, device, batch_size=32):
     cls_embeddings = torch.cat(cls_embeds, dim=0)  # (N, D)
     patch_embeddings = torch.cat(patch_embeds, dim=0)  # (N, num_patches, D)
     
+    num_patches = patch_embeddings.size(1)
+    grid_h = int(np.sqrt(num_patches))
+    while num_patches % grid_h != 0 and grid_h > 1:
+        grid_h -= 1
+    grid_w = num_patches // grid_h
+    
     print(f"✓ Encoded {len(image_ids)} images")
     print(f"  CLS shape: {cls_embeddings.shape}, Patch shape: {patch_embeddings.shape}")
+    print(f"  Detected patch grid: {grid_h}×{grid_w} = {num_patches} patches")
     
     return cls_embeddings, patch_embeddings, image_ids
 
@@ -152,19 +171,35 @@ def compute_patch_concept_attention(patch_embeds, concept_embeds, top_k=5):
     return attention, top_concepts_idx, top_concepts_scores
 
 
-def create_attention_heatmap(attention_vector, patch_grid_size=27, image_size=384):
+def create_attention_heatmap(attention_vector, patch_grid_size=None, image_size=384):
     """Convert patch attention vector to 2D heatmap.
     
     Args:
         attention_vector: (num_patches,) attention scores
-        patch_grid_size: grid size (27 for 384x384 image with patch_size=14)
+        patch_grid_size: grid size (auto-detected if None)
         image_size: output heatmap size
     
     Returns:
         heatmap: (image_size, image_size) heatmap
     """
+    num_patches = attention_vector.numel()
+    
+    # Auto-detect grid size if not provided
+    if patch_grid_size is None:
+        # Try to find factors close to square
+        grid_h = int(np.sqrt(num_patches))
+        while num_patches % grid_h != 0 and grid_h > 1:
+            grid_h -= 1
+        grid_w = num_patches // grid_h
+        
+        # Prefer square-ish grids (swap if needed to make more square)
+        if grid_h > grid_w:
+            grid_h, grid_w = grid_w, grid_h
+    else:
+        grid_h = grid_w = patch_grid_size
+    
     # Reshape to 2D grid
-    heatmap_2d = attention_vector.reshape(patch_grid_size, patch_grid_size).numpy()
+    heatmap_2d = attention_vector.reshape(grid_h, grid_w).numpy()
     
     # Resize to image size using PIL
     heatmap_pil = Image.fromarray((heatmap_2d * 255).astype(np.uint8))
@@ -340,6 +375,8 @@ def parse_args():
                         help='Device to use')
     parser.add_argument('--batch_size', type=int, default=32,
                         help='Batch size for encoding')
+    parser.add_argument('--num_images', type=int, default=None,
+                        help='Number of images to encode from dataset (default: all images)')
     return parser.parse_args()
 
 
@@ -389,7 +426,7 @@ def main():
     # 3. Encode all images
     print("\n[3/5] Encoding all images (this may take a few minutes)...")
     cls_embeddings, patch_embeddings, image_ids = encode_all_images(
-        model, dataset, device, batch_size=args.batch_size
+        model, dataset, device, batch_size=args.batch_size, max_images=args.num_images
     )
     
     # 4. Encode concepts
