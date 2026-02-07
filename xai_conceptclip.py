@@ -57,10 +57,12 @@ def encode_all_images(model, dataset, device, batch_size=32):
     print(f"Encoding {len(dataset)} images...")
     
     for i in tqdm(range(0, len(dataset), batch_size)):
-        batch_data = [dataset[j] for j in range(i, min(i + batch_size, len(dataset)))]
+        batch_indices = list(range(i, min(i + batch_size, len(dataset))))
+        batch_data = [dataset[j] for j in batch_indices]
         
         images = [item['image'] for item in batch_data]
-        batch_image_ids = [item['image_id'] for item in batch_data]
+        # Get image IDs from dataset directly using indices
+        batch_image_ids = [dataset.image_ids[j] for j in batch_indices]
         
         # Process images
         inputs = processor(images=images, return_tensors="pt")
