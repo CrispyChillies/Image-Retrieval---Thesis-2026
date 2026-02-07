@@ -439,9 +439,15 @@ def main():
     
     # Select query images
     if args.query_image_id:
+        if args.query_image_id not in image_ids:
+            print(f"ERROR: Query image ID '{args.query_image_id}' not found in encoded images.")
+            print(f"       Try increasing --num_images or choose a different query_image_id.")
+            return
         query_indices = [image_ids.index(args.query_image_id)]
     else:
-        query_indices = np.random.choice(len(dataset), args.num_query_samples, replace=False)
+        # Select from actually encoded images, not full dataset
+        num_encoded = len(image_ids)
+        query_indices = np.random.choice(num_encoded, min(args.num_query_samples, num_encoded), replace=False)
     
     print(f"   Testing {len(query_indices)} query images...")
     
