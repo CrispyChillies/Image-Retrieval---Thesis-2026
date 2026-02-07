@@ -209,11 +209,19 @@ class conceptCLIP(nn.Module):
 
         # Unfreeze last N text encoder layers
         if hasattr(self.model, 'text') and hasattr(self.model.text, 'transformer'):
-            # OpenCLIP text structure
-            text_layers = self.model.text.transformer.resblocks
-            for layer in text_layers[-unfreeze_text_layers:]:
-                for param in layer.parameters():
-                    param.requires_grad = True
+            text_transformer = self.model.text.transformer
+            if hasattr(text_transformer, 'resblocks'):
+                # OpenCLIP custom text transformer
+                text_layers = text_transformer.resblocks
+            elif hasattr(text_transformer, 'encoder') and hasattr(text_transformer.encoder, 'layer'):
+                # HuggingFace BertModel (PubMedBERT) used as text encoder
+                text_layers = text_transformer.encoder.layer
+            else:
+                text_layers = None
+            if text_layers is not None:
+                for layer in text_layers[-unfreeze_text_layers:]:
+                    for param in layer.parameters():
+                        param.requires_grad = True
         elif hasattr(self.model, 'text_model'):
             if hasattr(self.model.text_model, 'encoder'):
                 text_layers = self.model.text_model.encoder.layer
