@@ -12,7 +12,7 @@ from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
 from loss import TripletMarginLoss, WeightedMultiLabelTripletLoss, ConceptCLIPLoss
 from sampler import PKSampler
 
-from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2, HybridConvNeXtViT, conceptCLIP, Resnet50_with_Attention
+from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2, conceptCLIP
 
 from sklearn.metrics import average_precision_score
 import numpy as np
