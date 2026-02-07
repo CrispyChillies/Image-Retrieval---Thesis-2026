@@ -220,23 +220,36 @@ class ITAlignLoss(nn.Module):
         B = image_features.size(0)
         
         # Compute similarity matrix: (B, B)
-        # logit_scale is typically stored as log(scale), so exp it
+        # logit_scale: clamp to prevent overflow. Typical range: exp(-5) to exp(5) = 0.007 to 148
+        # Original CLIP uses ~exp(2.66) ≈ 14.3
         if logit_scale.dim() == 0 or logit_scale.numel() == 1:
-            t = logit_scale.exp()
+            # Clamp log scale to [-10, 10] before exp to prevent inf
+            clamped_log_scale = torch.clamp(logit_scale, -10, 10)
+            t = clamped_log_scale.exp()
         else:
-            t = logit_scale
+            # Already a scale, clamp directly
+            t = torch.clamp(logit_scale, 0.1, 100.0)
         
-        logits = t * (image_features @ text_features.T)  # (B, B)
+        # Compute cosine similarity
+        cos_sim = image_features @ text_features.T  # (B, B) in [-1, 1]
+        logits = t * cos_sim
         
         if logit_bias is not None:
             logits = logits + logit_bias
         
+        # Clamp logits to prevent overflow in logsigmoid
+        logits = torch.clamp(logits, -50, 50)
+        
         # z_mn: +1 for matching pairs (diagonal), -1 for non-matching
-        # SigLIP loss: -1/B^2 * Σ_m Σ_n log(sigmoid(z_mn * logits_mn))
         z = 2 * torch.eye(B, device=logits.device) - 1  # +1 on diag, -1 off-diag
         
-        # log(sigmoid(z * logits)) = -log(1 + exp(-z * logits)) = -softplus(-z * logits)
-        loss = -F.logsigmoid(z * logits).sum() / (B * B)
+        # log(sigmoid(z * logits)) = -log(1 + exp(-z * logits))
+        loss = -F.logsigmoid(z * logits).mean()  # mean instead of sum then divide
+        
+        # Check for inf/nan
+        if not torch.isfinite(loss):
+            print(f"WARNING: IT-Align loss is {loss.item()}, logit_scale={logit_scale.item():.3f}, t={t.item():.3f}")
+            return torch.tensor(0.0, device=loss.device, requires_grad=True)
         
         return loss
 
@@ -283,10 +296,12 @@ class RCAlignLoss(nn.Module):
         
         V = len(valid_indices)
         
+        # Compute temperature with numerical stability
         if logit_scale.dim() == 0 or logit_scale.numel() == 1:
-            t = logit_scale.exp()
+            clamped_log_scale = torch.clamp(logit_scale, -10, 10)
+            t = clamped_log_scale.exp()
         else:
-            t = logit_scale
+            t = torch.clamp(logit_scale, 0.1, 100.0)
         
         # Compute S(I_m, T_n) for all valid pairs
         # S(I, T) = (1/w) * Σ_j max_i( cos(patch_i, concept_j) )
@@ -320,9 +335,17 @@ class RCAlignLoss(nn.Module):
         if logit_bias is not None:
             logits = logits + logit_bias
         
+        # Clamp logits
+        logits = torch.clamp(logits, -50, 50)
+        
         # SigLIP-style loss on region-concept similarities
         z = 2 * torch.eye(V, device=device) - 1
-        loss = -F.logsigmoid(z * logits).sum() / (V * V)
+        loss = -F.logsigmoid(z * logits).mean()
+        
+        # Check for inf/nan
+        if not torch.isfinite(loss):
+            print(f"WARNING: RC-Align loss is inf/nan, returning 0")
+            return torch.tensor(0.0, device=device, requires_grad=True)
         
         return loss
 

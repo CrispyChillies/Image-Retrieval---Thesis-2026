@@ -173,6 +173,16 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
         )
         inputs = {k: v.to(device) for k, v in inputs.items()}
         
+        # Debug: print logit_scale on first iteration
+        if i == 0 and epoch == 1 and rank == 0:
+            raw_model = model.module if hasattr(model, 'module') else model
+            if hasattr(raw_model.model, 'logit_scale'):
+                ls = raw_model.model.logit_scale
+                print(f"Initial logit_scale value: {ls.item():.4f} (exp={ls.exp().item():.4f})")
+            if hasattr(raw_model.model, 'logit_bias'):
+                lb = raw_model.model.logit_bias
+                print(f"Initial logit_bias value: {lb.item():.4f}")
+        
         # Separate image and text inputs
         pixel_values = inputs.get('pixel_values')
         input_ids = inputs.get('input_ids')
@@ -194,6 +204,11 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
             logit_scale = outputs['logit_scale']
             logit_bias = outputs.get('logit_bias', None)
             
+            # Debug: check for NaN/inf in features on first iteration
+            if i == 0 and epoch == 1 and rank == 0:
+                print(f"image_features: min={image_features.min().item():.4f}, max={image_features.max().item():.4f}, has_nan={torch.isnan(image_features).any().item()}, has_inf={torch.isinf(image_features).any().item()}")
+                print(f"text_features: min={text_features.min().item():.4f}, max={text_features.max().item():.4f}, has_nan={torch.isnan(text_features).any().item()}, has_inf={torch.isinf(text_features).any().item()}")
+            
             # Encode individual concept embeddings for RC-Align
             concept_embeds_list = encode_concepts_for_rc_align(
                 model_without_ddp, concept_names, device
@@ -208,6 +223,10 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
                 logit_scale=logit_scale,
                 logit_bias=logit_bias
             )
+            
+            # Debug: check losses on first few iterations
+            if (i < 3 or not torch.isfinite(total_loss)) and rank == 0:
+                print(f"[Iter {i}] total_loss={total_loss.item():.4f}, it_loss={it_loss.item():.4f}, rc_loss={rc_loss.item():.4f}")
         
         # Backward pass
         if scaler is not None:
