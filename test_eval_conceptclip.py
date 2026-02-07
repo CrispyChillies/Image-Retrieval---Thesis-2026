@@ -3,8 +3,9 @@ Quick test script to verify ConceptCLIP evaluation works correctly.
 Tests on a small subset (100 samples) of the validation set.
 
 Usage:
-    python test_eval_conceptclip.py --checkpoint_path model_checkpoint.pth
+    python test_eval_conceptclip.py
     python test_eval_conceptclip.py --checkpoint_path checkpoints/conceptclip_epoch1.pth
+    python test_eval_conceptclip.py --csv_file vindr/image_labels_test.csv --data_dir path/to/test/images
 """
 
 import torch
@@ -19,11 +20,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Test ConceptCLIP evaluation')
     parser.add_argument('--checkpoint_path', type=str, default=None,
                         help='Path to checkpoint (optional, will test with random init if not provided)')
-    parser.add_argument('--test_csv', type=str, 
+    parser.add_argument('--csv_file', type=str, 
                         default='vindr/image_labels_test.csv',
                         help='Path to test CSV')
-    parser.add_argument('--test_dir', type=str,
-                        default='D:/VinDR-CXR-dataset/vinbigdata-chest-xray-original-png/test',
+    parser.add_argument('--data_dir', type=str,
+                        default='D:/VinDR-CXR-dataset/vinbigdata-chest-xray-original-png/test/test',
                         help='Path to test images directory')
     parser.add_argument('--num_samples', type=int, default=100,
                         help='Number of samples to test (default: 100 for quick test)')
@@ -66,13 +67,13 @@ def main():
     
     # 2. Create test dataset
     print(f"\n2. Creating test dataset...")
-    print(f"   CSV: {args.test_csv}")
-    print(f"   Images: {args.test_dir}")
+    print(f"   CSV: {args.csv_file}")
+    print(f"   Images: {args.data_dir}")
     
     full_dataset = VINDRConceptCLIPDataSet(
-        csv_path=args.test_csv,
-        img_dir=args.test_dir,
-        mode='test'
+        data_dir=args.data_dir,
+        csv_file=args.csv_file,
+        return_pil=True
     )
     
     print(f"   Total samples: {len(full_dataset)}")
