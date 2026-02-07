@@ -24,7 +24,7 @@ labels = [
     'covid line chart',
     'squamous cell carcinoma histopathology',
     'immunohistochemistry histopathology',
-    'bone X-ray',p
+    'bone X-ray',
     'chest X-ray',
     'pie chart',
     'hematoxylin and eosin histopathology'

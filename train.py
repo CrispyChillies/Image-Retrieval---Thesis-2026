@@ -12,7 +12,7 @@ from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
 from loss import TripletMarginLoss, WeightedMultiLabelTripletLoss
 from sampler import PKSampler
 
-from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2, HybridConvNeXtViT, ConceptCLIPBackbone, Resnet50_with_Attention
+from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2, HybridConvNeXtViT, conceptCLIP, Resnet50_with_Attention
 
 from sklearn.metrics import average_precision_score
 import numpy as np
@@ -208,12 +208,7 @@ def main(args):
     elif args.model == 'hybrid_convnext_vit':
         model = HybridConvNeXtViT(embedding_dim=args.embedding_dim)
     elif args.model == 'conceptclip':
-        model = ConceptCLIPBackbone(
-            pretrained=True,
-            embedding_dim=args.embedding_dim,
-            freeze=args.freeze_backbone,
-            processor_normalize=True
-        )
+        model = conceptCLIP(embedding_dim=args.embedding_dim)
     elif args.model == 'resnet50_attention':
         model = Resnet50_with_Attention(embedding_dim=args.embedding_dim)
     else:
