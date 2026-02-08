@@ -204,10 +204,11 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
             logit_scale = outputs['logit_scale']
             logit_bias = outputs.get('logit_bias', None)
             
-            # Debug: check for NaN/inf in features on first iteration
-            if i == 0 and epoch == 1 and rank == 0:
-                print(f"image_features: min={image_features.min().item():.4f}, max={image_features.max().item():.4f}, has_nan={torch.isnan(image_features).any().item()}, has_inf={torch.isinf(image_features).any().item()}")
-                print(f"text_features: min={text_features.min().item():.4f}, max={text_features.max().item():.4f}, has_nan={torch.isnan(text_features).any().item()}, has_inf={torch.isinf(text_features).any().item()}")
+            # Debug: check for NaN/inf in features on first iteration (only epoch 1, iter 0)
+            # Disabled for performance - uncomment only if debugging NaN issues
+            # if i == 0 and epoch == 1 and rank == 0:
+            #     print(f"image_features: min={image_features.min().item():.4f}, max={image_features.max().item():.4f}")
+            #     print(f"text_features: min={text_features.min().item():.4f}, max={text_features.max().item():.4f}")
             
             # Encode individual concept embeddings for RC-Align
             concept_embeds_list = encode_concepts_for_rc_align(
@@ -224,56 +225,29 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
                 logit_bias=logit_bias
             )
             
-            # Debug: check losses on first few iterations
-            if (i < 3 or not torch.isfinite(total_loss)) and rank == 0:
-                print(f"[Iter {i}] total_loss={total_loss.item():.4f}, it_loss={it_loss.item():.4f}, rc_loss={rc_loss.item():.4f}")
-                # Check for NaN in features before loss
-                has_nan_img = torch.isnan(image_features).any().item()
-                has_nan_txt = torch.isnan(text_features).any().item()
-                has_inf_img = torch.isinf(image_features).any().item()
-                has_inf_txt = torch.isinf(text_features).any().item()
-                if has_nan_img or has_nan_txt or has_inf_img or has_inf_txt:
-                    print(f"   [WARNING] NaN/inf in features: img_nan={has_nan_img}, txt_nan={has_nan_txt}, img_inf={has_inf_img}, txt_inf={has_inf_txt}")
+            # Debug: check losses only on first 3 iterations of epoch 1 (disabled for performance)
+            # if i < 3 and epoch == 1 and rank == 0:
+            #     print(f"[Iter {i}] total_loss={total_loss.item():.4f}, it_loss={it_loss.item():.4f}, rc_loss={rc_loss.item():.4f}")
+            
+            # Emergency check: halt if loss becomes non-finite
+            if not torch.isfinite(total_loss):
+                print(f"[ERROR] Non-finite loss at iter {i}, epoch {epoch}: {total_loss.item()}")
+                raise ValueError("Training diverged: non-finite loss detected")
         
         # Backward pass
         if scaler is not None:
             scaler.scale(total_loss).backward()
             scaler.unscale_(optimizer)
             
-            # Debug: Check for NaN gradients and gradient norms
-            if i == 0 and epoch == 1 and rank == 0:
-                print(f"   [Debug] Checking gradients at iter {i}, epoch {epoch}...")
-                grad_norms = {}
-                nan_grads = []
-                zero_grads = []
-                total_params = 0
-                for name, param in model.named_parameters():
-                    total_params += 1
-                    if param.requires_grad:
-                        if param.grad is None:
-                            continue
-                        grad_norm = param.grad.norm().item()
-                        if torch.isnan(param.grad).any():
-                            nan_grads.append(name)
-                        elif grad_norm == 0:
-                            zero_grads.append(name)
-                        else:
-                            grad_norms[name] = grad_norm
-                
-                print(f"   [Debug] Total parameters: {total_params}, with gradients: {len(grad_norms) + len(nan_grads) + len(zero_grads)}")
-                
-                # Show statistics
-                if nan_grads:
-                    print(f"   [ERROR] {len(nan_grads)} params with NaN gradients: {nan_grads[:5]}")
-                if zero_grads:
-                    print(f"   [WARNING] {len(zero_grads)} params with zero gradients (including: {zero_grads[:3]})")
-                
-                # Show only parameters with largest gradients
-                if grad_norms:
-                    sorted_grads = sorted(grad_norms.items(), key=lambda x: x[1], reverse=True)[:5]
-                    print(f"   [Debug] Top 5 gradient norms: {[(n.split('.')[-1], f'{v:.6f}') for n, v in sorted_grads]}")
-                else:
-                    print(f"   [ERROR] NO parameters have valid gradients!")
+            # Debug: Gradient checking (disabled for performance - very expensive on large models)
+            # Uncomment only if debugging gradient issues
+            # if i == 0 and epoch == 1 and rank == 0:
+            #     print(f"   [Debug] Checking gradients...")
+            #     for name, param in model.named_parameters():
+            #         if param.requires_grad and param.grad is not None:
+            #             if torch.isnan(param.grad).any():
+            #                 print(f"   [ERROR] NaN gradient in {name}")
+            #                 break
             
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             scaler.step(optimizer)
@@ -301,11 +275,13 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
             if rank == 0:
                 print(f'[{epoch}, {n}] | total: {avg_loss:.4f} | '
                       f'IT-Align: {avg_it:.4f} | RC-Align: {avg_rc:.4f}')
-                # Log logit_scale periodically
-                raw_model_log = model.module if hasattr(model, 'module') else model
-                if hasattr(raw_model_log.model, 'logit_scale'):
-                    ls_val = raw_model_log.model.logit_scale.item()
-                    print(f'   [Info] logit_scale={ls_val:.4f}, temperature={torch.tensor(ls_val).exp().item():.2f}')
+                # Log logit_scale periodically (only every 5th print to reduce overhead)
+                if n % 50 == 0:  # Every 50 iterations instead of every 10
+                    raw_model_log = model.module if hasattr(model, 'module') else model
+                    if hasattr(raw_model_log.model, 'logit_scale'):
+                        ls_val = raw_model_log.model.logit_scale.item()
+                        temp_val = 2.71828 ** ls_val  # Use constant instead of torch.tensor().exp()
+                        print(f'   [Info] logit_scale={ls_val:.4f}, temperature={temp_val:.2f}')
             running_loss = 0
             running_it_loss = 0
             running_rc_loss = 0
@@ -348,11 +324,9 @@ def evaluate_conceptclip(model, loader, device, rank=0, world_size=1):
     embeds = torch.cat(embeds, dim=0)
     labels = torch.cat(labels, dim=0)
     
-    # Debug: Print embedding statistics to verify they're changing between epochs
-    if rank == 0:
-        print(f"   [Debug] Embeddings shape: {embeds.shape}, mean={embeds.mean().item():.6f}, std={embeds.std().item():.6f}")
-        if first_batch_embeds_for_debug is not None:
-            print(f"   [Debug] First sample (first 8 dims): {first_batch_embeds_for_debug[0, :8].tolist()}")
+    # Debug: Print embedding statistics (disabled for performance)
+    # if rank == 0:
+    #     print(f"   [Debug] Embeddings shape: {embeds.shape}, mean={embeds.mean().item():.6f}")
     
     # Gather from all processes if DDP
     if world_size > 1:
