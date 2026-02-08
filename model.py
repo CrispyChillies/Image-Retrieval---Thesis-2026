@@ -271,12 +271,16 @@ class conceptCLIP(nn.Module):
             input_ids=input_ids,
             attention_mask=attention_mask
         )
+        # IMPORTANT: return raw learnable parameters (log-space), NOT the model
+        # output which already applies exp(). The loss functions apply exp().
+        logit_scale = self.model.logit_scale if hasattr(self.model, 'logit_scale') else torch.tensor(0.0)
+        logit_bias = self.model.logit_bias if hasattr(self.model, 'logit_bias') else torch.tensor(0.0)
         return {
             'image_features': outputs['image_features'],         # (B, D)
             'text_features': outputs['text_features'],           # (B, D) or (num_texts, D)
             'image_token_features': outputs.get('image_token_features', None),  # (B, N, D)
-            'logit_scale': outputs.get('logit_scale', torch.tensor(1.0)),
-            'logit_bias': outputs.get('logit_bias', torch.tensor(0.0)),
+            'logit_scale': logit_scale,   # raw log-space parameter
+            'logit_bias': logit_bias,     # raw bias parameter
         }
 
     def forward(self, pixel_values):

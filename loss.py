@@ -207,8 +207,8 @@ class ITAlignLoss(nn.Module):
         Args:
             image_features: (B, D) L2-normalized image CLS embeddings
             text_features: (B, D) L2-normalized text CLS embeddings
-            logit_scale: scalar or (1,) learnable temperature (log scale)
-            logit_bias: scalar or (1,) learnable bias (optional, default 0)
+            logit_scale: scalar learnable temperature in LOG space (typical: 2.6-4.6)
+            logit_bias: scalar learnable bias (optional, default 0)
         
         Returns:
             loss: scalar IT-Align loss
@@ -219,26 +219,10 @@ class ITAlignLoss(nn.Module):
         
         B = image_features.size(0)
         
-        # Compute similarity matrix: (B, B)
-        # logit_scale: should be in log space (typical: 2.6-4.6, gives exp(x)=14-100)
-        if logit_scale.dim() == 0 or logit_scale.numel() == 1:
-            raw_log_scale = logit_scale.item()
-            
-            # Relaxed clamping: allow typical pretrained range
-            # ConceptCLIP pretrained uses ~4.57 (exp=96)
-            # Only clamp if truly extreme
-            if raw_log_scale < -5 or raw_log_scale > 10:
-                if raw_log_scale > 5:  # Only warn once per epoch
-                    import random
-                    if random.random() < 0.01:  # 1% chance to print
-                        print(f"   [Info] logit_scale (log)={raw_log_scale:.4f}, exp={logit_scale.exp().item():.2f}")
-                clamped_log_scale = torch.clamp(logit_scale, -5, 10)
-                t = clamped_log_scale.exp()
-            else:
-                t = logit_scale.exp()
-        else:
-            # Already a scale, clamp directly
-            t = torch.clamp(logit_scale, 0.1, 1000.0)
+        # logit_scale is in log space: clamp to [0, ln(100)=4.6052] then exp()
+        # This gives effective temperature in [1, 100], following CLIP convention
+        clamped_log_scale = torch.clamp(logit_scale, min=0.0, max=4.6052)
+        t = clamped_log_scale.exp()  # effective temperature in [1, 100]
         
         # Compute cosine similarity
         cos_sim = image_features @ text_features.T  # (B, B) in [-1, 1]
@@ -254,7 +238,7 @@ class ITAlignLoss(nn.Module):
         z = 2 * torch.eye(B, device=logits.device) - 1  # +1 on diag, -1 off-diag
         
         # log(sigmoid(z * logits)) = -log(1 + exp(-z * logits))
-        loss = -F.logsigmoid(z * logits).mean()  # mean instead of sum then divide
+        loss = -F.logsigmoid(z * logits).mean()
         
         # Check for inf/nan
         if not torch.isfinite(loss):
@@ -306,16 +290,9 @@ class RCAlignLoss(nn.Module):
         
         V = len(valid_indices)
         
-        # Compute temperature with numerical stability
-        if logit_scale.dim() == 0 or logit_scale.numel() == 1:
-            # Use same relaxed clamping as IT-Align
-            raw_log_scale = logit_scale.item()
-            if raw_log_scale < -5 or raw_log_scale > 10:
-                t = torch.clamp(logit_scale, -5, 10).exp()
-            else:
-                t = logit_scale.exp()
-        else:
-            t = torch.clamp(logit_scale, 0.1, 1000.0)
+        # logit_scale is in log space: clamp to [0, ln(100)=4.6052] then exp()
+        clamped_log_scale = torch.clamp(logit_scale, min=0.0, max=4.6052)
+        t = clamped_log_scale.exp()  # effective temperature in [1, 100]
         
         # Compute S(I_m, T_n) for all valid pairs
         # S(I, T) = (1/w) * Σ_j max_i( cos(patch_i, concept_j) )

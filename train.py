@@ -283,6 +283,12 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
         
+        # Clamp logit_scale parameter to prevent unbounded growth
+        with torch.no_grad():
+            raw_model = model.module if hasattr(model, 'module') else model
+            if hasattr(raw_model.model, 'logit_scale'):
+                raw_model.model.logit_scale.clamp_(0.0, 4.6052)  # [1, 100] temperature range
+        
         running_loss += total_loss.item()
         running_it_loss += it_loss.item()
         running_rc_loss += rc_loss.item()
@@ -295,6 +301,11 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
             if rank == 0:
                 print(f'[{epoch}, {n}] | total: {avg_loss:.4f} | '
                       f'IT-Align: {avg_it:.4f} | RC-Align: {avg_rc:.4f}')
+                # Log logit_scale periodically
+                raw_model_log = model.module if hasattr(model, 'module') else model
+                if hasattr(raw_model_log.model, 'logit_scale'):
+                    ls_val = raw_model_log.model.logit_scale.item()
+                    print(f'   [Info] logit_scale={ls_val:.4f}, temperature={torch.tensor(ls_val).exp().item():.2f}')
             running_loss = 0
             running_it_loss = 0
             running_rc_loss = 0
