@@ -232,6 +232,17 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
         if scaler is not None:
             scaler.scale(total_loss).backward()
             scaler.unscale_(optimizer)
+            
+            # Debug: Check gradient norms on first iteration of first epoch
+            if i == 0 and epoch == 1 and rank == 0:
+                grad_norms = {}
+                for name, param in model.named_parameters():
+                    if param.requires_grad and param.grad is not None:
+                        grad_norms[name] = param.grad.norm().item()
+                # Show only parameters with largest gradients
+                sorted_grads = sorted(grad_norms.items(), key=lambda x: x[1], reverse=True)[:5]
+                print(f"   [Debug] Top 5 gradient norms: {[(n.split('.')[-1], f'{v:.6f}') for n, v in sorted_grads]}")
+            
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             scaler.step(optimizer)
             scaler.update()
@@ -270,7 +281,10 @@ def evaluate_conceptclip(model, loader, device, rank=0, world_size=1):
     
     embeds, labels = [], []
     
-    for batch in loader:
+    # Debug: Check first few embeddings to see if they change between epochs
+    first_batch_embeds_for_debug = None
+    
+    for batch_idx, batch in enumerate(loader):
         images = batch['images']           # list of PIL Images
         all_labels = batch['all_labels']   # (B, 28)
         
@@ -280,11 +294,22 @@ def evaluate_conceptclip(model, loader, device, rank=0, world_size=1):
         
         # Get image embeddings via standard forward (returns normalized CLS)
         embedding = model_without_ddp(pixel_values)  # (B, D)
+        
+        # Debug: Store first batch embeddings
+        if batch_idx == 0:
+            first_batch_embeds_for_debug = embedding[:min(3, len(embedding))].detach().cpu()
+        
         embeds.append(embedding.cpu())
         labels.append(all_labels)
     
     embeds = torch.cat(embeds, dim=0)
     labels = torch.cat(labels, dim=0)
+    
+    # Debug: Print embedding statistics to verify they're changing between epochs
+    if rank == 0:
+        print(f"   [Debug] Embeddings shape: {embeds.shape}, mean={embeds.mean().item():.6f}, std={embeds.std().item():.6f}")
+        if first_batch_embeds_for_debug is not None:
+            print(f"   [Debug] First sample (first 8 dims): {first_batch_embeds_for_debug[0, :8].tolist()}")
     
     # Gather from all processes if DDP
     if world_size > 1:
