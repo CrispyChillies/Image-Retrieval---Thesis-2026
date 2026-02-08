@@ -227,21 +227,46 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
             # Debug: check losses on first few iterations
             if (i < 3 or not torch.isfinite(total_loss)) and rank == 0:
                 print(f"[Iter {i}] total_loss={total_loss.item():.4f}, it_loss={it_loss.item():.4f}, rc_loss={rc_loss.item():.4f}")
+                # Check for NaN in features before loss
+                has_nan_img = torch.isnan(image_features).any().item()
+                has_nan_txt = torch.isnan(text_features).any().item()
+                has_inf_img = torch.isinf(image_features).any().item()
+                has_inf_txt = torch.isinf(text_features).any().item()
+                if has_nan_img or has_nan_txt or has_inf_img or has_inf_txt:
+                    print(f"   [WARNING] NaN/inf in features: img_nan={has_nan_img}, txt_nan={has_nan_txt}, img_inf={has_inf_img}, txt_inf={has_inf_txt}")
         
         # Backward pass
         if scaler is not None:
             scaler.scale(total_loss).backward()
             scaler.unscale_(optimizer)
             
-            # Debug: Check gradient norms on first iteration of first epoch
+            # Debug: Check for NaN gradients and gradient norms
             if i == 0 and epoch == 1 and rank == 0:
                 grad_norms = {}
+                nan_grads = []
+                zero_grads = []
                 for name, param in model.named_parameters():
-                    if param.requires_grad and param.grad is not None:
-                        grad_norms[name] = param.grad.norm().item()
+                    if param.requires_grad:
+                        if param.grad is None:
+                            continue
+                        grad_norm = param.grad.norm().item()
+                        if torch.isnan(param.grad).any():
+                            nan_grads.append(name)
+                        elif grad_norm == 0:
+                            zero_grads.append(name)
+                        else:
+                            grad_norms[name] = grad_norm
+                
+                # Show statistics
+                if nan_grads:
+                    print(f"   [ERROR] {len(nan_grads)} params with NaN gradients: {nan_grads[:5]}")
+                if zero_grads:
+                    print(f"   [WARNING] {len(zero_grads)} params with zero gradients (including: {zero_grads[:3]})")
+                
                 # Show only parameters with largest gradients
-                sorted_grads = sorted(grad_norms.items(), key=lambda x: x[1], reverse=True)[:5]
-                print(f"   [Debug] Top 5 gradient norms: {[(n.split('.')[-1], f'{v:.6f}') for n, v in sorted_grads]}")
+                if grad_norms:
+                    sorted_grads = sorted(grad_norms.items(), key=lambda x: x[1], reverse=True)[:5]
+                    print(f"   [Debug] Top 5 gradient norms: {[(n.split('.')[-1], f'{v:.6f}') for n, v in sorted_grads]}")
             
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             scaler.step(optimizer)

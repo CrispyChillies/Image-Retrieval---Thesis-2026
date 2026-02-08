@@ -223,9 +223,18 @@ class ITAlignLoss(nn.Module):
         # logit_scale: clamp to prevent overflow. Typical range: exp(-5) to exp(5) = 0.007 to 148
         # Original CLIP uses ~exp(2.66) ≈ 14.3
         if logit_scale.dim() == 0 or logit_scale.numel() == 1:
-            # Clamp log scale to [-10, 10] before exp to prevent inf
-            clamped_log_scale = torch.clamp(logit_scale, -10, 10)
-            t = clamped_log_scale.exp()
+            # Use clamp with requires_grad preserved - clamp doesn't stop gradients within bounds
+            # Check if value is reasonable before clamping
+            raw_scale = logit_scale.item()
+            if raw_scale < -10 or raw_scale > 10:
+                print(f"[WARNING] logit_scale={raw_scale:.4f} outside safe range, clamping")
+            
+            # Don't clamp if within reasonable range to preserve gradients better
+            if -8 < raw_scale < 8:
+                t = logit_scale.exp()
+            else:
+                clamped_log_scale = torch.clamp(logit_scale, -10, 10)
+                t = clamped_log_scale.exp()
         else:
             # Already a scale, clamp directly
             t = torch.clamp(logit_scale, 0.1, 100.0)
