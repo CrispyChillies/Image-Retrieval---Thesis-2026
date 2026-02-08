@@ -242,10 +242,13 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
             
             # Debug: Check for NaN gradients and gradient norms
             if i == 0 and epoch == 1 and rank == 0:
+                print(f"   [Debug] Checking gradients at iter {i}, epoch {epoch}...")
                 grad_norms = {}
                 nan_grads = []
                 zero_grads = []
+                total_params = 0
                 for name, param in model.named_parameters():
+                    total_params += 1
                     if param.requires_grad:
                         if param.grad is None:
                             continue
@@ -257,6 +260,8 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
                         else:
                             grad_norms[name] = grad_norm
                 
+                print(f"   [Debug] Total parameters: {total_params}, with gradients: {len(grad_norms) + len(nan_grads) + len(zero_grads)}")
+                
                 # Show statistics
                 if nan_grads:
                     print(f"   [ERROR] {len(nan_grads)} params with NaN gradients: {nan_grads[:5]}")
@@ -267,6 +272,8 @@ def train_epoch_conceptclip(model, optimizer, criterion, data_loader, device, ep
                 if grad_norms:
                     sorted_grads = sorted(grad_norms.items(), key=lambda x: x[1], reverse=True)[:5]
                     print(f"   [Debug] Top 5 gradient norms: {[(n.split('.')[-1], f'{v:.6f}') for n, v in sorted_grads]}")
+                else:
+                    print(f"   [ERROR] NO parameters have valid gradients!")
             
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             scaler.step(optimizer)

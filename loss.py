@@ -220,24 +220,25 @@ class ITAlignLoss(nn.Module):
         B = image_features.size(0)
         
         # Compute similarity matrix: (B, B)
-        # logit_scale: clamp to prevent overflow. Typical range: exp(-5) to exp(5) = 0.007 to 148
-        # Original CLIP uses ~exp(2.66) ≈ 14.3
+        # logit_scale: should be in log space (typical: 2.6-4.6, gives exp(x)=14-100)
         if logit_scale.dim() == 0 or logit_scale.numel() == 1:
-            # Use clamp with requires_grad preserved - clamp doesn't stop gradients within bounds
-            # Check if value is reasonable before clamping
-            raw_scale = logit_scale.item()
-            if raw_scale < -10 or raw_scale > 10:
-                print(f"[WARNING] logit_scale={raw_scale:.4f} outside safe range, clamping")
+            raw_log_scale = logit_scale.item()
             
-            # Don't clamp if within reasonable range to preserve gradients better
-            if -8 < raw_scale < 8:
-                t = logit_scale.exp()
-            else:
-                clamped_log_scale = torch.clamp(logit_scale, -10, 10)
+            # Relaxed clamping: allow typical pretrained range
+            # ConceptCLIP pretrained uses ~4.57 (exp=96)
+            # Only clamp if truly extreme
+            if raw_log_scale < -5 or raw_log_scale > 10:
+                if raw_log_scale > 5:  # Only warn once per epoch
+                    import random
+                    if random.random() < 0.01:  # 1% chance to print
+                        print(f"   [Info] logit_scale (log)={raw_log_scale:.4f}, exp={logit_scale.exp().item():.2f}")
+                clamped_log_scale = torch.clamp(logit_scale, -5, 10)
                 t = clamped_log_scale.exp()
+            else:
+                t = logit_scale.exp()
         else:
             # Already a scale, clamp directly
-            t = torch.clamp(logit_scale, 0.1, 100.0)
+            t = torch.clamp(logit_scale, 0.1, 1000.0)
         
         # Compute cosine similarity
         cos_sim = image_features @ text_features.T  # (B, B) in [-1, 1]
@@ -307,10 +308,14 @@ class RCAlignLoss(nn.Module):
         
         # Compute temperature with numerical stability
         if logit_scale.dim() == 0 or logit_scale.numel() == 1:
-            clamped_log_scale = torch.clamp(logit_scale, -10, 10)
-            t = clamped_log_scale.exp()
+            # Use same relaxed clamping as IT-Align
+            raw_log_scale = logit_scale.item()
+            if raw_log_scale < -5 or raw_log_scale > 10:
+                t = torch.clamp(logit_scale, -5, 10).exp()
+            else:
+                t = logit_scale.exp()
         else:
-            t = torch.clamp(logit_scale, 0.1, 100.0)
+            t = torch.clamp(logit_scale, 0.1, 1000.0)
         
         # Compute S(I_m, T_n) for all valid pairs
         # S(I, T) = (1/w) * Σ_j max_i( cos(patch_i, concept_j) )
