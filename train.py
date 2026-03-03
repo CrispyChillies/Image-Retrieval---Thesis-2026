@@ -681,10 +681,10 @@ def main(args):
                 return_pil=True,
             )
         else:
-            train_dataset = VINDRDataSet(data_dir=os.path.join(args.dataset_dir, 'train_data/train'),
+            train_dataset = VINDRDataSet(data_dir=os.path.join(args.dataset_dir, 'train/train'),
                                          csv_file=args.train_image_list,
                                          transform=train_transform)
-            test_dataset = VINDRDataSet(data_dir=os.path.join(args.dataset_dir, 'test_data/test'),
+            test_dataset = VINDRDataSet(data_dir=os.path.join(args.dataset_dir, 'test/test'),
                                         csv_file=args.test_image_list,
                                         transform=test_transform)
     else:
