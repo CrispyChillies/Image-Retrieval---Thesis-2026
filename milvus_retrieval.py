@@ -95,7 +95,7 @@ class MilvusRetriever:
                 if metric_type == 'COSINE':
                     # For COSINE: distance = 1 - cosine_similarity
                     # So: cosine_similarity = 1 - distance
-                    similarity = 1.0 - distance
+                    similarity = distance
                 elif metric_type == 'IP':
                     # For IP (Inner Product) with normalized vectors: IP = cosine_similarity
                     similarity = distance
