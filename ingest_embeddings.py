@@ -4,23 +4,14 @@ Supports batch processing for efficient insertion
 """
 
 import os
-import sys
 import torch
 import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
+from model import DenseNet121, ResNet50, ConvNeXtV2
+from milvus_setup import MilvusManager, MODEL_CONFIGS
 from tqdm import tqdm
 import argparse
-
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-try:
-    from model import DenseNet121, ResNet50, ConvNeXtV2
-except ImportError:
-    from ..model import DenseNet121, ResNet50, ConvNeXtV2
-
-from milvus_setup import MilvusManager, MODEL_CONFIGS
 
 
 def get_model_and_transform(model_type, model_weights, embedding_dim, device):
