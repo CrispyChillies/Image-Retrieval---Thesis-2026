@@ -80,7 +80,7 @@ class DebugCausalMetric():
         print(f"  Saliency map shape: {explanation.shape}")
         print(f"  Saliency map range: [{explanation.min():.4f}, {explanation.max():.4f}]")
         
-        salient_order = np.flip(np.argsort(explanation.flatten()))
+        salient_order = np.flip(np.argsort(explanation.flatten())).copy()  # .copy() fixes negative stride
         salient_order = torch.from_numpy(salient_order).unsqueeze(0)
         
         # Show top salient pixels
