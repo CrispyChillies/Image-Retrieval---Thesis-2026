@@ -20,8 +20,8 @@ import matplotlib.pyplot as plt
 
 # Add milvus to path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'milvus'))
-from milvus.milvus_setup import MilvusManager
-from milvus.milvus_retrieval import MilvusRetriever, get_model_and_transform
+from milvus_setup import MilvusManager
+from milvus_retrieval import MilvusRetriever, get_model_and_transform
 
 
 class CausalMetric():
