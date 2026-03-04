@@ -204,7 +204,7 @@ class MilvusManager:
         
         return info
     
-    def setup_all_collections(self, drop_old=False):
+    def setup_all_collections(self, drop_old=False, metric_type='COSINE'):
         """Setup collections for all models"""
         print("\n" + "="*70)
         print("SETTING UP ALL COLLECTIONS")
@@ -213,7 +213,7 @@ class MilvusManager:
         for model_type in MODEL_CONFIGS.keys():
             print(f"\n[{model_type.upper()}]")
             collection = self.create_collection(model_type, drop_old=drop_old)
-            self.create_index(model_type)
+            self.create_index(model_type, metric_type=metric_type)
             self.load_collection(model_type)
         
         print("\n" + "="*70)
@@ -235,6 +235,9 @@ def main():
     parser.add_argument('--model', type=str, default='all',
                        choices=['all', 'densenet121', 'resnet50', 'convnextv2'],
                        help='Which model collection to setup')
+    parser.add_argument('--metric_type', type=str, default='COSINE',
+                       choices=['COSINE', 'L2', 'IP'],
+                       help='Distance metric for index (COSINE recommended)')
     
     args = parser.parse_args()
     
@@ -248,10 +251,10 @@ def main():
     try:
         # Setup collections
         if args.model == 'all':
-            manager.setup_all_collections(drop_old=args.drop_old)
+            manager.setup_all_collections(drop_old=args.drop_old, metric_type=args.metric_type)
         else:
             manager.create_collection(args.model, drop_old=args.drop_old)
-            manager.create_index(args.model)
+            manager.create_index(args.model, metric_type=args.metric_type)
             manager.load_collection(args.model)
         
         # Show collection info

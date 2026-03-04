@@ -36,7 +36,7 @@ class MilvusRetriever:
             self.collection = self.manager.collections[self.model_type]
         return self.collection
     
-    def search(self, query_image_path, top_k=10, search_params=None):
+    def search(self, query_image_path, top_k=10, search_params=None, metric_type='COSINE'):
         """
         Search for similar images
         
@@ -44,6 +44,7 @@ class MilvusRetriever:
             query_image_path: Path to query image or PIL Image
             top_k: Number of results to return
             search_params: Optional search parameters
+            metric_type: 'COSINE', 'L2', or 'IP' - should match index metric
             
         Returns:
             results: List of dicts with keys: 'image_path', 'label', 'distance', 'similarity'
@@ -58,6 +59,7 @@ class MilvusRetriever:
         
         with torch.no_grad():
             query_embedding = self.model(img_tensor)
+            # Always normalize for consistent behavior
             query_embedding = F.normalize(query_embedding, p=2, dim=1)
         
         # Convert to list for Milvus
@@ -66,7 +68,7 @@ class MilvusRetriever:
         # Default search params
         if search_params is None:
             search_params = {
-                "metric_type": "COSINE",
+                "metric_type": metric_type,
                 "params": {"nprobe": 10}
             }
         
@@ -83,16 +85,35 @@ class MilvusRetriever:
             output_fields=["image_path", "label"]
         )
         
-        # Format results
+        # Format results and convert distance to similarity
         results = []
         for hits in search_results:
             for hit in hits:
+                distance = hit.distance
+                
+                # Convert distance to similarity based on metric type
+                if metric_type == 'COSINE':
+                    # For COSINE: distance = 1 - cosine_similarity
+                    # So: cosine_similarity = 1 - distance
+                    similarity = 1.0 - distance
+                elif metric_type == 'IP':
+                    # For IP (Inner Product) with normalized vectors: IP = cosine_similarity
+                    similarity = distance
+                elif metric_type == 'L2':
+                    # For L2: smaller distance = more similar
+                    # Convert to similarity: exp(-distance) or 1/(1+distance)
+                    # Since L2 dist for normalized vectors: sqrt(2 - 2*cos_sim)
+                    # We can recover: cos_sim = 1 - (L2^2)/2
+                    similarity = 1.0 - (distance * distance) / 2.0
+                else:
+                    similarity = None
+                
                 result = {
                     'id': hit.id,
                     'image_path': hit.entity.get('image_path'),
                     'label': hit.entity.get('label'),
-                    'distance': hit.distance,
-                    'similarity': 1 - hit.distance if search_params['metric_type'] == 'COSINE' else None
+                    'distance': distance,
+                    'similarity': similarity
                 }
                 results.append(result)
         

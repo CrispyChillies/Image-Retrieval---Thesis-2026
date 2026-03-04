@@ -109,6 +109,9 @@ def main():
                        help='Zilliz Cloud token')
     parser.add_argument('--device', type=str, default='cuda',
                        help='Device to use')
+    parser.add_argument('--metric_type', type=str, default='COSINE',
+                       choices=['COSINE', 'L2', 'IP'],
+                       help='Distance metric used in Milvus index (COSINE for cosine similarity, L2 for Euclidean distance, IP for inner product)')
     
     args = parser.parse_args()
     
@@ -154,8 +157,9 @@ def main():
         print(f"[Step 2] Retrieving top-{args.top_k} similar images...")
         print(f"{'='*70}")
         print(f"Query: {os.path.basename(args.query_image)}")
+        print(f"Using metric: {args.metric_type}")
         
-        results, query_emb = retriever.search(args.query_image, top_k=args.top_k)
+        results, query_emb = retriever.search(args.query_image, top_k=args.top_k, metric_type=args.metric_type)
         
         print(f"\nTop-{args.top_k} Retrieved Images:")
         retrieved_paths = []
