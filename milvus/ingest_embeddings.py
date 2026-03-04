@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
-from model import DenseNet121, ResNet50, ConvNeXtV2
+from ..model import DenseNet121, ResNet50, ConvNeXtV2
 from milvus_setup import MilvusManager, MODEL_CONFIGS
 from tqdm import tqdm
 import argparse
