@@ -87,19 +87,49 @@ def generate_saliency(query_tensor, retrieved_tensor, explainer, explainer_type)
 
 
 def load_image_list(image_list_file, data_dir):
-    """Load list of test images"""
+    """
+    Load list of test images
+    Expected format: <image_id> <filename> <label> <source>
+    Example: 47c78742-4998-4878-aec4-37b11b1354ac 47c78742-4998-4878-aec4-37b11b1354ac.png normal rsna
+    """
     images = []
     with open(image_list_file, 'r') as f:
-        for line in f:
-            parts = line.strip().split()
-            if len(parts) >= 1:
-                img_path = os.path.join(data_dir, parts[0])
-                if os.path.exists(img_path):
-                    images.append({
-                        'path': img_path,
-                        'filename': parts[0],
-                        'label': parts[1] if len(parts) > 1 else 'unknown'
-                    })
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line or line.startswith('#'):  # Skip empty lines and comments
+                continue
+            
+            parts = line.split()
+            
+            # Parse based on number of columns
+            if len(parts) >= 4:
+                # Format: <id> <filename> <label> <source>
+                image_id, filename, label, source = parts[0], parts[1], parts[2], parts[3]
+            elif len(parts) >= 2:
+                # Legacy format: <filename> <label>
+                image_id, filename, label, source = parts[0], parts[0], parts[1], 'unknown'
+            elif len(parts) == 1:
+                # Just filename
+                image_id, filename, label, source = parts[0], parts[0], 'unknown', 'unknown'
+            else:
+                print(f"Warning: Skipping malformed line {line_num}: {line}")
+                continue
+            
+            # Construct full path
+            img_path = os.path.join(data_dir, filename)
+            
+            # Check if file exists
+            if os.path.exists(img_path):
+                images.append({
+                    'path': img_path,
+                    'filename': filename,
+                    'image_id': image_id,
+                    'label': label,
+                    'source': source
+                })
+            else:
+                print(f"Warning: Image not found: {img_path}")
+    
     return images
 
 
@@ -179,6 +209,19 @@ def main():
     print(f"LOADING TEST DATASET")
     print(f"{'='*70}")
     test_images = load_image_list(args.image_list, args.data_dir)
+    print(f"Successfully loaded {len(test_images)} images from {args.image_list}")
+    
+    # Print label distribution
+    if test_images:
+        from collections import Counter
+        label_counts = Counter(img['label'] for img in test_images)
+        source_counts = Counter(img['source'] for img in test_images)
+        print(f"\nLabel distribution:")
+        for label, count in sorted(label_counts.items()):
+            print(f"  {label}: {count}")
+        print(f"\nSource distribution:")
+        for source, count in sorted(source_counts.items()):
+            print(f"  {source}: {count}")
     
     if args.limit:
         test_images = test_images[:args.limit]
@@ -290,7 +333,9 @@ def main():
                 
                 query_result = {
                     'query_image': query_filename,
+                    'query_image_id': test_img_info.get('image_id', query_filename),
                     'query_label': test_img_info['label'],
+                    'query_source': test_img_info.get('source', 'unknown'),
                     'model_type': args.model_type,
                     'explainer': args.explainer,
                     'top_k': args.top_k,
