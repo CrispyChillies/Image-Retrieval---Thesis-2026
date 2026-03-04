@@ -9,8 +9,8 @@ echo "==================================================================="
 echo ""
 
 # Configuration - UPDATE THESE PATHS TO MATCH YOUR SETUP
-QUERY_IMAGE="/data/brian.hu/COVID/data/test/47c78742-4998-4878-aec4-37b11b1354ac.png"
-MODEL_WEIGHTS="./model.pth"  # or path to your ConvNeXtV2 checkpoint
+QUERY_IMAGE="/kaggle/input/rsna-png/data/test/47c78742-4998-4878-aec4-37b11b1354ac.png"
+MODEL_WEIGHTS="/kaggle/input/convnextv2/pytorch/default/1/covid_convnextv2_seed_0_epoch_16_ckpt.pth"
 OUTPUT_DIR="./debug_output"
 STEP_SIZE=1000  # Number of pixels to modify per iteration (lower = more detailed)
 
