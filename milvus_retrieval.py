@@ -165,10 +165,18 @@ def get_model_and_transform(model_type, model_weights, embedding_dim, device):
     
     # Setup transform
     normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+
+    # Always enforce fixed output size so tensors can be stacked and explained safely.
+    # For ConvNeXtV2, keep aspect ratio during resize and then center crop to 384x384.
+    if img_size == 384:
+        resize_size = 432
+    else:
+        resize_size = 256
+
     transform = transforms.Compose([
         transforms.Lambda(lambda img: img.convert('RGB')),
-        transforms.Resize(256 if img_size == 224 else img_size),
-        transforms.CenterCrop(img_size) if img_size == 224 else transforms.Lambda(lambda x: x),
+        transforms.Resize(resize_size),
+        transforms.CenterCrop(img_size),
         transforms.ToTensor(),
         normalize
     ])

@@ -297,13 +297,28 @@ def main():
         
         elif args.explainer == 'sbsm':
             explainer = SBSMBatch(model, input_size=(img_size, img_size), gpu_batch=250)
-            maskspath = 'masks.npy'
-            if not os.path.isfile(maskspath):
-                print("Generating masks for SBSM...")
+            maskspath = f'masks_{img_size}x{img_size}.npy'
+            regenerate_masks = True
+
+            if os.path.isfile(maskspath):
+                try:
+                    existing_masks = np.load(maskspath)
+                    if existing_masks.shape[-2:] == (img_size, img_size):
+                        regenerate_masks = False
+                    else:
+                        print(
+                            f"Existing mask shape {existing_masks.shape[-2:]} does not match "
+                            f"required {(img_size, img_size)}. Regenerating masks..."
+                        )
+                except Exception as e:
+                    print(f"Failed to read existing masks from {maskspath}: {e}. Regenerating masks...")
+
+            if regenerate_masks:
+                print(f"Generating masks for SBSM at size {(img_size, img_size)}...")
                 explainer.generate_masks(window_size=24, stride=5, savepath=maskspath)
             else:
                 explainer.load_masks(maskspath)
-                print('Masks loaded.')
+                print(f'Masks loaded from {maskspath}.')
         
         explainer.to(device)
         print(f"✅ Explainer ready: {args.explainer}")
