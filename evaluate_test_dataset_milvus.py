@@ -195,6 +195,17 @@ def main():
     
     output_path = os.path.join(args.output_dir, args.output_file)
     
+    # DEBUG: Print output information
+    print(f"\n{'='*70}")
+    print(f"OUTPUT CONFIGURATION")
+    print(f"{'='*70}")
+    print(f"Output directory: {os.path.abspath(args.output_dir)}")
+    print(f"Output file: {args.output_file}")
+    print(f"Full output path: {os.path.abspath(output_path)}")
+    print(f"Directory exists: {os.path.exists(args.output_dir)}")
+    print(f"Directory writable: {os.access(args.output_dir, os.W_OK)}")
+    print(f"Current working directory: {os.getcwd()}")
+    
     # Load existing results if skip_existing is enabled
     processed_queries = set()
     if args.skip_existing and os.path.exists(output_path):
@@ -441,7 +452,13 @@ def main():
                 
                 # Save incrementally (every 10 queries)
                 if len(all_results) % 10 == 0:
+                    print(f"\n📝 Saving incremental results: {len(all_results)} queries processed...")
                     save_results(output_path, all_results, args)
+                    if os.path.exists(output_path):
+                        file_size = os.path.getsize(output_path)
+                        print(f"✅ Results saved to {output_path} ({file_size:,} bytes)")
+                    else:
+                        print(f"⚠️  WARNING: File not found after save attempt: {output_path}")
                 
             except Exception as e:
                 print(f"\n❌ Error processing {query_filename}: {e}")
@@ -450,7 +467,25 @@ def main():
                 continue
         
         # Final save
+        print(f"\n{'='*70}")
+        print(f"FINAL SAVE")
+        print(f"{'='*70}")
+        print(f"Total results to save: {len(all_results)}")
+        print(f"Output path: {os.path.abspath(output_path)}")
+        print(f"About to call save_results()...")
+        
         save_results(output_path, all_results, args)
+        
+        # Verify save succeeded
+        if os.path.exists(output_path):
+            file_size = os.path.getsize(output_path)
+            print(f"✅ SUCCESS: Results saved to {os.path.abspath(output_path)}")
+            print(f"   File size: {file_size:,} bytes")
+            print(f"   Contains: {len(all_results)} query results")
+        else:
+            print(f"❌ ERROR: File not found after save: {output_path}")
+            print(f"   Directory exists: {os.path.exists(args.output_dir)}")
+            print(f"   Directory contents: {os.listdir(args.output_dir) if os.path.exists(args.output_dir) else 'N/A'}")
         
         # Print summary statistics
         print_summary(all_results, args)
@@ -461,21 +496,33 @@ def main():
 
 def save_results(output_path, results, args):
     """Save results to JSON file"""
-    output_data = {
-        'metadata': {
-            'model_type': args.model_type,
-            'explainer': args.explainer,
-            'top_k': args.top_k,
-            'step_size': args.step_size,
-            'metric_type': args.metric_type,
-            'num_queries': len(results),
-            'timestamp': datetime.now().isoformat()
-        },
-        'results': results
-    }
-    
-    with open(output_path, 'w') as f:
-        json.dump(output_data, f, indent=2)
+    try:
+        output_data = {
+            'metadata': {
+                'model_type': args.model_type,
+                'explainer': args.explainer,
+                'top_k': args.top_k,
+                'step_size': args.step_size,
+                'metric_type': args.metric_type,
+                'num_queries': len(results),
+                'timestamp': datetime.now().isoformat()
+            },
+            'results': results
+        }
+        
+        # Ensure directory exists
+        output_dir = os.path.dirname(output_path)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+        
+        with open(output_path, 'w') as f:
+            json.dump(output_data, f, indent=2)
+            
+    except Exception as e:
+        print(f"❌ ERROR in save_results(): {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 def print_summary(results, args):
@@ -535,4 +582,4 @@ def print_summary(results, args):
 
 
 if __name__ == '__main__':
-    main()
+    main()  
