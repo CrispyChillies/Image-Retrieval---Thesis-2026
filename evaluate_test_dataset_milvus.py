@@ -174,12 +174,6 @@ def main():
                        help='Limit number of test images to process (for testing)')
     parser.add_argument('--skip_existing', action='store_true',
                        help='Skip already processed images')
-    parser.add_argument('--sbsm_gpu_batch', type=int, default=0,
-                       help='GPU batch size for SBSM (0=adaptive, lower reduces memory)')
-    parser.add_argument('--sbsm_window_size', type=int, default=0,
-                       help='SBSM mask window size (0=adaptive, larger=coarser masks=less memory)')
-    parser.add_argument('--sbsm_stride', type=int, default=0,
-                       help='SBSM mask stride (0=adaptive, larger=fewer masks=less memory)')
     
     args = parser.parse_args()
     
@@ -302,26 +296,8 @@ def main():
                               fc=model_seq[2] if args.embedding_dim else None)
         
         elif args.explainer == 'sbsm':
-            # Adaptive SBSM parameters based on image size (ConvNeXtV2 = 384, others = 224)
-            if args.sbsm_gpu_batch <= 0:
-                gpu_batch = 32 if img_size >= 384 else 64
-            else:
-                gpu_batch = args.sbsm_gpu_batch
-            
-            if args.sbsm_window_size <= 0:
-                window_size = 48 if img_size >= 384 else 24
-            else:
-                window_size = args.sbsm_window_size
-            
-            if args.sbsm_stride <= 0:
-                stride = 24 if img_size >= 384 else 5
-            else:
-                stride = args.sbsm_stride
-            
-            print(f"SBSM Config: img_size={img_size}, gpu_batch={gpu_batch}, window_size={window_size}, stride={stride}")
-            
-            explainer = SBSMBatch(model, input_size=(img_size, img_size), gpu_batch=gpu_batch)
-            maskspath = f'masks_{img_size}x{img_size}_w{window_size}_s{stride}.npy'
+            explainer = SBSMBatch(model, input_size=(img_size, img_size), gpu_batch=250)
+            maskspath = f'masks_{img_size}x{img_size}.npy'
             regenerate_masks = True
 
             if os.path.isfile(maskspath):
@@ -338,13 +314,10 @@ def main():
                     print(f"Failed to read existing masks from {maskspath}: {e}. Regenerating masks...")
 
             if regenerate_masks:
-                num_masks = ((img_size - window_size) // stride + 1) ** 2
                 print(f"Generating masks for SBSM at size {(img_size, img_size)}...")
-                print(f"  (window_size={window_size}, stride={stride}) -> ~{num_masks} masks")
-                explainer.generate_masks(window_size=window_size, stride=stride, savepath=maskspath)
+                explainer.generate_masks(window_size=24, stride=5, savepath=maskspath)
             else:
                 explainer.load_masks(maskspath)
-                print(f'Masks loaded from {maskspath}.')
                 print(f'Masks loaded from {maskspath}.')
         
         explainer.to(device)
@@ -504,16 +477,6 @@ def main():
                 
             except Exception as e:
                 print(f"\n❌ Error processing {query_filename}: {e}")
-                
-                # Detect and handle CUDA OOM specifically
-                if 'CUDA out of memory' in str(e) or 'out of memory' in str(e).lower():
-                    print("\n💡 CUDA OOM detected! Try reducing memory with one of these:")
-                    print("   --sbsm_stride 32 --sbsm_window_size 64 --sbsm_gpu_batch 16")
-                    print("   or further if still OOM:")
-                    print("   --sbsm_stride 40 --sbsm_window_size 80 --sbsm_gpu_batch 8")
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                
                 import traceback
                 traceback.print_exc()
                 continue
