@@ -151,7 +151,7 @@ def main():
                        help='Explanation method')
     parser.add_argument('--top_k', type=int, default=5,
                        help='Number of retrieved images to analyze per query')
-    parser.add_argument('--output_dir', type=str, default='./test_evaluation_results',
+    parser.add_argument('--output_dir', type=str, default='/kaggle/working/test_evaluation_results',
                        help='Output directory')
     parser.add_argument('--output_file', type=str, default=None,
                        help='Output JSON file (default: results_{model}_{explainer}.json)')
