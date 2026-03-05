@@ -38,10 +38,18 @@ def get_model_and_transform(model_type, model_weights, embedding_dim, device):
     
     # Setup transform
     normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    
+    # For ConvNeXt, resize to slightly larger and then center crop
+    # For other models, use standard 256->224 crop
+    if img_size == 384:
+        resize_size = 432  # ~1.125x the target size
+    else:
+        resize_size = 256
+    
     transform = transforms.Compose([
         transforms.Lambda(lambda img: img.convert('RGB')),
-        transforms.Resize(256 if img_size == 224 else img_size),
-        transforms.CenterCrop(img_size) if img_size == 224 else transforms.Lambda(lambda x: x),
+        transforms.Resize(resize_size),
+        transforms.CenterCrop(img_size),
         transforms.ToTensor(),
         normalize
     ])
