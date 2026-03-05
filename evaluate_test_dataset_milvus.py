@@ -25,6 +25,7 @@ from datetime import datetime
 sys.path.append(os.path.join(os.path.dirname(__file__), 'milvus'))
 from milvus_setup import MilvusManager
 from milvus_retrieval import MilvusRetriever, get_model_and_transform
+from milvus_retrieval_patched import MilvusRetrieverPatched
 
 
 class CausalMetric():
@@ -174,6 +175,8 @@ def main():
                        help='Limit number of test images to process (for testing)')
     parser.add_argument('--skip_existing', action='store_true',
                        help='Skip already processed images')
+    parser.add_argument('--local_data_base_path', type=str, default=None,
+                       help='Local VM path to replace /kaggle/input paths')
     
     args = parser.parse_args()
     
@@ -269,8 +272,15 @@ def main():
         )
         print(f"✅ Model loaded: {args.model_type}")
         
-        # Create retriever
-        retriever = MilvusRetriever(manager, args.model_type, model, transform)
+        # Create retriever (with optional Kaggle path remapping for local VM usage)
+        if args.local_data_base_path:
+            print(f"Using path remapping: /kaggle/... -> {args.local_data_base_path}")
+            retriever = MilvusRetrieverPatched(
+                manager, args.model_type, model, transform,
+                local_data_base_path=args.local_data_base_path
+            )
+        else:
+            retriever = MilvusRetriever(manager, args.model_type, model, transform)
         retriever.load_collection()
         print(f"✅ Retriever ready")
         
