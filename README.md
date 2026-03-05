@@ -95,3 +95,23 @@ This material is based on research sponsored by the Air Force Research Laborator
 
 ### Disclaimer
 The views and conclusions contained herein are those of the authors and should not be interpreted as necessarily representing the official policies or endorsements, either expressed or implied, of the Air Force Research Laboratory and DARPA or the U.S. Government.
+
+
+
+
+
+# Command for running insertion and deletion xAi metrics
+
+```python
+python evaluate_test_dataset_milvus.py \
+  --data_dir /media/vhviet03/datasets/covidx-cxr/data/test \
+  --image_list test_COVIDx4.txt \
+  --model_type convnextv2 \
+  --model_weights model.pth \
+  --explainer sbsm \
+  --local_data_base_path /media/vhviet03/datasets/covidx-cxr/data/train \
+  --top_k 5 \
+  --output_dir ./covid_results \
+  --uri <your_zilliz_uri> \
+  --token <your_zilliz_token> \
+```
