@@ -17,12 +17,12 @@ import os
 # Model configurations
 MODEL_CONFIGS = {
     'densenet121': {
-        'embedding_dim': 256,
+        'embedding_dim': 1024,
         'collection_name': 'isic_image_retrieval_densenet121',
         'description': 'DenseNet121 image embeddings'
     },
     'resnet50': {
-        'embedding_dim': 256,
+        'embedding_dim': 2048,
         'collection_name': 'isic_image_retrieval_resnet50',
         'description': 'ResNet50 image embeddings'
     },
