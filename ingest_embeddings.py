@@ -72,22 +72,45 @@ def load_image_list(image_list_file, data_dir):
     if is_csv:
         # Parse ISIC CSV format
         import csv
+        print(f"Parsing CSV file: {image_list_file}")
+        
         with open(image_list_file, newline='') as f:
             reader = csv.reader(f)
-            next(reader, None)  # skip header
+            header = next(reader, None)  # skip header
+            print(f"CSV Header: {header}")
+            
+            line_count = 0
             for line in reader:
+                line_count += 1
+                if len(line) < 3:
+                    print(f"Warning: Line {line_count} has fewer than 3 columns: {line}")
+                    continue
+                    
                 image_name = line[0] + '.jpg'
                 
-                # Determine label based on columns
-                if float(line[1]) == 1:
-                    label = 'melanoma'
-                elif float(line[2]) == 1:
-                    label = 'seborrheic_keratosis'
-                else:
-                    label = 'nevus'
-                
-                image_path = os.path.join(data_dir, image_name)
-                images.append((image_path, label))
+                try:
+                    # Determine label based on columns
+                    if float(line[1]) == 1:
+                        label = 'melanoma'
+                    elif float(line[2]) == 1:
+                        label = 'seborrheic_keratosis'
+                    else:
+                        label = 'nevus'
+                    
+                    image_path = os.path.join(data_dir, image_name)
+                    images.append((image_path, label))
+                    
+                    # Show first few entries for debugging
+                    if line_count <= 3:
+                        print(f"  Sample {line_count}: {image_name} -> {label}")
+                        print(f"    Full path: {image_path}")
+                        print(f"    Exists: {os.path.exists(image_path)}")
+                        
+                except (ValueError, IndexError) as e:
+                    print(f"Error parsing line {line_count}: {line} - {e}")
+                    continue
+            
+            print(f"Parsed {line_count} lines from CSV")
     else:
         # Parse text format (ChestXray)
         with open(image_list_file, 'r') as f:
