@@ -8,8 +8,9 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
-from model import DenseNet121, ResNet50, ConvNeXtV2
+from model import DenseNet121, ResNet50, ConvNeXtV2, MedSigLIP
 from milvus_setup import MilvusManager, MODEL_CONFIGS
+from transformers import AutoProcessor
 from tqdm import tqdm
 import argparse
 
@@ -27,6 +28,23 @@ def get_model_and_transform(model_type, model_weights, embedding_dim, device):
     elif model_type == 'convnextv2':
         model = ConvNeXtV2(embedding_dim=embedding_dim)
         img_size = 384
+    elif model_type == 'medsiglip':
+        embed_dim = embedding_dim if embedding_dim is not None else 512
+        model = MedSigLIP(embed_dim=embed_dim)
+        
+        # Load weights
+        checkpoint = torch.load(model_weights, map_location=device)
+        model.load_state_dict(checkpoint, strict=False)
+        model.eval()
+        model.to(device)
+        
+        # MedSigLIP uses AutoProcessor (448x448, normalisation baked in)
+        processor = AutoProcessor.from_pretrained("google/medsiglip-448")
+        def medsiglip_transform(img):
+            inputs = processor(images=img.convert('RGB'), return_tensors="pt")
+            return inputs["pixel_values"].squeeze(0)
+        
+        return model, medsiglip_transform
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
@@ -40,7 +58,7 @@ def get_model_and_transform(model_type, model_weights, embedding_dim, device):
     normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     
     # For ConvNeXt, resize to slightly larger and then center crop
-# For other models, use standard 256->224 crop
+    # For other models, use standard 256->224 crop
     if img_size == 384:
         resize_size = 432  # ~1.125x the target size
     else:
@@ -194,7 +212,7 @@ def ingest_embeddings(manager, model_type, embeddings, image_paths, labels, batc
 def main():
     parser = argparse.ArgumentParser(description='Ingest image embeddings into Milvus')
     parser.add_argument('--model_type', type=str, required=True,
-                       choices=['densenet121', 'resnet50', 'convnextv2'],
+                       choices=['densenet121', 'resnet50', 'convnextv2', 'medsiglip'],
                        help='Model type to use')
     parser.add_argument('--model_weights', type=str, required=True,
                        help='Path to model weights')

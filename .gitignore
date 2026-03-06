@@ -7,3 +7,4 @@ tbx_11/
 medsiglip_fintune/
 eval.ipynb
 .env
+.vscode/

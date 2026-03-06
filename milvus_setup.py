@@ -30,6 +30,11 @@ MODEL_CONFIGS = {
         'embedding_dim': 1024,
         'collection_name': 'isic_image_retrieval_convnextv2',
         'description': 'ConvNeXtV2 image embeddings'
+    },
+    'medsiglip': {
+        'embedding_dim': 512,
+        'collection_name': 'covid_image_retrieval_medsiglip',
+        'description': 'MedSigLIP image embeddings'
     }
 }
 
@@ -90,7 +95,7 @@ class MilvusManager:
         Create collection for a specific model
         
         Args:
-            model_type: 'densenet121', 'resnet50', or 'convnextv2'
+            model_type: 'densenet121', 'resnet50', 'convnextv2', or 'medsiglip'
             drop_old: Whether to drop existing collection
         """
         if model_type not in MODEL_CONFIGS:
@@ -233,7 +238,7 @@ def main():
     parser.add_argument('--drop_old', action='store_true',
                        help='Drop existing collections')
     parser.add_argument('--model', type=str, default='all',
-                       choices=['all', 'densenet121', 'resnet50', 'convnextv2'],
+                       choices=['all', 'densenet121', 'resnet50', 'convnextv2', 'medsiglip'],
                        help='Which model collection to setup')
     parser.add_argument('--metric_type', type=str, default='COSINE',
                        choices=['COSINE', 'L2', 'IP'],
