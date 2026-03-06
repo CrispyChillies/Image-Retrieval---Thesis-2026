@@ -90,46 +90,116 @@ def generate_saliency(query_tensor, retrieved_tensor, explainer, explainer_type)
 def load_image_list(image_list_file, data_dir):
     """
     Load list of test images
-    Expected format: <image_id> <filename> <label> <source>
-    Example: 47c78742-4998-4878-aec4-37b11b1354ac 47c78742-4998-4878-aec4-37b11b1354ac.png normal rsna
+    
+    Supports two formats:
+    1. CSV format (ISIC dataset): image_id, melanoma, seborrheic_keratosis, ...
+    2. Text format (ChestXray): <image_id> <filename> <label> <source>
+    
+    Example text format: 47c78742-4998-4878-aec4-37b11b1354ac 47c78742-4998-4878-aec4-37b11b1354ac.png normal rsna
     """
     images = []
-    with open(image_list_file, 'r') as f:
-        for line_num, line in enumerate(f, 1):
-            line = line.strip()
-            if not line or line.startswith('#'):  # Skip empty lines and comments
-                continue
+    
+    # Detect if file is CSV
+    is_csv = image_list_file.endswith('.csv')
+    
+    if is_csv:
+        # Parse ISIC CSV format
+        import csv
+        print(f"Parsing CSV file: {image_list_file}")
+        
+        with open(image_list_file, newline='') as f:
+            reader = csv.reader(f)
+            header = next(reader, None)  # skip header
+            print(f"CSV Header: {header}")
             
-            parts = line.split()
+            line_count = 0
+            found_count = 0
+            for line in reader:
+                line_count += 1
+                if len(line) < 3:
+                    print(f"Warning: Line {line_count} has fewer than 3 columns: {line}")
+                    continue
+                
+                try:
+                    image_id = line[0]
+                    filename = image_id + '.jpg'
+                    
+                    # Determine label based on columns
+                    if float(line[1]) == 1:
+                        label = 'melanoma'
+                    elif float(line[2]) == 1:
+                        label = 'seborrheic_keratosis'
+                    else:
+                        label = 'nevus'
+                    
+                    source = 'ISIC'
+                    
+                    # Construct full path
+                    img_path = os.path.join(data_dir, filename)
+                    
+                    # Check if file exists
+                    if os.path.exists(img_path):
+                        images.append({
+                            'path': img_path,
+                            'filename': filename,
+                            'image_id': image_id,
+                            'label': label,
+                            'source': source
+                        })
+                        found_count += 1
+                        
+                        # Show first few entries for debugging
+                        if found_count <= 3:
+                            print(f"  Sample {found_count}: {filename} -> {label}")
+                            print(f"    Full path: {img_path}")
+                    else:
+                        if line_count <= 5:  # Only show warnings for first few missing files
+                            print(f"Warning: Image not found: {img_path}")
+                        
+                except (ValueError, IndexError) as e:
+                    print(f"Error parsing line {line_count}: {line} - {e}")
+                    continue
             
-            # Parse based on number of columns
-            if len(parts) >= 4:
-                # Format: <id> <filename> <label> <source>
-                image_id, filename, label, source = parts[0], parts[1], parts[2], parts[3]
-            elif len(parts) >= 2:
-                # Legacy format: <filename> <label>
-                image_id, filename, label, source = parts[0], parts[0], parts[1], 'unknown'
-            elif len(parts) == 1:
-                # Just filename
-                image_id, filename, label, source = parts[0], parts[0], 'unknown', 'unknown'
-            else:
-                print(f"Warning: Skipping malformed line {line_num}: {line}")
-                continue
-            
-            # Construct full path
-            img_path = os.path.join(data_dir, filename)
-            
-            # Check if file exists
-            if os.path.exists(img_path):
-                images.append({
-                    'path': img_path,
-                    'filename': filename,
-                    'image_id': image_id,
-                    'label': label,
-                    'source': source
-                })
-            else:
-                print(f"Warning: Image not found: {img_path}")
+            print(f"Parsed {line_count} lines from CSV, found {found_count} existing images")
+    
+    else:
+        # Parse text format (ChestXray)
+        with open(image_list_file, 'r') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line or line.startswith('#'):  # Skip empty lines and comments
+                    continue
+                
+                parts = line.split()
+                
+                # Parse based on number of columns
+                if len(parts) >= 4:
+                    # Format: <id> <filename> <label> <source>
+                    image_id, filename, label, source = parts[0], parts[1], parts[2], parts[3]
+                elif len(parts) >= 2:
+                    # Legacy format: <filename> <label>
+                    image_id, filename, label, source = parts[0], parts[0], parts[1], 'unknown'
+                elif len(parts) == 1:
+                    # Just filename
+                    image_id, filename, label, source = parts[0], parts[0], 'unknown', 'unknown'
+                else:
+                    print(f"Warning: Skipping malformed line {line_num}: {line}")
+                    continue
+                
+                # Construct full path
+                img_path = os.path.join(data_dir, filename)
+                
+                # Check if file exists
+                if os.path.exists(img_path):
+                    images.append({
+                        'path': img_path,
+                        'filename': filename,
+                        'image_id': image_id,
+                        'label': label,
+                        'source': source
+                    })
+                else:
+                    print(f"Warning: Image not found: {img_path}")
     
     return images
 
