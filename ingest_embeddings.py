@@ -40,7 +40,7 @@ def get_model_and_transform(model_type, model_weights, embedding_dim, device):
     normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     
     # For ConvNeXt, resize to slightly larger and then center crop
-    # For other models, use standard 256->224 crop
+# For other models, use standard 256->224 crop
     if img_size == 384:
         resize_size = 432  # ~1.125x the target size
     else:
