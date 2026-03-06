@@ -58,16 +58,45 @@ def get_model_and_transform(model_type, model_weights, embedding_dim, device):
 
 
 def load_image_list(image_list_file, data_dir):
-    """Load image paths and labels from file"""
+    """Load image paths and labels from file
+    
+    Supports two formats:
+    1. CSV format (ISIC dataset): image_id, melanoma, seborrheic_keratosis, ...
+    2. Text format (ChestXray): idx filename label
+    """
     images = []
     
-    with open(image_list_file, 'r') as f:
-        for line in f:
-            parts = line.strip().split()
-            if len(parts) >= 2:
-                image_path = os.path.join(data_dir, parts[1])
-                label = parts[2] if len(parts) > 2 else 'unknown'
+    # Detect if file is CSV
+    is_csv = image_list_file.endswith('.csv')
+    
+    if is_csv:
+        # Parse ISIC CSV format
+        import csv
+        with open(image_list_file, newline='') as f:
+            reader = csv.reader(f)
+            next(reader, None)  # skip header
+            for line in reader:
+                image_name = line[0] + '.jpg'
+                
+                # Determine label based on columns
+                if float(line[1]) == 1:
+                    label = 'melanoma'
+                elif float(line[2]) == 1:
+                    label = 'seborrheic_keratosis'
+                else:
+                    label = 'nevus'
+                
+                image_path = os.path.join(data_dir, image_name)
                 images.append((image_path, label))
+    else:
+        # Parse text format (ChestXray)
+        with open(image_list_file, 'r') as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    image_path = os.path.join(data_dir, parts[1])
+                    label = parts[2] if len(parts) > 2 else 'unknown'
+                    images.append((image_path, label))
     
     return images
 
