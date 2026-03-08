@@ -100,40 +100,57 @@ class ConvNeXtV2(nn.Module):
 
 
 class CSRA(nn.Module):
-    """Class-Specific Residual Attention module."""
+    """Class-Specific Residual Attention adapted for retrieval.
 
-    def __init__(self, input_dim, num_classes, lam=0.1):
+    Instead of producing class logits, uses K attention heads to compute
+    spatially-attended features, then projects them into an embedding space.
+    """
+
+    def __init__(self, input_dim, num_heads=8, lam=0.1, embedding_dim=512):
         super().__init__()
-        self.num_classes = num_classes
+        self.num_heads = num_heads
         self.lam = lam
-        self.classifier = nn.Linear(input_dim, num_classes)
-        self.conv_att = nn.Conv2d(input_dim, num_classes, kernel_size=1, bias=False)
+
+        # attention: K heads, each producing a spatial attention map
+        self.conv_att = nn.Conv2d(input_dim, num_heads, kernel_size=1, bias=False)
         self.softmax = nn.Softmax(dim=2)
+
+        # projection: GAP features + attention-weighted features → embedding
+        self.projection = nn.Sequential(
+            nn.Linear(input_dim * (1 + num_heads), 512),
+            nn.LayerNorm(512),
+            nn.ReLU(),
+            nn.Linear(512, embedding_dim)
+        )
 
     def forward(self, x):
         b, c, h, w = x.size()
-        gap_feat = torch.mean(x, dim=(2, 3))
-        logit_gap = self.classifier(gap_feat)
 
-        att_map = self.conv_att(x).view(b, self.num_classes, h * w)
+        # global average pooling branch
+        gap_feat = torch.mean(x, dim=(2, 3))  # (B, C)
+
+        # attention-weighted branch: K heads
+        att_map = self.conv_att(x).view(b, self.num_heads, h * w)  # (B, K, H*W)
         att_score = self.softmax(att_map)
 
-        x_flat = x.view(b, c, h * w)
+        x_flat = x.view(b, c, h * w)  # (B, C, H*W)
+        # (B, K, H*W) x (B, H*W, C) → (B, K, C)
         csra_feat = torch.bmm(att_score, x_flat.permute(0, 2, 1))
+        csra_feat = csra_feat.view(b, -1)  # (B, K*C)
 
-        w_cls = self.classifier.weight
-        logit_csra = torch.sum(csra_feat * w_cls.unsqueeze(0), dim=2) + self.classifier.bias
-        return logit_gap + self.lam * logit_csra
+        # residual fusion: concat GAP + attention features
+        fused = torch.cat([gap_feat, self.lam * csra_feat], dim=1)  # (B, C + K*C)
+        return self.projection(fused)
 
 
 class ConvNeXtV2_CSRA(nn.Module):
-    """ConvNeXtV2 with CSRA (Class-Specific Residual Attention) head.
+    """ConvNeXtV2 with CSRA (Class-Specific Residual Attention) head for retrieval.
 
     Uses spatial feature maps from ConvNeXtV2 backbone and applies CSRA
-    to produce class-aware embeddings for retrieval.
+    with multiple attention heads to produce retrieval embeddings.
     """
 
-    def __init__(self, pretrained=True, num_classes=2, lam=0.1, embedding_dim=None):
+    def __init__(self, pretrained=True, num_heads=8, lam=0.1, embedding_dim=512):
         super(ConvNeXtV2_CSRA, self).__init__()
         # load pretrained model from timm
         self.convnext = timm.create_model(
@@ -143,19 +160,14 @@ class ConvNeXtV2_CSRA(nn.Module):
         )
 
         in_features = self.convnext.num_features
-        self.csra = CSRA(in_features, num_classes, lam=lam)
-
-        # optional embedding layer on top of CSRA logits
-        self.fc = nn.Linear(
-            num_classes, embedding_dim) if embedding_dim else None
+        self.csra = CSRA(in_features, num_heads=num_heads, lam=lam,
+                         embedding_dim=embedding_dim)
 
     def forward(self, x):
         # extract spatial feature maps (B, C, H, W) before pooling
         x = self.convnext.forward_features(x)
-        # CSRA produces class logits (B, num_classes)
+        # CSRA produces retrieval embeddings (B, embedding_dim)
         x = self.csra(x)
-        if self.fc:
-            x = self.fc(x)
         # normalize for retrieval
         x = F.normalize(x, dim=1)
         return x
