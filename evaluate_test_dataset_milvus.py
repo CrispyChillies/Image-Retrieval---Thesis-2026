@@ -256,6 +256,8 @@ def main():
                        help='Skip already processed images')
     parser.add_argument('--local_data_base_path', type=str, default=None,
                        help='Local VM path to replace /kaggle/input paths')
+    parser.add_argument('--gpu_batch', type=int, default=50,
+                       help='GPU batch size for SBSM mask evaluation (lower = less VRAM)')
     
     args = parser.parse_args()
     
@@ -385,7 +387,7 @@ def main():
                               fc=model_seq[2] if args.embedding_dim else None)
         
         elif args.explainer == 'sbsm':
-            explainer = SBSMBatch(model, input_size=(img_size, img_size), gpu_batch=250)
+            explainer = SBSMBatch(model, input_size=(img_size, img_size), gpu_batch=args.gpu_batch)
             maskspath = f'masks_{img_size}x{img_size}.npy'
             regenerate_masks = True
 
