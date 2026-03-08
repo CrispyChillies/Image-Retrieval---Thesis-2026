@@ -99,6 +99,68 @@ class ConvNeXtV2(nn.Module):
         return x
 
 
+class CSRA(nn.Module):
+    """Class-Specific Residual Attention module."""
+
+    def __init__(self, input_dim, num_classes, lam=0.1):
+        super().__init__()
+        self.num_classes = num_classes
+        self.lam = lam
+        self.classifier = nn.Linear(input_dim, num_classes)
+        self.conv_att = nn.Conv2d(input_dim, num_classes, kernel_size=1, bias=False)
+        self.softmax = nn.Softmax(dim=2)
+
+    def forward(self, x):
+        b, c, h, w = x.size()
+        gap_feat = torch.mean(x, dim=(2, 3))
+        logit_gap = self.classifier(gap_feat)
+
+        att_map = self.conv_att(x).view(b, self.num_classes, h * w)
+        att_score = self.softmax(att_map)
+
+        x_flat = x.view(b, c, h * w)
+        csra_feat = torch.bmm(att_score, x_flat.permute(0, 2, 1))
+
+        w_cls = self.classifier.weight
+        logit_csra = torch.sum(csra_feat * w_cls.unsqueeze(0), dim=2) + self.classifier.bias
+        return logit_gap + self.lam * logit_csra
+
+
+class ConvNeXtV2_CSRA(nn.Module):
+    """ConvNeXtV2 with CSRA (Class-Specific Residual Attention) head.
+
+    Uses spatial feature maps from ConvNeXtV2 backbone and applies CSRA
+    to produce class-aware embeddings for retrieval.
+    """
+
+    def __init__(self, pretrained=True, num_classes=2, lam=0.1, embedding_dim=None):
+        super(ConvNeXtV2_CSRA, self).__init__()
+        # load pretrained model from timm
+        self.convnext = timm.create_model(
+            'convnextv2_base.fcmae_ft_in22k_in1k_384',
+            pretrained=pretrained,
+            num_classes=0
+        )
+
+        in_features = self.convnext.num_features
+        self.csra = CSRA(in_features, num_classes, lam=lam)
+
+        # optional embedding layer on top of CSRA logits
+        self.fc = nn.Linear(
+            num_classes, embedding_dim) if embedding_dim else None
+
+    def forward(self, x):
+        # extract spatial feature maps (B, C, H, W) before pooling
+        x = self.convnext.forward_features(x)
+        # CSRA produces class logits (B, num_classes)
+        x = self.csra(x)
+        if self.fc:
+            x = self.fc(x)
+        # normalize for retrieval
+        x = F.normalize(x, dim=1)
+        return x
+
+
 class SwinV2(nn.Module):
     # SwinV2 model for feature extraction using timm
 
