@@ -3,6 +3,7 @@ Evaluate insertion/deletion metrics on entire test dataset using Milvus
 Scales up debug_pipeline_with_milvus.py to process all test images
 """
 
+import gc
 import os
 import sys
 import json
@@ -41,38 +42,46 @@ class CausalMetric():
         
     def evaluate(self, img_tensor, retrieved_tensor, explanation):
         """Evaluate insertion/deletion metric"""
-        q_feat = self.model(img_tensor.cuda())
+        device = img_tensor.device
         n_steps = (self.hw + self.step - 1) // self.step
-        
-        if self.mode == 'del':
-            start = retrieved_tensor.clone()
-            finish = self.substrate_fn(retrieved_tensor)
-        else:
-            start = self.substrate_fn(retrieved_tensor)
-            finish = retrieved_tensor.clone()
-        
-        scores = np.empty(n_steps + 1)
-        salient_order = np.flip(np.argsort(explanation.flatten())).copy()
-        salient_order = torch.from_numpy(salient_order).unsqueeze(0)
-        
-        zero_counter = 0
-        for i in range(n_steps + 1):
-            r_feat = self.model(start.cuda())
-            cosine_sim = F.cosine_similarity(q_feat, r_feat)[0]
-            
-            if cosine_sim < 0:
-                cosine_sim = torch.clamp(cosine_sim, min=0, max=1)
-                zero_counter += 1
-            
-            scores[i] = cosine_sim.item()
-            
-            if i < n_steps:
-                coords = salient_order[:, self.step * i:self.step * (i + 1)]
-                start_reshaped = start.reshape(1, 3, self.hw)
-                finish_reshaped = finish.reshape(1, 3, self.hw)
-                start_reshaped[0, :, coords] = finish_reshaped[0, :, coords]
-                start = start_reshaped.reshape(start.shape)
-        
+
+        with torch.no_grad():
+            q_feat = self.model(img_tensor)
+
+            if self.mode == 'del':
+                start = retrieved_tensor.clone()
+                finish = self.substrate_fn(retrieved_tensor)
+            else:
+                start = self.substrate_fn(retrieved_tensor)
+                finish = retrieved_tensor.clone()
+
+            # Flatten once for in-place pixel swapping
+            start = start.reshape(1, 3, self.hw)
+            finish = finish.reshape(1, 3, self.hw)
+
+            scores = np.empty(n_steps + 1)
+            salient_order = torch.from_numpy(
+                np.flip(np.argsort(explanation.flatten())).copy()
+            ).unsqueeze(0).to(device)
+
+            zero_counter = 0
+            for i in range(n_steps + 1):
+                r_feat = self.model(start.reshape(1, 3,
+                    int(self.hw ** 0.5), int(self.hw ** 0.5)))
+                cosine_sim = F.cosine_similarity(q_feat, r_feat)[0]
+
+                if cosine_sim < 0:
+                    cosine_sim = torch.clamp(cosine_sim, min=0, max=1)
+                    zero_counter += 1
+
+                scores[i] = cosine_sim.item()
+                del r_feat, cosine_sim
+
+                if i < n_steps:
+                    coords = salient_order[:, self.step * i:self.step * (i + 1)]
+                    start[0, :, coords] = finish[0, :, coords]
+
+        del start, finish, q_feat, salient_order
         return auc(scores), scores, zero_counter
 
 
@@ -535,15 +544,21 @@ def main():
                         plt.savefig(os.path.join(vis_dir, f'rank{rank}_metrics.png'),
                                    dpi=100, bbox_inches='tight')
                         plt.close()
-                    
+
+                    del ret_tensor, saliency
                     query_result['retrieved'].append(retrieved_result)
                 
                 # Compute query-level statistics
                 query_result['avg_del_auc'] = float(np.mean([r['del_auc'] for r in query_result['retrieved']]))
                 query_result['avg_ins_auc'] = float(np.mean([r['ins_auc'] for r in query_result['retrieved']]))
                 query_result['avg_similarity'] = float(np.mean([r['similarity'] for r in query_result['retrieved']]))
-                
+
                 all_results.append(query_result)
+
+                # Free GPU memory after each query
+                del query_tensor
+                torch.cuda.empty_cache()
+                gc.collect()
                 
                 # Save incrementally (every 10 queries)
                 if len(all_results) % 10 == 0:
