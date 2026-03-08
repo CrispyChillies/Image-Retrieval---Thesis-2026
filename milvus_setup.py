@@ -28,7 +28,7 @@ MODEL_CONFIGS = {
     },
     'convnextv2': {
         'embedding_dim': 1024,
-        'collection_name': 'isic_image_retrieval_convnextv2',
+        'collection_name': 'image_retrieval_convnextv2',
         'description': 'ConvNeXtV2 image embeddings'
     },
     'medsiglip': {
