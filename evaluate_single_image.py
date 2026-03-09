@@ -247,6 +247,7 @@ def main():
         # Build retriever
         # ------------------------------------------------------------------
         if args.local_data_base_path:
+            print(f'  Using path remapping: /kaggle/... -> {args.local_data_base_path}')
             retriever = MilvusRetrieverPatched(
                 manager, args.model_type, model, transform,
                 local_data_base_path=args.local_data_base_path
