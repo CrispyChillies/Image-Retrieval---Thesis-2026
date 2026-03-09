@@ -23,7 +23,7 @@ MODEL_CONFIGS = {
     },
     'resnet50': {
         'embedding_dim': 2048,
-        'collection_name': 'isic_image_retrieval_resnet50',
+        'collection_name': 'image_retrieval_resnet50',
         'description': 'ResNet50 image embeddings'
     },
     'convnextv2': {
