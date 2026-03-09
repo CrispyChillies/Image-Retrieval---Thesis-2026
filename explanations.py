@@ -129,6 +129,10 @@ class SBSMBatch(SBSM):
                 x.append(self.model(
                     stack[i:min(i + self.gpu_batch, self.N*B)]))
             x = torch.cat(x)
+            # ==== 
+            del stack
+            torch.cuda.empty_cache()
+            # ====
             if self_sim:
                 m_dist = torch.norm(x_q.unsqueeze(
                     1) - x.view(-1, B, x_q.shape[1]).permute(1, 0, 2), dim=2)
