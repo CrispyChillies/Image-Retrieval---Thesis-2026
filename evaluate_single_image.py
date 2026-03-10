@@ -294,11 +294,11 @@ def main():
                         raise ValueError('Shape mismatch')
                 except Exception as e:
                     print(f'  Regenerating masks ({e})')
-                    explainer.generate_masks(window_size=24, stride=5,
+                    explainer.generate_masks(window_size=48, stride=8,
                                              savepath=maskspath)
             else:
                 print(f'  Generating masks at size {img_size}...')
-                explainer.generate_masks(window_size=24, stride=5,
+                explainer.generate_masks(window_size=48, stride=8,
                                           savepath=maskspath)
 
         explainer.to(device)
@@ -313,7 +313,7 @@ def main():
         blur_fn = lambda x: F.conv2d(x, kern, padding=klen // 2)
 
         del_metric = CausalMetric(model, 'del', args.step_size,
-                                   torch.zeros_like, img_size)
+                           blur_fn, img_size)
         ins_metric = CausalMetric(model, 'ins', args.step_size,
                                    blur_fn,           img_size)
 
