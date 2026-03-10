@@ -1074,6 +1074,12 @@ def main(args):
         elif args.model == 'convnextv2':
             model = ConvNeXtV2(embedding_dim=args.embedding_dim)
             is_conceptclip = False
+        elif args.model == 'convnextv2_sra':
+            model = ConvNeXtV2_SRA(num_heads=args.sra_num_heads, lam=args.sra_lam)
+            is_conceptclip = False
+        elif args.model == 'swinv2':
+            model = SwinV2(embedding_dim=args.embedding_dim)
+            is_conceptclip = False
         elif args.model == 'medsiglip':
             model = MedSigLIP()
             is_conceptclip = False
