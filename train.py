@@ -12,7 +12,7 @@ from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
 from loss import TripletMarginLoss, WeightedMultiLabelTripletLoss, ConceptCLIPLoss
 from sampler import PKSampler
 
-from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2, conceptCLIP
+from model import ResNet50, DenseNet121, ConvNeXtV2, ConvNeXtV2_SRA, SwinV2, conceptCLIP
 
 from sklearn.metrics import average_precision_score
 import numpy as np
@@ -503,6 +503,8 @@ def main(args):
         model = ResNet50(embedding_dim=args.embedding_dim)
     elif args.model == 'convnextv2':
         model = ConvNeXtV2(embedding_dim=args.embedding_dim)
+    elif args.model == 'convnextv2_sra':
+        model = ConvNeXtV2_SRA(num_heads=args.sra_num_heads, lam=args.sra_lam)
     elif args.model == 'swinv2':
         model = SwinV2(embedding_dim=args.embedding_dim)
     elif args.model == 'hybrid_convnext_vit':
@@ -590,14 +592,14 @@ def main(args):
             {'params': model_without_ddp.bnneck.parameters(), 'lr': args.lr},
             {'params': model_without_ddp.fc.parameters(), 'lr': args.lr},
         ])
-    elif args.model in ['convnextv2', 'hybrid_convnext_vit']:
+    elif args.model in ['convnextv2', 'convnextv2_sra', 'hybrid_convnext_vit']:
         # ConvNeXt or Hybrid model - use different LR for backbone vs head
         model_without_ddp = model.module if args.use_ddp else model
         backbone_params = []
         head_params = []
         
         for name, param in model_without_ddp.named_parameters():
-            if 'fc' in name or 'fusion' in name:
+            if 'fc' in name or 'fusion' in name or 'sra' in name:
                 head_params.append(param)
             else:
                 backbone_params.append(param)
@@ -614,7 +616,7 @@ def main(args):
                                      [0.229, 0.224, 0.225])
 
     # Use 384x384 for ConvNeXtV2, SwinV2 and Hybrid models, 224x224 for other models
-    img_size = 384 if args.model in ['convnextv2', 'swinv2', 'hybrid_convnext_vit'] else 224
+    img_size = 384 if args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'hybrid_convnext_vit'] else 224
     resize_size = 432 if img_size == 384 else 256
 
     train_transform = transforms.Compose([
@@ -853,9 +855,13 @@ def parse_args():
     parser.add_argument('--anomaly', action='store_true',
                         help='Train without anomaly class')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, convnextv2, swinv2, hybrid_convnext_vit, conceptclip, or resnet50_attention)')
+                        help='Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, swinv2, hybrid_convnext_vit, conceptclip, or resnet50_attention)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
+    parser.add_argument('--sra-num-heads', default=8, type=int,
+                        help='Number of attention heads for SRA (ConvNeXtV2_SRA)')
+    parser.add_argument('--sra-lam', default=0.1, type=float,
+                        help='Lambda for residual attention in SRA (ConvNeXtV2_SRA)')
     parser.add_argument('--freeze-backbone', action='store_true',
                         help='Freeze backbone weights (useful for ConceptCLIP)')
     parser.add_argument('-p', '--labels-per-batch', default=3, type=int,
