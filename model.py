@@ -99,14 +99,15 @@ class ConvNeXtV2(nn.Module):
         return x
 
 
-class CSRA(nn.Module):
-    """Class-Specific Residual Attention adapted for retrieval.
+class SRA(nn.Module):
+    """Spatial Residual Attention for retrieval.
 
-    Instead of producing class logits, uses K attention heads to compute
-    spatially-attended features, then projects them into an embedding space.
+    Uses K attention heads to compute spatially-attended features,
+    then averages them with GAP features to preserve the original
+    backbone feature dimension (e.g., 1024 for ConvNeXtV2-Base).
     """
 
-    def __init__(self, input_dim, num_heads=8, lam=0.1, embedding_dim=512):
+    def __init__(self, input_dim, num_heads=8, lam=0.1):
         super().__init__()
         self.num_heads = num_heads
         self.lam = lam
@@ -114,14 +115,6 @@ class CSRA(nn.Module):
         # attention: K heads, each producing a spatial attention map
         self.conv_att = nn.Conv2d(input_dim, num_heads, kernel_size=1, bias=False)
         self.softmax = nn.Softmax(dim=2)
-
-        # projection: GAP features + attention-weighted features → embedding
-        self.projection = nn.Sequential(
-            nn.Linear(input_dim * (1 + num_heads), 512),
-            nn.LayerNorm(512),
-            nn.ReLU(),
-            nn.Linear(512, embedding_dim)
-        )
 
     def forward(self, x):
         b, c, h, w = x.size()
@@ -136,22 +129,22 @@ class CSRA(nn.Module):
         x_flat = x.view(b, c, h * w)  # (B, C, H*W)
         # (B, K, H*W) x (B, H*W, C) → (B, K, C)
         csra_feat = torch.bmm(att_score, x_flat.permute(0, 2, 1))
-        csra_feat = csra_feat.view(b, -1)  # (B, K*C)
+        # average across heads → (B, C)
+        csra_feat = csra_feat.mean(dim=1)
 
-        # residual fusion: concat GAP + attention features
-        fused = torch.cat([gap_feat, self.lam * csra_feat], dim=1)  # (B, C + K*C)
-        return self.projection(fused)
+        # residual fusion: GAP + λ * attention-weighted features → (B, C)
+        return gap_feat + self.lam * csra_feat
 
 
-class ConvNeXtV2_CSRA(nn.Module):
-    """ConvNeXtV2 with CSRA (Class-Specific Residual Attention) head for retrieval.
+class ConvNeXtV2_SRA(nn.Module):
+    """ConvNeXtV2 with SRA (Spatial Residual Attention) head for retrieval.
 
-    Uses spatial feature maps from ConvNeXtV2 backbone and applies CSRA
-    with multiple attention heads to produce retrieval embeddings.
+    Uses spatial feature maps from ConvNeXtV2 backbone and applies SRA
+    with multiple attention heads. Outputs same dimension as backbone (1024).
     """
 
-    def __init__(self, pretrained=True, num_heads=8, lam=0.1, embedding_dim=512):
-        super(ConvNeXtV2_CSRA, self).__init__()
+    def __init__(self, pretrained=True, num_heads=8, lam=0.1):
+        super(ConvNeXtV2_SRA, self).__init__()
         # load pretrained model from timm
         self.convnext = timm.create_model(
             'convnextv2_base.fcmae_ft_in22k_in1k_384',
@@ -160,14 +153,13 @@ class ConvNeXtV2_CSRA(nn.Module):
         )
 
         in_features = self.convnext.num_features
-        self.csra = CSRA(in_features, num_heads=num_heads, lam=lam,
-                         embedding_dim=embedding_dim)
+        self.sra = SRA(in_features, num_heads=num_heads, lam=lam)
 
     def forward(self, x):
         # extract spatial feature maps (B, C, H, W) before pooling
         x = self.convnext.forward_features(x)
-        # CSRA produces retrieval embeddings (B, embedding_dim)
-        x = self.csra(x)
+        # SRA produces attention-refined features (B, C)
+        x = self.sra(x)
         # normalize for retrieval
         x = F.normalize(x, dim=1)
         return x
