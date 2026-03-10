@@ -197,7 +197,11 @@ class SwinV2(nn.Module):
 class MedSigLIP(nn.Module):
     def __init__(self, model_name="google/medsiglip-448", embed_dim=512, unfreeze_layers=2):
         super().__init__()
-        full_model = AutoModel.from_pretrained(model_name)
+        # Load with eager attention to enable attention weight extraction
+        full_model = AutoModel.from_pretrained(
+            model_name,
+            attn_implementation='eager'
+        )
         self.backbone = full_model.vision_model 
         
         # Enable attention output for explainability methods

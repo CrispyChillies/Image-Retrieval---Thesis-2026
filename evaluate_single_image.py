@@ -108,21 +108,31 @@ def generate_saliency(query_tensor, retrieved_tensor, explainer, explainer_type)
 # Visualization helpers
 # ---------------------------------------------------------------------------
 
-def _to_hwc(tensor):
+def _to_hwc(tensor, mean=None, std=None):
     """Convert a normalised CHW tensor to a displayable HWC numpy array."""
     arr = tensor.squeeze(0).cpu().numpy().transpose(1, 2, 0)
-    mean = np.array([0.485, 0.456, 0.406])
-    std  = np.array([0.229, 0.224, 0.225])
+    if mean is None:
+        mean = np.array([0.485, 0.456, 0.406])  # ImageNet default
+    if std is None:
+        std = np.array([0.229, 0.224, 0.225])   # ImageNet default
     arr  = std * arr + mean
     return np.clip(arr, 0, 1)
 
 
 def save_saliency_figure(query_tensor, ret_tensor, saliency, rank, similarity,
-                         del_auc, del_scores, ins_auc, ins_scores, out_dir):
+                         del_auc, del_scores, ins_auc, ins_scores, out_dir, model_type='densenet121'):
     """Save a combined figure: query | retrieved | saliency overlay | metric curves."""
 
-    query_np = _to_hwc(query_tensor)
-    ret_np   = _to_hwc(ret_tensor)
+    # Use MedSigLIP normalization (0.5/0.5/0.5) or ImageNet normalization
+    if model_type == 'medsiglip':
+        mean = np.array([0.5, 0.5, 0.5])
+        std = np.array([0.5, 0.5, 0.5])
+    else:
+        mean = np.array([0.485, 0.456, 0.406])
+        std = np.array([0.229, 0.224, 0.225])
+
+    query_np = _to_hwc(query_tensor, mean, std)
+    ret_np   = _to_hwc(ret_tensor, mean, std)
 
     fig = plt.figure(figsize=(20, 5))
     gs  = gridspec.GridSpec(1, 4, figure=fig)
@@ -384,7 +394,8 @@ def main():
                 rank, similarity,
                 del_auc, del_scores,
                 ins_auc, ins_scores,
-                args.output_dir
+                args.output_dir,
+                args.model_type
             )
 
             # Save raw saliency
