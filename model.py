@@ -200,9 +200,11 @@ class MedSigLIP(nn.Module):
         # Load with eager attention to enable attention weight extraction
         full_model = AutoModel.from_pretrained(
             model_name,
-            attn_implementation='eager'
+            attn_implementation='eager',
+            output_attentions=True
         )
         self.backbone = full_model.vision_model 
+        self.backbone.config._attn_implementation = "eager"
         
         # Enable attention output for explainability methods
         self.backbone.config.output_attentions = True
