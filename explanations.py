@@ -974,3 +974,166 @@ class SimCAM_MedSigLIP(nn.Module):
             ).squeeze(1)  # [K,H,W]
 
         return maps
+
+
+class AttentionRolloutMedSigLIP(nn.Module):
+    """
+    Attention Rollout saliency for MedSigLIP (SigLIP ViT backbone).
+
+    For each query–retrieved pair the method computes a spatial saliency
+    map over the *retrieved* image that indicates which patches were most
+    attended to across all transformer layers.  An optional query-guided
+    weighting re-weights those patches by how similar each patch embedding
+    is to the query embedding, making the saliency retrieval-aware.
+
+    The interface matches SimAtt / SBSMBatch: forward(query_tensor, ret_tensor)
+    returns a (B, H, W) saliency tensor on the same device as the inputs.
+
+    Reference:
+        Abnar & Zuidema, "Quantifying Attention Flow in Transformers", ACL 2020.
+
+    Args:
+        model          : MedSigLIP instance (must have .backbone attribute).
+        head_fusion    : How to fuse multi-head attention. One of
+                         'mean' (default), 'max', 'min'.
+        discard_ratio  : Fraction of the lowest per-row attention values to
+                         zero out before rollout (default 0.9).  Higher values
+                         produce sharper but noisier maps.
+        query_guided   : If True, re-weight each patch's rollout score by its
+                         cosine similarity to the query embedding, making the
+                         saliency sensitive to the retrieval pair (default True).
+    """
+
+    def __init__(
+        self,
+        model,
+        head_fusion: str = 'mean',
+        discard_ratio: float = 0.9,
+        query_guided: bool = True,
+    ):
+        super().__init__()
+        self.model = model
+        self.head_fusion = head_fusion
+        self.discard_ratio = discard_ratio
+        self.query_guided = query_guided
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _fuse_heads(attn: torch.Tensor, mode: str) -> torch.Tensor:
+        """(B, H, N, N) -> (B, N, N)"""
+        if mode == 'mean':
+            return attn.mean(dim=1)
+        if mode == 'max':
+            return attn.max(dim=1).values
+        if mode == 'min':
+            return attn.min(dim=1).values
+        raise ValueError(f"Unknown head_fusion mode: {mode!r}")
+
+    def _rollout(self, attentions):
+        """
+        Compute cumulative attention rollout.
+
+        Args:
+            attentions: list[Tensor(B, heads, N, N)]
+        Returns:
+            Tensor(B, N, N) – row i gives the influence of each token on token i
+        """
+        B, _, N, _ = attentions[0].shape
+        device = attentions[0].device
+        eye = torch.eye(N, device=device, dtype=torch.float32)
+        result = eye.unsqueeze(0).expand(B, -1, -1).clone()  # (B, N, N)
+
+        for attn_layer in attentions:
+            a = self._fuse_heads(attn_layer.float(), self.head_fusion)  # (B, N, N)
+
+            # Discard the lowest-attention entries per row to reduce noise
+            if self.discard_ratio > 0.0:
+                k = max(1, int(N * self.discard_ratio))
+                # threshold = k-th smallest value in each row
+                thresh = a.kthvalue(k, dim=-1).values  # (B, N)
+                a = a * (a > thresh.unsqueeze(-1))
+
+            # Residual connection + row normalisation
+            a = a + eye.unsqueeze(0)
+            a = a / (a.sum(dim=-1, keepdim=True) + 1e-8)
+
+            result = torch.bmm(a, result)  # chain attention maps
+
+        return result  # (B, N, N)
+
+    # ------------------------------------------------------------------
+    # Public forward
+    # ------------------------------------------------------------------
+
+    def forward(self, query_tensor: torch.Tensor, retrieved_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Compute saliency map for the retrieved image.
+
+        Args:
+            query_tensor     : Tensor(1, 3, H, W)
+            retrieved_tensor : Tensor(B, 3, H, W)  (B is usually 1)
+
+        Returns:
+            Tensor(B, H, W) – spatial saliency map upsampled to input resolution.
+        """
+        B, C, H, W = retrieved_tensor.shape
+        device = retrieved_tensor.device
+
+        # ---- pass 1: rollout over the retrieved image ----
+        with torch.no_grad():
+            ret_outputs = self.model.backbone(
+                pixel_values=retrieved_tensor,
+                output_attentions=True,
+            )
+
+        # attentions: tuple of (B, heads, N, N), one per transformer layer
+        attentions = list(ret_outputs.attentions)
+        rollout = self._rollout(attentions)  # (B, N, N)
+
+        # SigLIP uses mean-pooling (no CLS token).
+        # importance[b, j] = mean attention *received* by patch j across all rows
+        importance = rollout.mean(dim=1)  # (B, N)
+
+        # ---- optional: weight by query–patch cosine similarity ----
+        if self.query_guided:
+            with torch.no_grad():
+                # Hidden states of the last layer contain patch embeddings
+                ret_hidden = ret_outputs.last_hidden_state  # (B, N, D)
+                # Normalise patch embeddings
+                ret_patches = F.normalize(ret_hidden, dim=-1)  # (B, N, D)
+
+                # Query global embedding
+                q_feat = self.model(query_tensor)  # (1, embed_dim)  already L2-normalised
+                q_feat = q_feat.unsqueeze(1)  # (1, 1, embed_dim)
+
+                # Match embed dims: if projection head changes dim, project patches too
+                if ret_patches.shape[-1] != q_feat.shape[-1]:
+                    # Apply model's projection head to each patch token
+                    ret_patches_proj = self.model.projection(ret_patches)  # (B, N, embed_dim)
+                    ret_patches_proj = F.normalize(ret_patches_proj, dim=-1)
+                else:
+                    ret_patches_proj = ret_patches
+
+                # Cosine similarity between query and each patch: (B, N)
+                patch_sim = (ret_patches_proj * q_feat.expand(B, ret_patches_proj.shape[1], -1)).sum(dim=-1)
+                patch_sim = patch_sim.clamp(min=0)  # keep only positive alignment
+
+                # Combine: rollout × query-alignment
+                importance = importance * patch_sim
+
+        # ---- reshape to spatial grid and upsample ----
+        N_patches = importance.shape[1]
+        side = int(N_patches ** 0.5)
+        assert side * side == N_patches, (
+            f"Number of patches ({N_patches}) is not a perfect square; "
+            "check model patch size / input resolution."
+        )
+
+        sal = importance.reshape(B, 1, side, side)  # (B, 1, grid, grid)
+        sal = F.interpolate(sal, size=(H, W), mode='bilinear', align_corners=False)
+        sal = sal.squeeze(1)  # (B, H, W)
+
+        return sal

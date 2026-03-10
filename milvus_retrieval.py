@@ -142,8 +142,8 @@ class MilvusRetriever:
 
 def get_model_and_transform(model_type, model_weights, embedding_dim, device):
     """Load model and get appropriate transform"""
-    from model import DenseNet121, ResNet50, ConvNeXtV2
-    
+    from model import DenseNet121, ResNet50, ConvNeXtV2, MedSigLIP
+
     # Load model
     if model_type == 'densenet121':
         model = DenseNet121(embedding_dim=embedding_dim)
@@ -154,6 +154,10 @@ def get_model_and_transform(model_type, model_weights, embedding_dim, device):
     elif model_type == 'convnextv2':
         model = ConvNeXtV2(embedding_dim=embedding_dim)
         img_size = 384
+    elif model_type == 'medsiglip':
+        embed_dim = embedding_dim if embedding_dim is not None else 512
+        model = MedSigLIP(embed_dim=embed_dim)
+        img_size = 448
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
@@ -164,11 +168,16 @@ def get_model_and_transform(model_type, model_weights, embedding_dim, device):
     model.to(device)
     
     # Setup transform
-    normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    # MedSigLIP uses SigLIP normalisation; all other models use ImageNet stats.
+    if model_type == 'medsiglip':
+        normalize = transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+    else:
+        normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
     # Always enforce fixed output size so tensors can be stacked and explained safely.
-    # For ConvNeXtV2, keep aspect ratio during resize and then center crop to 384x384.
-    if img_size == 384:
+    if img_size == 448:
+        resize_size = 512
+    elif img_size == 384:
         resize_size = 432
     else:
         resize_size = 256
@@ -190,7 +199,7 @@ def main():
     
     parser = argparse.ArgumentParser(description='Test Milvus retrieval')
     parser.add_argument('--model_type', type=str, required=True,
-                       choices=['densenet121', 'resnet50', 'convnextv2'],
+                       choices=['densenet121', 'resnet50', 'convnextv2', 'medsiglip'],
                        help='Model type')
     parser.add_argument('--model_weights', type=str, required=True,
                        help='Path to model weights')

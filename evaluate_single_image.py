@@ -32,8 +32,8 @@ import argparse
 # Local imports
 # ---------------------------------------------------------------------------
 sys.path.append(os.path.dirname(__file__))
-from model import ConvNeXtV2, DenseNet121, ResNet50
-from explanations import SimAtt, SimCAM, SBSMBatch
+from model import ConvNeXtV2, DenseNet121, ResNet50, MedSigLIP
+from explanations import SimAtt, SimCAM, SBSMBatch, AttentionRolloutMedSigLIP
 from evaluation import gkern, auc
 from milvus_setup import MilvusManager
 from milvus_retrieval import MilvusRetriever, get_model_and_transform
@@ -89,7 +89,7 @@ class CausalMetric:
                 if i < n_steps:
                     coords = salient_order[:, self.step * i: self.step * (i + 1)]
                     start[0, :, coords] = finish[0, :, coords]
-
+    
         return auc(scores), scores
 
 
@@ -98,7 +98,8 @@ class CausalMetric:
 # ---------------------------------------------------------------------------
 
 def generate_saliency(query_tensor, retrieved_tensor, explainer, explainer_type):
-    with torch.set_grad_enabled(explainer_type != 'sbsm'):
+    no_grad_methods = ('sbsm', 'rollout')
+    with torch.set_grad_enabled(explainer_type not in no_grad_methods):
         saliency = explainer(query_tensor, retrieved_tensor)
     return saliency.squeeze().cpu().numpy()
 
@@ -179,14 +180,14 @@ def main():
     parser.add_argument('--image', type=str, required=True,
                         help='Path to the query image')
     parser.add_argument('--model_type', type=str, default='densenet121',
-                        choices=['densenet121', 'resnet50', 'convnextv2'],
+                        choices=['densenet121', 'resnet50', 'convnextv2', 'medsiglip'],
                         help='Model architecture')
     parser.add_argument('--model_weights', type=str, required=True,
                         help='Path to model weights (.pth)')
     parser.add_argument('--embedding_dim', type=int, default=None,
                         help='Embedding dimension (leave blank for model default)')
     parser.add_argument('--explainer', type=str, default='simatt',
-                        choices=['simatt', 'simcam', 'sbsm'],
+                        choices=['simatt', 'simcam', 'sbsm', 'rollout'],
                         help='Explanation method')
     parser.add_argument('--top_k', type=int, default=5,
                         help='Number of retrieved images to analyse')
@@ -220,7 +221,12 @@ def main():
         print(f'ERROR: Image not found: {args.image}')
         return
 
-    img_size = 384 if args.model_type == 'convnextv2' else 224
+    if args.model_type == 'convnextv2':
+        img_size = 384
+    elif args.model_type == 'medsiglip':
+        img_size = 448
+    else:
+        img_size = 224
     os.makedirs(args.output_dir, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -300,6 +306,18 @@ def main():
                 print(f'  Generating masks at size {img_size}...')
                 explainer.generate_masks(window_size=48, stride=8,
                                           savepath=maskspath)
+
+        elif args.explainer == 'rollout':
+            if not isinstance(model, MedSigLIP):
+                raise NotImplementedError(
+                    'Attention Rollout is only supported for the medsiglip model_type'
+                )
+            explainer = AttentionRolloutMedSigLIP(
+                model,
+                head_fusion='mean',
+                discard_ratio=0.9,
+                query_guided=True,
+            )
 
         explainer.to(device)
         print('  Explainer ready')

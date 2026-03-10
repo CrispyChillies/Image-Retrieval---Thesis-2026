@@ -14,8 +14,8 @@ import torch.nn.functional as F
 import numpy as np
 from PIL import Image
 from torchvision import transforms
-from model import ConvNeXtV2, DenseNet121, ResNet50
-from explanations import SimAtt, SimCAM, SBSMBatch
+from model import ConvNeXtV2, DenseNet121, ResNet50, MedSigLIP
+from explanations import SimAtt, SimCAM, SBSMBatch, AttentionRolloutMedSigLIP
 from evaluation import gkern, auc
 import argparse
 import matplotlib.pyplot as plt
@@ -87,12 +87,9 @@ class CausalMetric():
 
 def generate_saliency(query_tensor, retrieved_tensor, explainer, explainer_type):
     """Generate saliency map for query-retrieved pair"""
-    with torch.set_grad_enabled(explainer_type != 'sbsm'):
-        if explainer_type == 'sbsm':
-            saliency = explainer(query_tensor, retrieved_tensor)
-        else:
-            saliency = explainer(query_tensor, retrieved_tensor)
-    
+    no_grad_methods = ('sbsm', 'rollout')
+    with torch.set_grad_enabled(explainer_type not in no_grad_methods):
+        saliency = explainer(query_tensor, retrieved_tensor)
     return saliency.squeeze().cpu().numpy()
 
 
@@ -220,14 +217,14 @@ def main():
     parser.add_argument('--image_list', type=str, required=True,
                        help='File containing list of test images')
     parser.add_argument('--model_type', type=str, default='densenet121',
-                       choices=['densenet121', 'resnet50', 'convnextv2'],
+                       choices=['densenet121', 'resnet50', 'convnextv2', 'medsiglip'],
                        help='Model architecture')
     parser.add_argument('--model_weights', type=str, required=True,
                        help='Path to model weights')
     parser.add_argument('--embedding_dim', type=int, default=None,
                        help='Embedding dimension')
     parser.add_argument('--explainer', type=str, default='simatt',
-                       choices=['simatt', 'simcam', 'sbsm'],
+                       choices=['simatt', 'simcam', 'sbsm', 'rollout'],
                        help='Explanation method')
     parser.add_argument('--top_k', type=int, default=5,
                        help='Number of retrieved images to analyze per query')
@@ -267,6 +264,8 @@ def main():
     # Determine image size based on model
     if args.model_type == 'convnextv2':
         img_size = 384
+    elif args.model_type == 'medsiglip':
+        img_size = 448
     else:
         img_size = 224
     
@@ -410,7 +409,19 @@ def main():
             else:
                 explainer.load_masks(maskspath)
                 print(f'Masks loaded from {maskspath}.')
-        
+
+        elif args.explainer == 'rollout':
+            if not isinstance(model, MedSigLIP):
+                raise NotImplementedError(
+                    'Attention Rollout is only supported for the medsiglip model_type'
+                )
+            explainer = AttentionRolloutMedSigLIP(
+                model,
+                head_fusion='mean',
+                discard_ratio=0.9,
+                query_guided=True,
+            )
+
         explainer.to(device)
         print(f"✅ Explainer ready: {args.explainer}")
         
