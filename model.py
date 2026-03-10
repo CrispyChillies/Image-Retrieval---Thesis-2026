@@ -200,6 +200,9 @@ class MedSigLIP(nn.Module):
         full_model = AutoModel.from_pretrained(model_name)
         self.backbone = full_model.vision_model 
         
+        # Enable attention output for explainability methods
+        self.backbone.config.output_attentions = True
+        
         # --- BƯỚC 1: Đóng băng toàn bộ Backbone ---
         for param in self.backbone.parameters():
             param.requires_grad = False

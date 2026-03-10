@@ -1087,9 +1087,17 @@ class AttentionRolloutMedSigLIP(nn.Module):
             ret_outputs = self.model.backbone(
                 pixel_values=retrieved_tensor,
                 output_attentions=True,
+                return_dict=True,
             )
 
         # attentions: tuple of (B, heads, N, N), one per transformer layer
+        if ret_outputs.attentions is None:
+            raise RuntimeError(
+                "Model did not return attention weights. "
+                "Ensure the model's config supports output_attentions=True. "
+                "Check model.backbone.config.output_attentions or recreate the model "
+                "with output_attentions enabled in the config."
+            )
         attentions = list(ret_outputs.attentions)
         rollout = self._rollout(attentions)  # (B, N, N)
 
