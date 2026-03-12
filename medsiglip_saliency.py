@@ -16,10 +16,14 @@ Usage:
 """
 
 import argparse
+import gc
+import json
+import math
 import os
 
 import cv2
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import numpy as np
 import torch
 import torch.nn as nn
@@ -35,6 +39,7 @@ except ImportError:
     CosineSimilarityTarget = None
 
 from model import MedSigLIP
+from evaluation import gkern, auc
 from milvus_setup import MilvusManager, MODEL_CONFIGS
 from path_mapper import PathMapper
 
@@ -261,6 +266,67 @@ def _compute_single_gradcam(
 
 
 # ---------------------------------------------------------------------------
+# CausalMetric (insertion / deletion)
+# ---------------------------------------------------------------------------
+
+class CausalMetric:
+    """Compute insertion or deletion AUC for a query-retrieved image pair."""
+
+    def __init__(self, model, mode, step, substrate_fn, input_size=448):
+        assert mode in ('del', 'ins')
+        self.model = model
+        self.mode = mode
+        self.step = step
+        self.substrate_fn = substrate_fn
+        self.hw = input_size * input_size
+
+    def evaluate(self, query_tensor, retrieved_tensor, saliency):
+        device = query_tensor.device
+        n_steps = (self.hw + self.step - 1) // self.step
+
+        with torch.no_grad():
+            q_feat = self.model(query_tensor)
+
+            if self.mode == 'del':
+                start = retrieved_tensor.clone()
+                finish = self.substrate_fn(retrieved_tensor)
+            else:
+                start = self.substrate_fn(retrieved_tensor)
+                finish = retrieved_tensor.clone()
+
+            start = start.reshape(1, 3, self.hw)
+            finish = finish.reshape(1, 3, self.hw)
+
+            scores = np.empty(n_steps + 1)
+            salient_order = torch.from_numpy(
+                np.flip(np.argsort(saliency.flatten())).copy()
+            ).unsqueeze(0).to(device)
+
+            zero_counter = 0
+            for i in range(n_steps + 1):
+                r_feat = self.model(
+                    start.reshape(1, 3,
+                                  int(self.hw ** 0.5),
+                                  int(self.hw ** 0.5))
+                )
+                cosine_sim = F.cosine_similarity(q_feat, r_feat)[0]
+
+                if cosine_sim < 0:
+                    cosine_sim = torch.clamp(cosine_sim, min=0, max=1)
+                    zero_counter += 1
+
+                scores[i] = cosine_sim.item()
+                del r_feat, cosine_sim
+
+                if i < n_steps:
+                    coords = salient_order[:, self.step * i: self.step * (i + 1)]
+                    start[0, :, coords] = finish[0, :, coords]
+
+        del start, finish, q_feat, salient_order
+        return auc(scores), scores, zero_counter
+
+
+# ---------------------------------------------------------------------------
 # Milvus retrieval helpers
 # ---------------------------------------------------------------------------
 
@@ -317,21 +383,31 @@ def overlay_heatmap(image: np.ndarray, heatmap: np.ndarray, alpha: float = 0.5) 
     return blended
 
 
+def _to_hwc(tensor):
+    """Convert a MedSigLIP-normalised CHW tensor to displayable HWC [0,1] array."""
+    arr = tensor.squeeze(0).cpu().numpy().transpose(1, 2, 0)
+    arr = 0.5 * arr + 0.5  # MedSigLIP uses mean=0.5, std=0.5
+    return np.clip(arr, 0, 1)
+
+
 def visualize_top_k(
     query_image_path: str,
     results: list,
     heatmaps: np.ndarray,
+    metrics: list | None = None,
     local_data_base_path: str | None = None,
     save_path: str | None = None,
 ):
-    """Visualize query + top-K results with their Grad-CAM saliency maps.
+    """Visualize query + top-K results with saliency maps and metric curves.
 
-    Layout per row:  [Query Image]  |  [Retrieved Image]  |  [Saliency Map]
+    Layout per row:
+        [Query]  |  [Retrieved]  |  [Saliency Overlay]  |  [Ins/Del Curves]
 
     Args:
         query_image_path: path to the query image.
         results: list of dicts from Milvus search.
         heatmaps: (K, H, W) array from compute_gradcam_saliency.
+        metrics: list of dicts with 'del_auc', 'del_scores', 'ins_auc', 'ins_scores'.
         local_data_base_path: if set, remap /kaggle/ paths to local.
         save_path: if set, save figure to this path instead of showing.
     """
@@ -340,7 +416,9 @@ def visualize_top_k(
         path_mapper = PathMapper(local_base_path=local_data_base_path)
 
     K = len(results)
-    fig, axes = plt.subplots(K, 3, figsize=(15, 5 * K))
+    has_metrics = metrics is not None and len(metrics) == K
+    ncols = 4 if has_metrics else 3
+    fig, axes = plt.subplots(K, ncols, figsize=(5 * ncols, 5 * K))
     if K == 1:
         axes = axes[np.newaxis, :]
 
@@ -360,7 +438,7 @@ def visualize_top_k(
             ret_img = Image.open(ret_path).convert("RGB")
         except FileNotFoundError:
             print(f"WARNING: could not open {ret_path}, skipping row {i+1}")
-            for j in range(3):
+            for j in range(ncols):
                 axes[i, j].axis("off")
             axes[i, 0].set_title(f"Top {i+1}: image not found")
             continue
@@ -374,7 +452,7 @@ def visualize_top_k(
 
         # Column 0: Query image
         axes[i, 0].imshow(query_img)
-        axes[i, 0].set_title(f"Query" if i == 0 else "")
+        axes[i, 0].set_title("Query" if i == 0 else "")
         axes[i, 0].axis("off")
 
         # Column 1: Retrieved image
@@ -386,6 +464,25 @@ def visualize_top_k(
         axes[i, 2].imshow(saliency_overlay)
         axes[i, 2].set_title(f"Grad-CAM Saliency (Top {i+1})")
         axes[i, 2].axis("off")
+
+        # Column 3: Insertion / Deletion curves
+        if has_metrics:
+            m = metrics[i]
+            ax3 = axes[i, 3]
+            del_scores = m['del_scores']
+            ins_scores = m['ins_scores']
+            x = np.linspace(0, 1, len(del_scores))
+            ax3.plot(x, del_scores, 'r-', linewidth=2,
+                     label=f"Del AUC={m['del_auc']:.4f}")
+            ax3.plot(x, ins_scores, 'b--', linewidth=2,
+                     label=f"Ins AUC={m['ins_auc']:.4f}")
+            ax3.fill_between(x, 0, del_scores, alpha=0.15, color='red')
+            ax3.fill_between(x, 0, ins_scores, alpha=0.15, color='blue')
+            ax3.set_xlabel('Fraction of pixels')
+            ax3.set_ylabel('Cosine similarity')
+            ax3.set_title(f'Insertion / Deletion (Top {i+1})')
+            ax3.legend(fontsize=8)
+            ax3.grid(True, alpha=0.3)
 
     plt.suptitle("Grad-CAM Saliency for Image Retrieval (MedSigLIP)", fontsize=16)
     plt.tight_layout()
@@ -422,8 +519,12 @@ def main():
                         help="Local base path for image files (remaps /kaggle/ paths)")
     parser.add_argument("--top_k", type=int, default=5,
                         help="Number of top results to display")
+    parser.add_argument("--step_size", type=int, default=1000,
+                        help="Pixel step size for insertion/deletion sweep")
     parser.add_argument("--save_path", type=str, default=None,
                         help="Path to save the output figure (shows interactively if omitted)")
+    parser.add_argument("--output_dir", type=str, default=None,
+                        help="Directory to save per-rank figures, saliency .npy, and summary JSON")
     parser.add_argument("--device", type=str, default=None,
                         help="Device to use (default: auto-detect)")
     args = parser.parse_args()
@@ -499,12 +600,100 @@ def main():
     print("Computing Grad-CAM saliency maps...")
     heatmaps = compute_gradcam_saliency(model, query_tensor, retrieved_tensor, device)
 
+    # ------------------------------------------------------------------
+    # Insertion / Deletion metrics
+    # ------------------------------------------------------------------
+    img_size = 448
+    klen = 51
+    ksig = math.sqrt(50)
+    kern = gkern(klen, ksig).to(device)
+    blur_fn = lambda x: F.conv2d(x, kern, padding=klen // 2)
+
+    del_metric = CausalMetric(model, 'del', args.step_size, torch.zeros_like, img_size)
+    ins_metric = CausalMetric(model, 'ins', args.step_size, blur_fn, img_size)
+
+    all_metrics = []
+    for rank, (r, hm) in enumerate(zip(valid_results, heatmaps), 1):
+        ret_path = r["image_path"]
+        if path_mapper and ret_path.startswith("/kaggle/"):
+            ret_path = path_mapper.remap_path(ret_path)
+
+        ret_tensor_i = retrieved_tensor[rank - 1 : rank].to(device)
+
+        del_auc, del_scores, del_zeros = del_metric.evaluate(
+            query_tensor.to(device), ret_tensor_i, hm
+        )
+        ins_auc, ins_scores, ins_zeros = ins_metric.evaluate(
+            query_tensor.to(device), ret_tensor_i, hm
+        )
+
+        print(f"  Rank {rank}: Del AUC={del_auc:.4f}  Ins AUC={ins_auc:.4f}")
+
+        all_metrics.append({
+            'rank': rank,
+            'retrieved_image': os.path.basename(ret_path),
+            'similarity': float(r.get('similarity', 0.0)),
+            'del_auc': float(del_auc),
+            'ins_auc': float(ins_auc),
+            'del_scores': del_scores,
+            'ins_scores': ins_scores,
+        })
+
+        del ret_tensor_i
+        torch.cuda.empty_cache()
+        gc.collect()
+
+    # ------------------------------------------------------------------
+    # Save per-rank figures + JSON if output_dir is set
+    # ------------------------------------------------------------------
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
+        for m in all_metrics:
+            rank = m['rank']
+            # Save raw saliency
+            np.save(os.path.join(args.output_dir, f'rank{rank:02d}_saliency.npy'),
+                    heatmaps[rank - 1])
+
+        # Save JSON summary (scores as lists for serialization)
+        summary = {
+            'query_image': os.path.abspath(args.query_image),
+            'model': 'medsiglip',
+            'explainer': 'gradcam',
+            'top_k': args.top_k,
+            'step_size': args.step_size,
+            'avg_del_auc': float(np.mean([m['del_auc'] for m in all_metrics])),
+            'avg_ins_auc': float(np.mean([m['ins_auc'] for m in all_metrics])),
+            'results': [
+                {k: (v.tolist() if isinstance(v, np.ndarray) else v)
+                 for k, v in m.items()}
+                for m in all_metrics
+            ],
+        }
+        json_path = os.path.join(args.output_dir, 'summary.json')
+        with open(json_path, 'w') as f:
+            json.dump(summary, f, indent=2)
+        print(f"Saved summary to {json_path}")
+
+    # ------------------------------------------------------------------
+    # Print summary
+    # ------------------------------------------------------------------
+    print('\n' + '=' * 60)
+    print('SUMMARY')
+    print('=' * 60)
+    for m in all_metrics:
+        print(f"  Rank {m['rank']:2d}  sim={m['similarity']:.4f}  "
+              f"Del={m['del_auc']:.4f}  Ins={m['ins_auc']:.4f}")
+    print(f"  Avg Del AUC: {np.mean([m['del_auc'] for m in all_metrics]):.4f}")
+    print(f"  Avg Ins AUC: {np.mean([m['ins_auc'] for m in all_metrics]):.4f}")
+    print('=' * 60)
+
     # Visualize
     print("Generating visualization...")
     visualize_top_k(
         query_image_path=args.query_image,
         results=valid_results,
         heatmaps=heatmaps,
+        metrics=all_metrics,
         local_data_base_path=args.local_data_base_path,
         save_path=args.save_path,
     )
