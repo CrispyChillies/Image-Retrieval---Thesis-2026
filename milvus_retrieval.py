@@ -167,6 +167,13 @@ def get_model_and_transform(model_type, model_weights, embedding_dim, device):
     model.eval()
     model.to(device)
     
+    # For MedSigLIP, verify attention output works (needed for explainability)
+    if model_type == 'medsiglip':
+        model.ensure_eager_attention()
+        if not model.verify_attention_output(device):
+            print("WARNING: MedSigLIP attention output may not work correctly. "
+                  "Attention rollout explainer may fail.")
+    
     # Setup transform
     # MedSigLIP uses SigLIP normalisation; all other models use ImageNet stats.
     if model_type == 'medsiglip':

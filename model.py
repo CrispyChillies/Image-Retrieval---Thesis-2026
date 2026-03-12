@@ -194,6 +194,46 @@ class SwinV2(nn.Module):
         x = F.normalize(x, dim=1)
         return x
 
+def _convert_sdpa_to_eager_attention(model):
+    """
+    Forcibly replace SDPA attention modules with eager attention.
+    This is necessary because SDPA attention cannot return attention weights.
+    """
+    try:
+        from transformers.models.siglip.modeling_siglip import (
+            SiglipAttention, SiglipSdpaAttention
+        )
+    except ImportError:
+        # Older transformers version - try alternative import
+        try:
+            from transformers.models.siglip.modeling_siglip import SiglipAttention
+            SiglipSdpaAttention = None
+        except ImportError:
+            return  # Can't patch, hopefully config settings work
+    
+    for name, module in model.named_modules():
+        # Check if this is an SDPA attention module that needs replacement
+        if SiglipSdpaAttention is not None and isinstance(module, SiglipSdpaAttention):
+            # Get parent module and attribute name
+            parent_name = '.'.join(name.split('.')[:-1])
+            attr_name = name.split('.')[-1]
+            
+            if parent_name:
+                parent = model.get_submodule(parent_name)
+            else:
+                parent = model
+            
+            # Create eager attention with same config
+            config = module.config if hasattr(module, 'config') else model.config
+            eager_attn = SiglipAttention(config)
+            
+            # Copy weights from SDPA to eager
+            eager_attn.load_state_dict(module.state_dict(), strict=False)
+            
+            # Replace the module
+            setattr(parent, attr_name, eager_attn)
+
+
 class MedSigLIP(nn.Module):
     def __init__(self, model_name="google/medsiglip-448", embed_dim=512, unfreeze_layers=2):
         super().__init__()
@@ -222,6 +262,9 @@ class MedSigLIP(nn.Module):
         self.backbone.config._attn_implementation_autoset = False
         self.backbone.config.output_attentions = True
         
+        # Force convert any SDPA attention modules to eager (belt-and-suspenders)
+        _convert_sdpa_to_eager_attention(self.backbone)
+        
         # --- BƯỚC 1: Đóng băng toàn bộ Backbone ---
         for param in self.backbone.parameters():
             param.requires_grad = False
@@ -247,6 +290,42 @@ class MedSigLIP(nn.Module):
             nn.ReLU(),
             nn.Linear(512, embed_dim)
         )
+
+    def ensure_eager_attention(self):
+        """
+        Call this after loading weights to ensure attention can be extracted.
+        Converts any SDPA attention modules to eager attention.
+        """
+        self.backbone.config._attn_implementation = "eager"
+        self.backbone.config._attn_implementation_autoset = False
+        self.backbone.config.output_attentions = True
+        _convert_sdpa_to_eager_attention(self.backbone)
+    
+    def load_state_dict(self, state_dict, strict=True, assign=False):
+        """Override to ensure eager attention is applied after loading weights."""
+        result = super().load_state_dict(state_dict, strict=strict, assign=assign)
+        # Re-apply eager attention conversion after loading weights
+        self.ensure_eager_attention()
+        return result
+    
+    def verify_attention_output(self, device='cuda'):
+        """
+        Test that attention weights can be extracted.
+        Returns True if attention output works, False otherwise.
+        """
+        self.eval()
+        with torch.no_grad():
+            dummy_input = torch.randn(1, 3, 448, 448, device=device)
+            outputs = self.backbone(
+                pixel_values=dummy_input,
+                output_attentions=True,
+                return_dict=True
+            )
+            if outputs.attentions is None or len(outputs.attentions) == 0:
+                return False
+            # Check first layer has valid attention
+            attn = outputs.attentions[0]
+            return attn is not None and attn.numel() > 0
 
     def forward(self, x):
         outputs = self.backbone(pixel_values=x)
