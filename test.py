@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
-from model import ResNet50, DenseNet121, ConvNeXtV2, SwinV2, MedSigLIP
+from model import ResNet50, DenseNet121, ConvNeXtV2, ConvNeXtV2_SRA, SwinV2, MedSigLIP
 
 def conceptclip_collate_fn(batch):
     """Custom collate function for ConceptCLIP that keeps PIL images as-is."""
@@ -1025,6 +1025,9 @@ def main(args):
         elif args.model == 'convnextv2':
             img_model = ConvNeXtV2(embedding_dim=args.embedding_dim)
             is_conceptclip_img = False
+        elif args.model == 'convnextv2_sra':
+            img_model = ConvNeXtV2_SRA(num_heads=args.sra_num_heads, lam=args.sra_lam)
+            is_conceptclip_img = False
         elif args.model == 'swinv2':
             img_model = SwinV2(embedding_dim=args.embedding_dim)
             is_conceptclip_img = False
@@ -1071,6 +1074,12 @@ def main(args):
         elif args.model == 'convnextv2':
             model = ConvNeXtV2(embedding_dim=args.embedding_dim)
             is_conceptclip = False
+        elif args.model == 'convnextv2_sra':
+            model = ConvNeXtV2_SRA(num_heads=args.sra_num_heads, lam=args.sra_lam)
+            is_conceptclip = False
+        elif args.model == 'swinv2':
+            model = SwinV2(embedding_dim=args.embedding_dim)
+            is_conceptclip = False
         elif args.model == 'medsiglip':
             model = MedSigLIP()
             is_conceptclip = False
@@ -1104,12 +1113,12 @@ def main(args):
         # Use 384x384 for ConvNeXtV2 and SwinV2, 448x448 for MedSigLIP, 224x224 for other models
         if args.model == 'medsiglip':
             img_size = 448
-        elif args.model in ['convnextv2', 'swinv2']:
+        elif args.model in ['convnextv2', 'convnextv2_sra', 'swinv2']:
             img_size = 384
         else:
             img_size = 224
 
-        if args.model in ['convnextv2', 'swinv2', 'medsiglip']:
+        if args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'medsiglip']:
             test_transform = transforms.Compose([
                 transforms.Lambda(lambda img: img.convert('RGB')),
                 transforms.Resize((img_size, img_size)),
@@ -1272,9 +1281,13 @@ def parse_args():
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, convnextv2, swinv2, or conceptclip)')
+                        help='Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, swinv2, or conceptclip)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
+    parser.add_argument('--sra-num-heads', default=8, type=int,
+                        help='Number of attention heads for SRA (ConvNeXtV2_SRA)')
+    parser.add_argument('--sra-lam', default=0.1, type=float,
+                        help='Lambda for residual attention in SRA (ConvNeXtV2_SRA)')
     
     # ConceptCLIP text-enhanced retrieval options
     parser.add_argument('--use-text', action='store_true',
