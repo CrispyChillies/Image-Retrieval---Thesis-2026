@@ -245,15 +245,16 @@ class MedSigLIP(nn.Module):
         # Force eager attention at config level (required for attention output)
         config._attn_implementation = "eager"
         config._attn_implementation_autoset = False  # prevent auto-override
+        config.output_attentions = True  # Enable attention output in config
         if hasattr(config, 'vision_config'):
             config.vision_config._attn_implementation = "eager"
             config.vision_config._attn_implementation_autoset = False
+            config.vision_config.output_attentions = True
         
         full_model = AutoModel.from_pretrained(
             model_name,
             config=config,
             attn_implementation='eager',
-            output_attentions=True
         )
         self.backbone = full_model.vision_model 
         
