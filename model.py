@@ -198,15 +198,28 @@ class MedSigLIP(nn.Module):
     def __init__(self, model_name="google/medsiglip-448", embed_dim=512, unfreeze_layers=2):
         super().__init__()
         # Load with eager attention to enable attention weight extraction
+        # Note: attn_implementation must be set BEFORE model instantiation
+        from transformers import AutoConfig
+        config = AutoConfig.from_pretrained(model_name)
+        
+        # Force eager attention at config level (required for attention output)
+        config._attn_implementation = "eager"
+        config._attn_implementation_autoset = False  # prevent auto-override
+        if hasattr(config, 'vision_config'):
+            config.vision_config._attn_implementation = "eager"
+            config.vision_config._attn_implementation_autoset = False
+        
         full_model = AutoModel.from_pretrained(
             model_name,
+            config=config,
             attn_implementation='eager',
             output_attentions=True
         )
         self.backbone = full_model.vision_model 
-        self.backbone.config._attn_implementation = "eager"
         
-        # Enable attention output for explainability methods
+        # Ensure config is properly set on the backbone
+        self.backbone.config._attn_implementation = "eager"
+        self.backbone.config._attn_implementation_autoset = False
         self.backbone.config.output_attentions = True
         
         # --- BƯỚC 1: Đóng băng toàn bộ Backbone ---
