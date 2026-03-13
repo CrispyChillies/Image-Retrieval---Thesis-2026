@@ -39,6 +39,10 @@ def find_image_path(
         if hit is not None and hit.exists():
             return hit
 
+        stem_hit = basename_index.get(candidate.stem)
+        if stem_hit is not None and stem_hit.exists():
+            return stem_hit
+
     return None
 
 
@@ -48,6 +52,7 @@ def build_basename_index(images_root: Path) -> dict[str, Path]:
         if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}:
             # Keep first hit for deterministic behavior.
             index.setdefault(p.name, p)
+            index.setdefault(p.stem, p)
     return index
 
 
