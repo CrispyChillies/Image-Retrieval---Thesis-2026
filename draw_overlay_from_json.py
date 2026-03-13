@@ -98,8 +98,16 @@ def build_query_keys(row: dict) -> list[str]:
     if qimg:
         qname = Path(qimg).name
         qstem = Path(qimg).stem
+        qsuffix = Path(qimg).suffix.lstrip(".")
         keys.append(qstem)
         keys.append(qname)
+
+        # Common exported-folder patterns:
+        # - <stem>_<ext>  (e.g. abc_png)
+        # - full filename with dots replaced by underscores (e.g. abc_png)
+        if qsuffix:
+            keys.append(f"{qstem}_{qsuffix}")
+        keys.append(qname.replace(".", "_"))
 
     # Deduplicate while preserving order.
     dedup: list[str] = []
