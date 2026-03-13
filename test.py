@@ -1423,16 +1423,21 @@ def main(args):
 
     # Use custom collate function for ConceptCLIP to handle PIL images
     use_conceptclip_collate = (is_conceptclip and not use_two_model_rerank) or (use_two_model_rerank and is_conceptclip_img) or is_biomedclip or is_dinov2
+    effective_workers = args.workers
+    if use_conceptclip_collate and args.workers > 0 and not args.allow_pil_multiprocess:
+        print("=> PIL-based loading detected. For stability in constrained environments, using num_workers=0.")
+        print("=> Set --allow-pil-multiprocess to keep multiprocessing enabled.")
+        effective_workers = 0
     
     if use_conceptclip_collate:
         test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
                                  shuffle=False,
-                                 num_workers=args.workers,
+                                 num_workers=effective_workers,
                                  collate_fn=conceptclip_collate_fn)
     else:
         test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
                                  shuffle=False,
-                                 num_workers=args.workers)
+                                 num_workers=effective_workers)
 
     print('Evaluating...')
     
@@ -1463,7 +1468,7 @@ def main(args):
             
             conceptclip_loader = DataLoader(conceptclip_dataset, batch_size=args.eval_batch_size,
                                            shuffle=False,
-                                           num_workers=args.workers,
+                                           num_workers=effective_workers,
                                            collate_fn=conceptclip_collate_fn)
         else:
             # Already using PIL images
@@ -1580,6 +1585,8 @@ def parse_args():
     parser.add_argument('--eval-batch-size', default=64, type=int)
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                         help='Number of data loading workers')
+    parser.add_argument('--allow-pil-multiprocess', action='store_true',
+                        help='Allow num_workers>0 when loading PIL-image batches (can be unstable on low-memory environments)')
     parser.add_argument('--save-dir', default='./results',
                         help='Result save directory')
     parser.add_argument('--resume', default='',
