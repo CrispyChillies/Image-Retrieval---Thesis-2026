@@ -87,6 +87,30 @@ def get_colormap(name: str) -> int:
     return cmap.get(name.lower(), cv2.COLORMAP_JET)
 
 
+def build_query_keys(row: dict) -> list[str]:
+    keys: list[str] = []
+
+    qid = row.get("query_image_id")
+    if qid:
+        keys.append(str(qid))
+
+    qimg = str(row.get("query_image", "")).strip()
+    if qimg:
+        qname = Path(qimg).name
+        qstem = Path(qimg).stem
+        keys.append(qstem)
+        keys.append(qname)
+
+    # Deduplicate while preserving order.
+    dedup: list[str] = []
+    seen = set()
+    for k in keys:
+        if k not in seen:
+            seen.add(k)
+            dedup.append(k)
+    return dedup
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Draw saliency overlays from results JSON + rank saliency .npy files")
     parser.add_argument("--results_json", required=True, type=str, help="Path to results_*.json")
@@ -151,6 +175,7 @@ def main() -> None:
         qid = str(row.get("query_image_id") or Path(str(row.get("query_image", "unknown"))).stem)
         query_image_raw = str(row.get("query_image", ""))
         retrieved = row.get("retrieved", []) or []
+        query_keys = build_query_keys(row)
 
         if not retrieved:
             skipped += 1
@@ -171,14 +196,21 @@ def main() -> None:
                     cv2.imwrite(str(query_out / "query.jpg"), q_bgr)
 
         for idx, item in enumerate(retrieved, start=1):
-            saliency_path = saliency_root / qid / args.rank_pattern.format(rank=idx)
-            if not saliency_path.exists():
-                # Optional compatibility with zero-padded rank names.
-                alt = saliency_root / qid / f"rank{idx:02d}_saliency.npy"
-                saliency_path = alt if alt.exists() else saliency_path
+            saliency_path = None
+            for qkey in query_keys:
+                candidate = saliency_root / qkey / args.rank_pattern.format(rank=idx)
+                if candidate.exists():
+                    saliency_path = candidate
+                    break
 
-            if not saliency_path.exists():
-                print(f"[WARN] Missing saliency: {saliency_path}")
+                # Optional compatibility with zero-padded rank names.
+                alt = saliency_root / qkey / f"rank{idx:02d}_saliency.npy"
+                if alt.exists():
+                    saliency_path = alt
+                    break
+
+            if saliency_path is None:
+                print(f"[WARN] Missing saliency for query keys={query_keys}, rank={idx}")
                 skipped += 1
                 continue
 
