@@ -33,7 +33,7 @@ MODEL_CONFIGS = {
     },
     'medsiglip': {
         'embedding_dim': 512,
-        'collection_name': 'covid_image_retrieval_medsiglip',
+        'collection_name': 'isic_image_retrieval_medsiglip',
         'description': 'MedSigLIP image embeddings'
     }
 }
