@@ -12,7 +12,11 @@ def read_json(json_path: Path) -> dict:
         return json.load(f)
 
 
-def find_image_path(raw_path: str, images_root: Path | None, basename_index: dict[str, Path] | None) -> Path | None:
+def find_image_path(
+    raw_path: str | None,
+    roots: list[Path] | None,
+    basename_index: dict[str, Path] | None,
+) -> Path | None:
     if not raw_path:
         return None
 
@@ -22,17 +26,18 @@ def find_image_path(raw_path: str, images_root: Path | None, basename_index: dic
     if candidate.is_absolute() and candidate.exists():
         return candidate
 
-    # 2) Relative path under images_root.
-    if images_root is not None:
-        rel_candidate = images_root / candidate
-        if rel_candidate.exists():
-            return rel_candidate
+    # 2) Relative path under provided roots.
+    if roots:
+        for root in roots:
+            rel_candidate = root / candidate
+            if rel_candidate.exists():
+                return rel_candidate
 
-        # 3) Basename fallback via prebuilt index.
-        if basename_index is not None:
-            hit = basename_index.get(candidate.name)
-            if hit is not None and hit.exists():
-                return hit
+    # 3) Basename fallback via prebuilt index.
+    if basename_index is not None:
+        hit = basename_index.get(candidate.name)
+        if hit is not None and hit.exists():
+            return hit
 
     return None
 
@@ -86,18 +91,31 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Draw saliency overlays from results JSON + rank saliency .npy files")
     parser.add_argument("--results_json", required=True, type=str, help="Path to results_*.json")
     parser.add_argument("--saliency_root", required=True, type=str, help="Root folder of saliency maps: saliency_root/<query_image_id>/rank{n}_saliency.npy")
-    parser.add_argument("--images_root", required=False, type=str, default=None, help="Root folder containing retrieved images (optional if JSON paths are absolute)")
+    parser.add_argument("--query_images_root", required=False, type=str, default=None, help="Root folder containing query images")
+    parser.add_argument("--retrieved_images_root", required=False, type=str, default=None, help="Root folder containing retrieved images")
+    parser.add_argument("--images_root", required=False, type=str, default=None, help="Backward-compatible alias: used for both query and retrieved roots")
     parser.add_argument("--output_dir", required=True, type=str, help="Where overlays will be written")
     parser.add_argument("--alpha", type=float, default=0.45, help="Heatmap blending factor in [0,1]")
     parser.add_argument("--colormap", type=str, default="jet", choices=["jet", "turbo", "hot", "viridis"], help="OpenCV colormap")
     parser.add_argument("--rank_pattern", type=str, default="rank{rank}_saliency.npy", help="Filename pattern for rank saliency files")
-    parser.add_argument("--index_by_basename", action="store_true", help="Build recursive basename index under images_root when paths in JSON are incomplete")
+    parser.add_argument("--index_by_basename", action="store_true", help="Build recursive basename index under query/retrieved roots when paths in JSON are incomplete")
+    parser.add_argument("--save_query_preview", action="store_true", help="Save query image preview into each query output folder")
     args = parser.parse_args()
 
     results_json = Path(args.results_json)
     saliency_root = Path(args.saliency_root)
     output_dir = Path(args.output_dir)
-    images_root = Path(args.images_root) if args.images_root else None
+
+    query_images_root = Path(args.query_images_root) if args.query_images_root else None
+    retrieved_images_root = Path(args.retrieved_images_root) if args.retrieved_images_root else None
+
+    # Backward compatibility: if only --images_root is provided, use it for both.
+    if args.images_root:
+        alias_root = Path(args.images_root)
+        if query_images_root is None:
+            query_images_root = alias_root
+        if retrieved_images_root is None:
+            retrieved_images_root = alias_root
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -108,10 +126,20 @@ def main() -> None:
 
     basename_index = None
     if args.index_by_basename:
-        if images_root is None:
-            raise RuntimeError("--index_by_basename requires --images_root")
-        print(f"Building basename index under: {images_root}")
-        basename_index = build_basename_index(images_root)
+        roots_to_index = []
+        if query_images_root is not None:
+            roots_to_index.append(query_images_root)
+        if retrieved_images_root is not None and retrieved_images_root != query_images_root:
+            roots_to_index.append(retrieved_images_root)
+        if not roots_to_index:
+            raise RuntimeError("--index_by_basename requires --query_images_root and/or --retrieved_images_root (or --images_root)")
+
+        basename_index = {}
+        for root in roots_to_index:
+            print(f"Building basename index under: {root}")
+            partial = build_basename_index(root)
+            for k, v in partial.items():
+                basename_index.setdefault(k, v)
         print(f"Indexed {len(basename_index)} unique image basenames")
 
     cmap = get_colormap(args.colormap)
@@ -121,6 +149,7 @@ def main() -> None:
 
     for row in rows:
         qid = str(row.get("query_image_id") or Path(str(row.get("query_image", "unknown"))).stem)
+        query_image_raw = str(row.get("query_image", ""))
         retrieved = row.get("retrieved", []) or []
 
         if not retrieved:
@@ -129,6 +158,17 @@ def main() -> None:
 
         query_out = output_dir / qid
         query_out.mkdir(parents=True, exist_ok=True)
+
+        if args.save_query_preview and query_image_raw:
+            query_path = find_image_path(
+                query_image_raw,
+                [query_images_root] if query_images_root is not None else None,
+                basename_index,
+            )
+            if query_path is not None:
+                q_bgr = cv2.imread(str(query_path), cv2.IMREAD_COLOR)
+                if q_bgr is not None:
+                    cv2.imwrite(str(query_out / "query.jpg"), q_bgr)
 
         for idx, item in enumerate(retrieved, start=1):
             saliency_path = saliency_root / qid / args.rank_pattern.format(rank=idx)
@@ -143,7 +183,11 @@ def main() -> None:
                 continue
 
             raw_img_path = extract_retrieved_image_path(item)
-            img_path = find_image_path(raw_img_path, images_root, basename_index)
+            img_path = find_image_path(
+                raw_img_path,
+                [retrieved_images_root] if retrieved_images_root is not None else None,
+                basename_index,
+            )
 
             if img_path is None:
                 print(f"[WARN] Could not resolve image path for query={qid}, rank={idx}, raw={raw_img_path}")
