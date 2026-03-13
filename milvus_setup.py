@@ -19,7 +19,7 @@ MODEL_CONFIGS = {
     'densenet121': {
         'embedding_dim': 1024,
         'collection_name': 'isic_image_retrieval_densenet121',
-        'description': 'DenseNet121 image embeddings'
+        'description': 'DenseNet121 image embedwdings'
     },
     'resnet50': {
         'embedding_dim': 2048,

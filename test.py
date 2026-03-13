@@ -5,6 +5,16 @@ from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_sc
 
 import torch
 from torch.utils.data import DataLoader
+try:
+    import timm
+    from timm.data import resolve_model_data_config, create_transform
+    TIMM_AVAILABLE = True
+except ImportError:
+    timm = None
+    resolve_model_data_config = None
+    create_transform = None
+    TIMM_AVAILABLE = False
+    print("Warning: timm library not available. DINOv2 will not be available.")
 
 
 import torchvision.transforms as transforms
@@ -25,6 +35,14 @@ try:
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
     print("Warning: transformers library not available. ConceptCLIP will not be available.")
+
+
+try:
+    from open_clip import create_model_from_pretrained, get_tokenizer
+    OPEN_CLIP_AVAILABLE = True
+except ImportError:
+    OPEN_CLIP_AVAILABLE = False
+    print("Warning: open_clip library not available. BiomedCLIP will not be available.")
 
 
 def retrieval_accuracy(output, target, topk=(1,)):
@@ -213,6 +231,209 @@ def compute_classification_metrics(labels, dists, k_values=[1, 5, 10, 15, 20]):
         }
     
     return results
+
+
+def get_dataset_label_names(args):
+    """Get class label names for zero-shot text prompts by dataset."""
+    if args.dataset == 'covid':
+        return args.covid_labels.split(',') if args.covid_labels else ['normal', 'pneumonia', 'COVID-19']
+    if args.dataset == 'isic':
+        return args.isic_labels.split(',') if args.isic_labels else ['nevus', 'seborrheic keratosis', 'melanoma']
+    if args.dataset == 'tbx11k':
+        return args.tbx11k_labels.split(',') if args.tbx11k_labels else ['tuberculosis', 'healthy', 'sick but no tuberculosis']
+    raise ValueError(f"Unknown dataset: {args.dataset}")
+
+
+@torch.no_grad()
+def evaluate_biomedclip_zeroshot(model, tokenizer, preprocess, loader, device, args):
+    """Zero-shot evaluation with BiomedCLIP on image classification + retrieval."""
+    model.eval()
+    class_names = get_dataset_label_names(args)
+    text_prompts = [args.biomedclip_prompt_template.format(label=label) for label in class_names]
+
+    print("\n=== BiomedCLIP Zero-Shot Evaluation ===")
+    print(f"Dataset: {args.dataset}")
+    print(f"Class names: {class_names}")
+    print(f"Prompt template: {args.biomedclip_prompt_template}")
+
+    text_tokens = tokenizer(text_prompts).to(device)
+    text_features = model.encode_text(text_tokens)
+    text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+
+    all_predictions = []
+    all_labels = []
+    embeds = []
+
+    logit_scale = model.logit_scale.exp() if hasattr(model, 'logit_scale') else torch.tensor(100.0, device=device)
+
+    for batch_idx, data in enumerate(loader):
+        images = data[0]
+        labels = data[1].to(device)
+
+        image_tensor = torch.stack([preprocess(img) for img in images]).to(device)
+        image_features = model.encode_image(image_tensor)
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+
+        logits = logit_scale * image_features @ text_features.t()
+        predictions = torch.argmax(logits, dim=-1)
+
+        all_predictions.extend(predictions.cpu().numpy())
+        all_labels.extend(labels.cpu().numpy())
+        embeds.append(image_features)
+
+        if (batch_idx + 1) % 10 == 0:
+            print(f"Processed {(batch_idx + 1) * args.eval_batch_size} images...")
+
+    labels = torch.tensor(np.array(all_labels), dtype=torch.long, device=device)
+    embeds = torch.cat(embeds, dim=0)
+
+    all_predictions = np.array(all_predictions)
+    all_labels = np.array(all_labels)
+
+    # Zero-shot classification metrics
+    accuracy_cls = accuracy_score(all_labels, all_predictions) * 100.0
+    precision_macro = precision_score(all_labels, all_predictions, average='macro', zero_division=0) * 100.0
+    recall_macro = recall_score(all_labels, all_predictions, average='macro', zero_division=0) * 100.0
+    f1_macro = f1_score(all_labels, all_predictions, average='macro', zero_division=0) * 100.0
+
+    print("\n>> Zero-shot Classification Metrics:")
+    print(f"   Accuracy: {accuracy_cls:.2f}%")
+    print(f"   Precision (macro): {precision_macro:.2f}%")
+    print(f"   Recall (macro): {recall_macro:.2f}%")
+    print(f"   F1 (macro): {f1_macro:.2f}%")
+
+    # Retrieval metrics from image embeddings
+    dists = embeds @ embeds.t()
+    dists.fill_diagonal_(float('-inf'))
+
+    kappas = [1, 5, 10]
+    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = torch.stack(accuracy).cpu().numpy()
+    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+
+    ranks = torch.argsort(dists, dim=0, descending=True)
+    mAP, _, pr, _ = compute_map(ranks.cpu().numpy(), labels.cpu().numpy(), kappas)
+    print('>> mAP: {:.2f}%'.format(mAP * 100.0))
+    print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
+
+    print('\n>> Retrieval Classification Metrics (Majority Voting):')
+    k_values = [1, 5, 10, 15, 20]
+    classification_results = compute_classification_metrics(labels, dists, k_values)
+
+    for k in k_values:
+        metrics = classification_results[k]
+        print(f'\n>> Top-{k} Retrieved Images:')
+        print(f'   Accuracy: {metrics["accuracy"]:.2f}%')
+        print(f'   Precision (macro): {metrics["precision_macro"]:.2f}%')
+        print(f'   Recall (macro): {metrics["recall_macro"]:.2f}%')
+        print(f'   F1 (macro): {metrics["f1_macro"]:.2f}%')
+
+    if args.save_dir:
+        os.makedirs(args.save_dir, exist_ok=True)
+        save_path = os.path.join(args.save_dir, 'biomedclip_zeroshot')
+
+        classification_k_values = list(classification_results.keys())
+        classification_metrics = {k: v for k, v in classification_results.items()}
+
+        np.savez(
+            save_path,
+            embeds=embeds.cpu().numpy(),
+            labels=labels.cpu().numpy(),
+            dists=-dists.cpu().numpy(),
+            predictions=all_predictions,
+            class_names=np.array(class_names),
+            text_prompts=np.array(text_prompts),
+            zero_shot_accuracy=accuracy_cls,
+            zero_shot_precision_macro=precision_macro,
+            zero_shot_recall_macro=recall_macro,
+            zero_shot_f1_macro=f1_macro,
+            kappas=kappas,
+            acc=accuracy,
+            mAP=mAP,
+            pr=pr,
+            classification_k_values=classification_k_values,
+            **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()}
+        )
+        print(f'\n>> Results saved to {save_path}.npz')
+
+
+@torch.no_grad()
+def evaluate_dinov2_zeroshot(model, transform, loader, device, args):
+    """Zero-shot evaluation with DINOv2 as a frozen retrieval backbone."""
+    model.eval()
+
+    print("\n=== DINOv2 Zero-Shot Retrieval Evaluation ===")
+    print(f"Dataset: {args.dataset}")
+    print(f"Backbone: {args.dinov2_model_name}")
+
+    embeds = []
+    labels = []
+
+    for batch_idx, data in enumerate(loader):
+        images = data[0]
+        _labels = data[1].to(device)
+
+        image_tensor = torch.stack([transform(img) for img in images]).to(device)
+        out = model(image_tensor)
+        if isinstance(out, (tuple, list)):
+            out = out[0]
+
+        out = out / out.norm(dim=-1, keepdim=True)
+        embeds.append(out)
+        labels.append(_labels)
+
+        if (batch_idx + 1) % 10 == 0:
+            print(f"Processed {(batch_idx + 1) * args.eval_batch_size} images...")
+
+    embeds = torch.cat(embeds, dim=0)
+    labels = torch.cat(labels, dim=0)
+
+    dists = embeds @ embeds.t()
+    dists.fill_diagonal_(float('-inf'))
+
+    kappas = [1, 5, 10]
+    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = torch.stack(accuracy).cpu().numpy()
+    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+
+    ranks = torch.argsort(dists, dim=0, descending=True)
+    mAP, _, pr, _ = compute_map(ranks.cpu().numpy(), labels.cpu().numpy(), kappas)
+    print('>> mAP: {:.2f}%'.format(mAP * 100.0))
+    print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
+
+    print('\n>> Classification Metrics (Majority Voting):')
+    k_values = [1, 5, 10, 15, 20]
+    classification_results = compute_classification_metrics(labels, dists, k_values)
+
+    for k in k_values:
+        metrics = classification_results[k]
+        print(f'\n>> Top-{k} Retrieved Images:')
+        print(f'   Accuracy: {metrics["accuracy"]:.2f}%')
+        print(f'   Precision (macro): {metrics["precision_macro"]:.2f}%')
+        print(f'   Recall (macro): {metrics["recall_macro"]:.2f}%')
+        print(f'   F1 (macro): {metrics["f1_macro"]:.2f}%')
+
+    if args.save_dir:
+        os.makedirs(args.save_dir, exist_ok=True)
+        save_path = os.path.join(args.save_dir, 'dinov2_zeroshot')
+
+        classification_k_values = list(classification_results.keys())
+        classification_metrics = {k: v for k, v in classification_results.items()}
+
+        np.savez(
+            save_path,
+            embeds=embeds.cpu().numpy(),
+            labels=labels.cpu().numpy(),
+            dists=-dists.cpu().numpy(),
+            kappas=kappas,
+            acc=accuracy,
+            mAP=mAP,
+            pr=pr,
+            dinov2_model_name=args.dinov2_model_name,
+            classification_k_values=classification_k_values,
+            **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()}
+        )
+        print(f'\n>> Results saved to {save_path}.npz')
 
 
 @torch.no_grad()
@@ -996,6 +1217,19 @@ def evaluate(model, loader, device, args):
 
 def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    use_two_model_rerank = False
+    is_conceptclip = False
+    is_biomedclip = False
+    is_dinov2 = False
+    is_conceptclip_img = False
+    dinov2_transform = None
+    model = None
+    processor = None
+    tokenizer = None
+    preprocess = None
+    img_model = None
+    text_model = None
+    text_processor = None
 
     # Two-model re-ranking: load both image backbone and ConceptCLIP
     if args.use_rerank_2models:
@@ -1065,6 +1299,27 @@ def main(args):
             processor = AutoProcessor.from_pretrained('JerrryNie/ConceptCLIP', trust_remote_code=True)
             model.to(device)
             is_conceptclip = True
+        elif args.model == 'biomedclip':
+            if not OPEN_CLIP_AVAILABLE:
+                raise ImportError('open_clip_torch is required for BiomedCLIP. Install it with: pip install open_clip_torch')
+            print("Loading BiomedCLIP model...")
+            model, _, preprocess = create_model_from_pretrained(
+                args.biomedclip_model_name,
+                device=device
+            )
+            tokenizer = get_tokenizer(args.biomedclip_model_name)
+            model.eval()
+            is_biomedclip = True
+        elif args.model == 'dinov2':
+            if not TIMM_AVAILABLE:
+                raise ImportError('timm is required for DINOv2. Install it with: pip install timm')
+            print(f"Loading DINOv2 model: {args.dinov2_model_name}...")
+            model = timm.create_model(args.dinov2_model_name, pretrained=True, num_classes=0)
+            data_config = resolve_model_data_config(model)
+            dinov2_transform = create_transform(**data_config, is_training=False)
+            model.to(device)
+            model.eval()
+            is_dinov2 = True
         elif args.model == 'densenet121':
             model = DenseNet121(embedding_dim=args.embedding_dim)
             is_conceptclip = False
@@ -1087,7 +1342,7 @@ def main(args):
             raise NotImplementedError('Model not supported!')
 
     if not use_two_model_rerank:
-        if not is_conceptclip:
+        if not is_conceptclip and not is_biomedclip and not is_dinov2:
             if os.path.isfile(args.resume):
                 print("=> loading checkpoint")
                 checkpoint = torch.load(args.resume)
@@ -1098,14 +1353,18 @@ def main(args):
             else:
                 print("=> no checkpoint found")
             model.to(device)
-        else:
+        elif is_conceptclip:
             print("=> Using pre-trained ConceptCLIP (zero-shot), no checkpoint needed")
+        elif is_biomedclip:
+            print("=> Using pre-trained BiomedCLIP (zero-shot), no checkpoint needed")
+        elif is_dinov2:
+            print("=> Using pre-trained DINOv2 (zero-shot), no checkpoint needed")
 
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
     
     # ConceptCLIP uses PIL images directly (processor handles preprocessing)
-    if (is_conceptclip and not use_two_model_rerank) or (use_two_model_rerank and is_conceptclip_img):
+    if (is_conceptclip and not use_two_model_rerank) or (use_two_model_rerank and is_conceptclip_img) or is_biomedclip or is_dinov2:
         test_transform = transforms.Compose([
             transforms.Lambda(lambda img: img.convert('RGB'))
         ])
@@ -1151,7 +1410,7 @@ def main(args):
         raise NotImplementedError('Dataset not supported!')
 
     # Use custom collate function for ConceptCLIP to handle PIL images
-    use_conceptclip_collate = (is_conceptclip and not use_two_model_rerank) or (use_two_model_rerank and is_conceptclip_img)
+    use_conceptclip_collate = (is_conceptclip and not use_two_model_rerank) or (use_two_model_rerank and is_conceptclip_img) or is_biomedclip or is_dinov2
     
     if use_conceptclip_collate:
         test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size,
@@ -1167,14 +1426,7 @@ def main(args):
     
     if use_two_model_rerank:
         # Two-model re-ranking approach - need separate loader for ConceptCLIP with PIL images
-        if args.dataset == 'covid':
-            label_names = args.covid_labels.split(',') if args.covid_labels else ['normal', 'pneumonia', 'COVID-19']
-        elif args.dataset == 'isic':
-            label_names = args.isic_labels.split(',') if args.isic_labels else ['melanoma', 'nevus', 'seborrheic keratosis']
-        elif args.dataset == 'tbx11k':
-            label_names = args.tbx11k_labels.split(',') if args.tbx11k_labels else ['normal', 'active TB', 'latent TB', 'uncertain TB']
-        else:
-            raise ValueError(f"Unknown dataset: {args.dataset}")
+        label_names = get_dataset_label_names(args)
         
         # Create separate dataset/loader with PIL images for ConceptCLIP
         if not is_conceptclip_img:
@@ -1252,18 +1504,15 @@ def main(args):
             evaluate_conceptclip_concept_retrieval(model, processor, test_loader, device, args, concept_list)
         elif args.use_text:
             # Get label names for text-enhanced retrieval
-            if args.dataset == 'covid':
-                label_names = args.covid_labels.split(',') if args.covid_labels else ['normal', 'pneumonia', 'COVID-19']
-            elif args.dataset == 'isic':
-                label_names = args.isic_labels.split(',') if args.isic_labels else ['melanoma', 'nevus', 'seborrheic keratosis']
-            elif args.dataset == 'tbx11k':
-                label_names = args.tbx11k_labels.split(',') if args.tbx11k_labels else ['normal', 'active TB', 'latent TB', 'uncertain TB']
-            else:
-                raise ValueError(f"Unknown dataset: {args.dataset}")
+            label_names = get_dataset_label_names(args)
             
             evaluate_conceptclip_with_text(model, processor, test_loader, device, args, label_names)
         else:
             evaluate_conceptclip(model, processor, test_loader, device, args)
+    elif is_biomedclip:
+        evaluate_biomedclip_zeroshot(model, tokenizer, preprocess, test_loader, device, args)
+    elif is_dinov2:
+        evaluate_dinov2_zeroshot(model, dinov2_transform, test_loader, device, args)
     else:
         evaluate(model, test_loader, device, args)
 
@@ -1273,7 +1522,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch Embedding Learning')
 
     parser.add_argument('--dataset', default='covid',
-                        help='Dataset to use (covid or isic)')
+                        help='Dataset to use (covid, isic, or tbx11k)')
     parser.add_argument('--test-dataset-dir', default='/data/brian.hu/COVID/data/test',
                         help='Test dataset directory path')
     parser.add_argument('--test-image-list', default='./test_COVIDx4.txt',
@@ -1281,7 +1530,7 @@ def parse_args():
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, swinv2, or conceptclip)')
+                        help='Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, swinv2, medsiglip, conceptclip, biomedclip, or dinov2)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
     parser.add_argument('--sra-num-heads', default=8, type=int,
@@ -1310,6 +1559,12 @@ def parse_args():
                         help='Comma-separated list of ISIC dataset labels for ConceptCLIP')
     parser.add_argument('--tbx11k-labels', default=None, type=str,
                         help='Comma-separated list of TBX11K dataset labels for ConceptCLIP')
+    parser.add_argument('--biomedclip-model-name', default='hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224', type=str,
+                        help='BiomedCLIP model identifier for open_clip')
+    parser.add_argument('--biomedclip-prompt-template', default='this is a medical image of {label}', type=str,
+                        help='Prompt template for BiomedCLIP zero-shot classification. Must contain {label}.')
+    parser.add_argument('--dinov2-model-name', default='vit_base_patch14_dinov2.lvd142m', type=str,
+                        help='timm model name for DINOv2 backbone')
     parser.add_argument('--eval-batch-size', default=64, type=int)
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                         help='Number of data loading workers')
