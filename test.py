@@ -1303,10 +1303,22 @@ def main(args):
             if not OPEN_CLIP_AVAILABLE:
                 raise ImportError('open_clip_torch is required for BiomedCLIP. Install it with: pip install open_clip_torch')
             print("Loading BiomedCLIP model...")
-            model, _, preprocess = create_model_from_pretrained(
+            loaded = create_model_from_pretrained(
                 args.biomedclip_model_name,
                 device=device
             )
+            # open_clip versions differ: some return (model, preprocess), others
+            # return (model, preprocess_train, preprocess_val)
+            if isinstance(loaded, tuple):
+                if len(loaded) == 2:
+                    model, preprocess = loaded
+                elif len(loaded) >= 3:
+                    model = loaded[0]
+                    preprocess = loaded[-1]
+                else:
+                    raise RuntimeError('Unexpected return from create_model_from_pretrained')
+            else:
+                raise RuntimeError('Unexpected return type from create_model_from_pretrained')
             tokenizer = get_tokenizer(args.biomedclip_model_name)
             model.eval()
             is_biomedclip = True
