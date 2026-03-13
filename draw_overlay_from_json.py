@@ -7,8 +7,8 @@ import numpy as np
 from PIL import Image
 
 
-DEFAULT_QUERY_DIR = "/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data"
-DEFAULT_RETRIEVED_DIR = "/kaggle/input/isic-2017/ISIC-2017_Training_Data/ISIC-2017_Training_Data"
+DEFAULT_QUERY_DIR = "/kaggle/input/rsna-png/data/test"
+DEFAULT_RETRIEVED_DIR = "/kaggle/input/rsna-png/data/train"
 DEFAULT_OUTPUT_DIR = "/kaggle/working/saliency_overlays"
 COMMON_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
