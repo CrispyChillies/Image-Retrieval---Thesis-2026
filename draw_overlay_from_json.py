@@ -1,268 +1,338 @@
 import argparse
 import json
-import os
 from pathlib import Path
 
-import cv2
+import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
 
 
-def read_json(json_path: Path) -> dict:
-    with json_path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+DEFAULT_QUERY_DIR = "/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data"
+DEFAULT_RETRIEVED_DIR = "/kaggle/input/isic-2017/ISIC-2017_Training_Data/ISIC-2017_Training_Data"
+DEFAULT_OUTPUT_DIR = "/kaggle/working/saliency_overlays"
+COMMON_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
 
-def find_image_path(
-    raw_path: str | None,
-    roots: list[Path] | None,
-    basename_index: dict[str, Path] | None,
-) -> Path | None:
-    if not raw_path:
-        return None
-
-    candidate = Path(raw_path)
-
-    # 1) Absolute path as-is.
-    if candidate.is_absolute() and candidate.exists():
-        return candidate
-
-    # 2) Relative path under provided roots.
-    if roots:
-        for root in roots:
-            rel_candidate = root / candidate
-            if rel_candidate.exists():
-                return rel_candidate
-
-    # 3) Basename fallback via prebuilt index.
-    if basename_index is not None:
-        hit = basename_index.get(candidate.name)
-        if hit is not None and hit.exists():
-            return hit
-
-        stem_hit = basename_index.get(candidate.stem)
-        if stem_hit is not None and stem_hit.exists():
-            return stem_hit
-
-    return None
+def parse_args():
+	parser = argparse.ArgumentParser(
+		description="Draw saliency overlays on retrieved images from evaluation JSON and saved .npy saliency maps."
+	)
+	parser.add_argument("--results-json", type=str, required=True,
+						help="Path to the evaluation JSON file.")
+	parser.add_argument("--query-id", type=str, required=True,
+						help="Query identifier, image id, or filename to visualize.")
+	parser.add_argument("--saliency-dir", type=str, default=None,
+						help="Directory that already contains rank*.npy files for one query.")
+	parser.add_argument("--saliency-root", type=str, default=None,
+						help="Root directory that contains per-query saliency folders.")
+	parser.add_argument("--query-dir", type=str, default=DEFAULT_QUERY_DIR,
+						help="Directory containing query images.")
+	parser.add_argument("--retrieved-dir", type=str, default=DEFAULT_RETRIEVED_DIR,
+						help="Directory containing retrieved images. Overlays are drawn on these images.")
+	parser.add_argument("--retrieved-images", nargs="*", default=None,
+						help="Optional override list of retrieved image filenames, ordered by rank.")
+	parser.add_argument("--top-k", type=int, default=None,
+						help="Optional limit on how many ranks to render.")
+	parser.add_argument("--alpha", type=float, default=0.45,
+						help="Overlay strength in [0, 1].")
+	parser.add_argument("--cmap", type=str, default="jet",
+						help="Matplotlib colormap name for the heatmap.")
+	parser.add_argument("--output-dir", type=str, default=DEFAULT_OUTPUT_DIR,
+						help="Directory to save output images.")
+	parser.add_argument("--save-grid", action="store_true",
+						help="Also save a single multi-row grid figure for all ranks.")
+	return parser.parse_args()
 
 
-def build_basename_index(images_root: Path) -> dict[str, Path]:
-    index: dict[str, Path] = {}
-    for p in images_root.rglob("*"):
-        if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}:
-            # Keep first hit for deterministic behavior.
-            index.setdefault(p.name, p)
-            index.setdefault(p.stem, p)
-    return index
+def normalize_text(value):
+	if value is None:
+		return ""
+	text = str(value).strip()
+	return text.lower()
 
 
-def extract_retrieved_image_path(item: dict) -> str | None:
-    # Handle different schemas.
-    for key in ("image_path", "path", "retrieved_image", "filename"):
-        if key in item and item[key]:
-            return str(item[key])
-    return None
+def query_keys(query_result):
+	keys = set()
+	query_image = query_result.get("query_image", "")
+	query_image_id = query_result.get("query_image_id", "")
+
+	for candidate in (query_image, query_image_id):
+		if not candidate:
+			continue
+		candidate_path = Path(str(candidate))
+		keys.add(normalize_text(candidate))
+		keys.add(normalize_text(candidate_path.name))
+		keys.add(normalize_text(candidate_path.stem))
+
+	return keys
 
 
-def overlay_heatmap(image_bgr: np.ndarray, heatmap: np.ndarray, alpha: float, colormap: int) -> np.ndarray:
-    h, w = image_bgr.shape[:2]
-    hm = cv2.resize(heatmap, (w, h), interpolation=cv2.INTER_LINEAR)
+def load_query_result(results_json_path, query_id):
+	with open(results_json_path, "r", encoding="utf-8") as handle:
+		data = json.load(handle)
 
-    hm = hm.astype(np.float32)
-    hm_min = float(hm.min())
-    hm_max = float(hm.max())
-    if hm_max - hm_min > 1e-8:
-        hm = (hm - hm_min) / (hm_max - hm_min)
-    else:
-        hm = np.zeros_like(hm, dtype=np.float32)
+	results = data.get("results", [])
+	query_key = normalize_text(query_id)
 
-    hm_u8 = np.uint8(np.clip(hm * 255.0, 0, 255))
-    hm_color = cv2.applyColorMap(hm_u8, colormap)
-    out = cv2.addWeighted(hm_color, alpha, image_bgr, 1.0 - alpha, 0)
-    return out
+	for query_result in results:
+		if query_key in query_keys(query_result):
+			return query_result
+
+	raise ValueError(f"Could not find query '{query_id}' in {results_json_path}.")
 
 
-def get_colormap(name: str) -> int:
-    cmap = {
-        "jet": cv2.COLORMAP_JET,
-        "turbo": cv2.COLORMAP_TURBO,
-        "hot": cv2.COLORMAP_HOT,
-        "viridis": cv2.COLORMAP_VIRIDIS,
-    }
-    return cmap.get(name.lower(), cv2.COLORMAP_JET)
+def candidate_names_from_value(value):
+	if not value:
+		return []
+
+	path = Path(str(value))
+	stem = path.stem
+	names = [path.name]
+	if stem and stem != path.name:
+		names.extend([stem + ext for ext in COMMON_EXTENSIONS])
+	if path.suffix:
+		names.append(stem)
+	return list(dict.fromkeys(names))
 
 
-def build_query_keys(row: dict) -> list[str]:
-    keys: list[str] = []
+def resolve_image_path(image_dir, candidates):
+	image_dir = Path(image_dir)
+	for candidate in candidates:
+		candidate_path = image_dir / candidate
+		if candidate_path.exists():
+			return candidate_path
 
-    qid = row.get("query_image_id")
-    if qid:
-        keys.append(str(qid))
+	lower_map = {child.name.lower(): child for child in image_dir.iterdir() if child.is_file()}
+	for candidate in candidates:
+		found = lower_map.get(candidate.lower())
+		if found is not None:
+			return found
 
-    qimg = str(row.get("query_image", "")).strip()
-    if qimg:
-        qname = Path(qimg).name
-        qstem = Path(qimg).stem
-        qsuffix = Path(qimg).suffix.lstrip(".")
-        keys.append(qstem)
-        keys.append(qname)
-
-        # Common exported-folder patterns:
-        # - <stem>_<ext>  (e.g. abc_png)
-        # - full filename with dots replaced by underscores (e.g. abc_png)
-        if qsuffix:
-            keys.append(f"{qstem}_{qsuffix}")
-        keys.append(qname.replace(".", "_"))
-
-    # Deduplicate while preserving order.
-    dedup: list[str] = []
-    seen = set()
-    for k in keys:
-        if k not in seen:
-            seen.add(k)
-            dedup.append(k)
-    return dedup
+	raise FileNotFoundError(
+		f"Could not resolve image in {image_dir} from candidates: {candidates}"
+	)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Draw saliency overlays from results JSON + rank saliency .npy files")
-    parser.add_argument("--results_json", required=True, type=str, help="Path to results_*.json")
-    parser.add_argument("--saliency_root", required=True, type=str, help="Root folder of saliency maps: saliency_root/<query_image_id>/rank{n}_saliency.npy")
-    parser.add_argument("--query_images_root", required=False, type=str, default=None, help="Root folder containing query images")
-    parser.add_argument("--retrieved_images_root", required=False, type=str, default=None, help="Root folder containing retrieved images")
-    parser.add_argument("--images_root", required=False, type=str, default=None, help="Backward-compatible alias: used for both query and retrieved roots")
-    parser.add_argument("--output_dir", required=True, type=str, help="Where overlays will be written")
-    parser.add_argument("--alpha", type=float, default=0.45, help="Heatmap blending factor in [0,1]")
-    parser.add_argument("--colormap", type=str, default="jet", choices=["jet", "turbo", "hot", "viridis"], help="OpenCV colormap")
-    parser.add_argument("--rank_pattern", type=str, default="rank{rank}_saliency.npy", help="Filename pattern for rank saliency files")
-    parser.add_argument("--index_by_basename", action="store_true", help="Build recursive basename index under query/retrieved roots when paths in JSON are incomplete")
-    parser.add_argument("--save_query_preview", action="store_true", help="Save query image preview into each query output folder")
-    args = parser.parse_args()
+def resolve_query_image(query_result, query_dir):
+	candidates = []
+	candidates.extend(candidate_names_from_value(query_result.get("query_image")))
+	candidates.extend(candidate_names_from_value(query_result.get("query_image_id")))
+	return resolve_image_path(query_dir, list(dict.fromkeys(candidates)))
 
-    results_json = Path(args.results_json)
-    saliency_root = Path(args.saliency_root)
-    output_dir = Path(args.output_dir)
 
-    query_images_root = Path(args.query_images_root) if args.query_images_root else None
-    retrieved_images_root = Path(args.retrieved_images_root) if args.retrieved_images_root else None
+def infer_saliency_dir(query_result, saliency_root):
+	query_image = query_result.get("query_image", "")
+	query_id = query_result.get("query_image_id", "")
+	candidate_dirs = []
 
-    # Backward compatibility: if only --images_root is provided, use it for both.
-    if args.images_root:
-        alias_root = Path(args.images_root)
-        if query_images_root is None:
-            query_images_root = alias_root
-        if retrieved_images_root is None:
-            retrieved_images_root = alias_root
+	for value in (query_image, query_id):
+		if not value:
+			continue
+		value_path = Path(str(value))
+		candidate_dirs.append(value_path.name.replace(".", "_"))
+		candidate_dirs.append(value_path.stem.replace(".", "_"))
+		candidate_dirs.append(str(value).replace(".", "_"))
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+	saliency_root = Path(saliency_root)
+	for candidate in dict.fromkeys(candidate_dirs):
+		path = saliency_root / candidate
+		if path.exists() and path.is_dir():
+			return path
 
-    data = read_json(results_json)
-    rows = data.get("results", [])
-    if not rows:
-        raise RuntimeError("No 'results' entries found in JSON.")
+	raise FileNotFoundError(
+		f"Could not infer saliency directory under {saliency_root} for query {query_result.get('query_image')}"
+	)
 
-    basename_index = None
-    if args.index_by_basename:
-        roots_to_index = []
-        if query_images_root is not None:
-            roots_to_index.append(query_images_root)
-        if retrieved_images_root is not None and retrieved_images_root != query_images_root:
-            roots_to_index.append(retrieved_images_root)
-        if not roots_to_index:
-            raise RuntimeError("--index_by_basename requires --query_images_root and/or --retrieved_images_root (or --images_root)")
 
-        basename_index = {}
-        for root in roots_to_index:
-            print(f"Building basename index under: {root}")
-            partial = build_basename_index(root)
-            for k, v in partial.items():
-                basename_index.setdefault(k, v)
-        print(f"Indexed {len(basename_index)} unique image basenames")
+def extract_rank(path):
+	digits = "".join(char for char in path.stem if char.isdigit())
+	if not digits:
+		raise ValueError(f"Could not extract rank from file name: {path.name}")
+	return int(digits)
 
-    cmap = get_colormap(args.colormap)
 
-    saved = 0
-    skipped = 0
+def load_saliency_files(saliency_dir, top_k=None):
+	saliency_dir = Path(saliency_dir)
+	files = sorted(saliency_dir.glob("rank*_saliency.npy"), key=extract_rank)
+	if top_k is not None:
+		files = files[:top_k]
+	if not files:
+		raise FileNotFoundError(f"No rank*_saliency.npy files found in {saliency_dir}")
+	return files
 
-    for row in rows:
-        qid = str(row.get("query_image_id") or Path(str(row.get("query_image", "unknown"))).stem)
-        query_image_raw = str(row.get("query_image", ""))
-        retrieved = row.get("retrieved", []) or []
-        query_keys = build_query_keys(row)
 
-        if not retrieved:
-            skipped += 1
-            continue
+def resolve_retrieved_images(query_result, retrieved_dir, saliency_files, retrieved_override=None):
+	if retrieved_override:
+		if len(retrieved_override) < len(saliency_files):
+			raise ValueError(
+				"The number of --retrieved-images must be at least the number of saliency files."
+			)
+		resolved = []
+		for image_name in retrieved_override[:len(saliency_files)]:
+			resolved.append(resolve_image_path(retrieved_dir, candidate_names_from_value(image_name)))
+		return resolved
 
-        query_out = output_dir / qid
-        query_out.mkdir(parents=True, exist_ok=True)
+	retrieved_entries = query_result.get("retrieved", [])
+	if not retrieved_entries:
+		raise ValueError(
+			"This JSON entry does not contain per-rank retrieved images. "
+			"Pass --retrieved-images explicitly, or use a detailed results JSON with query_result['retrieved']."
+		)
 
-        if args.save_query_preview and query_image_raw:
-            query_path = find_image_path(
-                query_image_raw,
-                [query_images_root] if query_images_root is not None else None,
-                basename_index,
-            )
-            if query_path is not None:
-                q_bgr = cv2.imread(str(query_path), cv2.IMREAD_COLOR)
-                if q_bgr is not None:
-                    cv2.imwrite(str(query_out / "query.jpg"), q_bgr)
+	rank_to_entry = {}
+	for entry in retrieved_entries:
+		rank = entry.get("rank")
+		if rank is not None:
+			rank_to_entry[int(rank)] = entry
 
-        for idx, item in enumerate(retrieved, start=1):
-            saliency_path = None
-            for qkey in query_keys:
-                candidate = saliency_root / qkey / args.rank_pattern.format(rank=idx)
-                if candidate.exists():
-                    saliency_path = candidate
-                    break
+	resolved = []
+	for saliency_file in saliency_files:
+		rank = extract_rank(saliency_file)
+		entry = rank_to_entry.get(rank)
+		if entry is None:
+			raise ValueError(f"Missing retrieved metadata for rank {rank}")
+		candidates = candidate_names_from_value(entry.get("retrieved_image"))
+		resolved.append(resolve_image_path(retrieved_dir, candidates))
+	return resolved
 
-                # Optional compatibility with zero-padded rank names.
-                alt = saliency_root / qkey / f"rank{idx:02d}_saliency.npy"
-                if alt.exists():
-                    saliency_path = alt
-                    break
 
-            if saliency_path is None:
-                print(f"[WARN] Missing saliency for query keys={query_keys}, rank={idx}")
-                skipped += 1
-                continue
+def normalize_saliency(saliency):
+	saliency = np.asarray(saliency, dtype=np.float32)
+	saliency = np.squeeze(saliency)
+	if saliency.ndim != 2:
+		raise ValueError(f"Expected a 2D saliency map, got shape {saliency.shape}")
+	min_value = float(np.min(saliency))
+	max_value = float(np.max(saliency))
+	if max_value <= min_value:
+		return np.zeros_like(saliency, dtype=np.float32)
+	return np.interp(saliency, (min_value, max_value), (0.0, 1.0)).astype(np.float32)
 
-            raw_img_path = extract_retrieved_image_path(item)
-            img_path = find_image_path(
-                raw_img_path,
-                [retrieved_images_root] if retrieved_images_root is not None else None,
-                basename_index,
-            )
 
-            if img_path is None:
-                print(f"[WARN] Could not resolve image path for query={qid}, rank={idx}, raw={raw_img_path}")
-                skipped += 1
-                continue
+def resize_saliency(saliency, size):
+	saliency_uint8 = np.clip(saliency * 255.0, 0, 255).astype(np.uint8)
+	resized = Image.fromarray(saliency_uint8).resize(size, Image.Resampling.BILINEAR)
+	return np.asarray(resized, dtype=np.float32) / 255.0
 
-            image_bgr = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
-            if image_bgr is None:
-                print(f"[WARN] Failed to read image: {img_path}")
-                skipped += 1
-                continue
 
-            heatmap = np.load(str(saliency_path))
-            if heatmap.ndim == 3:
-                # Handle shape like (1,H,W) or (H,W,1)
-                heatmap = np.squeeze(heatmap)
+def make_overlay(image, saliency, alpha=0.45, cmap_name="jet"):
+	image_rgb = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
+	resized_saliency = resize_saliency(saliency, image.size)
+	colored = plt.get_cmap(cmap_name)(resized_saliency)[..., :3]
+	overlay = (1.0 - alpha) * image_rgb + alpha * colored
+	overlay = np.clip(overlay, 0.0, 1.0)
+	return overlay, resized_saliency
 
-            overlay = overlay_heatmap(image_bgr, heatmap, alpha=args.alpha, colormap=cmap)
 
-            out_name = f"rank{idx}_overlay.jpg"
-            out_path = query_out / out_name
-            cv2.imwrite(str(out_path), overlay)
-            saved += 1
+def save_rank_figure(output_path, query_image, retrieved_image, overlay, rank, similarity=None):
+	fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+	axes[0].imshow(query_image)
+	axes[0].set_title("Query")
+	axes[0].axis("off")
 
-    print("=" * 70)
-    print(f"Done. Saved overlays: {saved}")
-    print(f"Skipped entries: {skipped}")
-    print(f"Output dir: {output_dir}")
-    print("=" * 70)
+	axes[1].imshow(retrieved_image)
+	if similarity is None:
+		axes[1].set_title(f"Retrieved rank {rank}")
+	else:
+		axes[1].set_title(f"Retrieved rank {rank} | sim={similarity:.4f}")
+	axes[1].axis("off")
+
+	axes[2].imshow(overlay)
+	axes[2].set_title(f"Overlay rank {rank}")
+	axes[2].axis("off")
+
+	fig.tight_layout()
+	fig.savefig(output_path, dpi=150, bbox_inches="tight")
+	plt.close(fig)
+
+
+def save_grid_figure(output_path, query_image, rows):
+	row_count = len(rows)
+	fig, axes = plt.subplots(row_count, 3, figsize=(15, 5 * row_count))
+	if row_count == 1:
+		axes = np.expand_dims(axes, axis=0)
+
+	for index, row in enumerate(rows):
+		axes[index, 0].imshow(query_image)
+		axes[index, 0].set_title("Query" if index == 0 else "")
+		axes[index, 0].axis("off")
+
+		axes[index, 1].imshow(row["retrieved_image"])
+		similarity = row.get("similarity")
+		if similarity is None:
+			title = f"Retrieved rank {row['rank']}"
+		else:
+			title = f"Retrieved rank {row['rank']} | sim={similarity:.4f}"
+		axes[index, 1].set_title(title)
+		axes[index, 1].axis("off")
+
+		axes[index, 2].imshow(row["overlay"])
+		axes[index, 2].set_title(f"Overlay rank {row['rank']}")
+		axes[index, 2].axis("off")
+
+	fig.tight_layout()
+	fig.savefig(output_path, dpi=150, bbox_inches="tight")
+	plt.close(fig)
+
+
+def main():
+	args = parse_args()
+	if not args.saliency_dir and not args.saliency_root:
+		raise ValueError("Provide either --saliency-dir or --saliency-root.")
+
+	query_result = load_query_result(args.results_json, args.query_id)
+	saliency_dir = Path(args.saliency_dir) if args.saliency_dir else infer_saliency_dir(query_result, args.saliency_root)
+	saliency_files = load_saliency_files(saliency_dir, top_k=args.top_k)
+
+	query_image_path = resolve_query_image(query_result, args.query_dir)
+	query_image = Image.open(query_image_path).convert("RGB")
+
+	retrieved_paths = resolve_retrieved_images(
+		query_result=query_result,
+		retrieved_dir=args.retrieved_dir,
+		saliency_files=saliency_files,
+		retrieved_override=args.retrieved_images,
+	)
+
+	output_dir = Path(args.output_dir) / normalize_text(query_result.get("query_image_id") or query_result.get("query_image") or args.query_id)
+	output_dir.mkdir(parents=True, exist_ok=True)
+
+	similarity_by_rank = {
+		int(item["rank"]): item.get("similarity")
+		for item in query_result.get("retrieved", [])
+		if item.get("rank") is not None
+	}
+
+	grid_rows = []
+	for saliency_file, retrieved_path in zip(saliency_files, retrieved_paths):
+		rank = extract_rank(saliency_file)
+		saliency = normalize_saliency(np.load(saliency_file))
+		retrieved_image = Image.open(retrieved_path).convert("RGB")
+		overlay, _ = make_overlay(retrieved_image, saliency, alpha=args.alpha, cmap_name=args.cmap)
+
+		rank_output = output_dir / f"rank{rank}_overlay.png"
+		save_rank_figure(
+			output_path=rank_output,
+			query_image=query_image,
+			retrieved_image=retrieved_image,
+			overlay=overlay,
+			rank=rank,
+			similarity=similarity_by_rank.get(rank),
+		)
+
+		grid_rows.append({
+			"rank": rank,
+			"retrieved_image": retrieved_image,
+			"overlay": overlay,
+			"similarity": similarity_by_rank.get(rank),
+		})
+
+		print(f"Saved rank {rank} overlay to {rank_output}")
+
+	if args.save_grid:
+		grid_output = output_dir / "all_ranks_overlay_grid.png"
+		save_grid_figure(grid_output, query_image, grid_rows)
+		print(f"Saved grid figure to {grid_output}")
 
 
 if __name__ == "__main__":
-    main()
+	main()
