@@ -119,7 +119,7 @@ def load_image_list(image_list_file, data_dir):
                     )
                     continue
 
-                image_name = line[0] + ".jpg"
+                image_name = line[0]
 
                 try:
                     # Determine label based on columns
