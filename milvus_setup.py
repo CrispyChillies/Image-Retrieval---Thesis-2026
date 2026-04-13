@@ -20,7 +20,7 @@ MODEL_CONFIGS = {
     "densenet121": {
         "embedding_dim": 1024,
         "collection_names": {
-            "default": "isic_image_retrieval_densenet121",
+            "default": "image_retrieval_densenet121",
             "isic": "isic_image_retrieval_densenet121",
             "covid": "covid_image_retrieval_densenet121",
         },
