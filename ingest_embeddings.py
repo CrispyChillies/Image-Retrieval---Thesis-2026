@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
 from model import DenseNet121, ResNet50, ConvNeXtV2, MedSigLIP
-from milvus_setup import MilvusManager, MODEL_CONFIGS
+from milvus.milvus_setup import MilvusManager, MODEL_CONFIGS
 from transformers import AutoProcessor
 from tqdm import tqdm
 import argparse
