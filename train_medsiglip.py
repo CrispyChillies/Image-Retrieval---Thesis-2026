@@ -4,12 +4,19 @@ import random
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import Compose, InterpolationMode, Normalize, Resize, ToTensor
 from transformers import AutoModel, AutoProcessor, Trainer, TrainingArguments
 
 from read_data import ChestXrayDataSet
 
+
+COVIDX_LABEL_TO_NAME = {
+    0: "normal",
+    1: "pneumonia",
+    2: "COVID-19",
+}
 
 COVIDX_LABEL_TO_TEXT = {
     0: "A chest X-ray showing no evidence of pneumonia or COVID-19 infection.",
@@ -18,8 +25,25 @@ COVIDX_LABEL_TO_TEXT = {
 }
 
 
+def retrieval_accuracy(output, target, topk=(1,)):
+    with torch.no_grad():
+        maxk = max(topk)
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.cpu()
+        target = target.cpu()
+        pred = target[pred].t()
+        correct = pred.eq(target[None])
+
+        res = []
+        batch_size = target.size(0)
+        for k in topk:
+            correct_k = correct[:k].any(dim=0).sum(dtype=torch.float32)
+            res.append(correct_k * (100.0 / batch_size))
+    return res
+
+
 class MedSigLIPCOVIDXDataset(Dataset):
-    """Wrap ChestXrayDataSet to expose paired image-text examples for contrastive training."""
+    """Wrap ChestXrayDataSet to expose paired image-text examples for retrieval fine-tuning."""
 
     def __init__(self, base_dataset, processor, max_text_length=64):
         self.base_dataset = base_dataset
@@ -45,13 +69,16 @@ class MedSigLIPCOVIDXDataset(Dataset):
 
     def __getitem__(self, index):
         image_path = self.base_dataset.image_names[index]
-        label = int(self.base_dataset.labels[index])
+        class_label = int(self.base_dataset.labels[index])
 
         image = self.base_dataset[index][0]
         if not torch.is_tensor(image):
             image = self.image_transform(image.convert("RGB"))
 
-        text = COVIDX_LABEL_TO_TEXT[label]
+        # The text paired with each image defines the positive image-text pair.
+        # MedSigLIP then uses all other pairs in the batch as in-batch negatives,
+        # which is the correct retrieval objective for this setup.
+        text = COVIDX_LABEL_TO_TEXT[class_label]
         text_inputs = self.processor.tokenizer(
             text,
             max_length=self.max_text_length,
@@ -64,25 +91,71 @@ class MedSigLIPCOVIDXDataset(Dataset):
             "pixel_values": image,
             "input_ids": torch.tensor(text_inputs["input_ids"], dtype=torch.long),
             "attention_mask": torch.tensor(text_inputs["attention_mask"], dtype=torch.long),
-            "labels": torch.tensor(label, dtype=torch.long),
+            "class_labels": torch.tensor(class_label, dtype=torch.long),
             "text": text,
             "image_path": image_path,
         }
 
 
 def collate_fn(examples):
-    pixel_values = torch.stack([example["pixel_values"] for example in examples])
-    input_ids = torch.stack([example["input_ids"] for example in examples])
-    attention_mask = torch.stack([example["attention_mask"] for example in examples])
-    labels = torch.stack([example["labels"] for example in examples])
-
     return {
-        "pixel_values": pixel_values,
-        "input_ids": input_ids,
-        "attention_mask": attention_mask,
-        "labels": labels,
+        "pixel_values": torch.stack([example["pixel_values"] for example in examples]),
+        "input_ids": torch.stack([example["input_ids"] for example in examples]),
+        "attention_mask": torch.stack([example["attention_mask"] for example in examples]),
+        "class_labels": torch.stack([example["class_labels"] for example in examples]),
         "return_loss": True,
     }
+
+
+class RetrievalTrainer(Trainer):
+    """Trainer that keeps MedSigLIP contrastive training but evaluates with retrieval metrics."""
+
+    @torch.no_grad()
+    def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval"):
+        metrics = super().evaluate(eval_dataset=eval_dataset, ignore_keys=ignore_keys, metric_key_prefix=metric_key_prefix)
+
+        dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
+        if dataset is None:
+            return metrics
+
+        eval_loader = DataLoader(
+            dataset,
+            batch_size=self.args.per_device_eval_batch_size,
+            shuffle=False,
+            num_workers=self.args.dataloader_num_workers,
+            collate_fn=collate_fn,
+        )
+
+        model = self.model
+        model.eval()
+        device = self.args.device
+
+        embeds = []
+        labels = []
+        for batch in eval_loader:
+            pixel_values = batch["pixel_values"].to(device)
+            if hasattr(model, "get_image_features"):
+                image_features = model.get_image_features(pixel_values=pixel_values)
+            else:
+                outputs = model(pixel_values=pixel_values)
+                image_features = outputs.image_embeds
+
+            embeds.append(F.normalize(image_features, dim=-1).cpu())
+            labels.append(batch["class_labels"].cpu())
+
+        embeds = torch.cat(embeds, dim=0)
+        labels = torch.cat(labels, dim=0)
+
+        dists = embeds @ embeds.t()
+        dists.fill_diagonal_(float("-inf"))
+
+        r1, r5, r10 = retrieval_accuracy(dists, labels, topk=(1, 5, 10))
+        metrics[f"{metric_key_prefix}_r1"] = r1.item()
+        metrics[f"{metric_key_prefix}_r5"] = r5.item()
+        metrics[f"{metric_key_prefix}_r10"] = r10.item()
+
+        self.log(metrics)
+        return metrics
 
 
 def build_datasets(args, processor):
@@ -100,17 +173,24 @@ def build_datasets(args, processor):
         transform=None,
     )
 
-    train_dataset = MedSigLIPCOVIDXDataset(
-        train_base,
-        processor=processor,
-        max_text_length=args.max_text_length,
-    )
-    eval_dataset = MedSigLIPCOVIDXDataset(
-        eval_base,
-        processor=processor,
-        max_text_length=args.max_text_length,
-    )
+    train_dataset = MedSigLIPCOVIDXDataset(train_base, processor=processor, max_text_length=args.max_text_length)
+    eval_dataset = MedSigLIPCOVIDXDataset(eval_base, processor=processor, max_text_length=args.max_text_length)
     return train_dataset, eval_dataset
+
+
+def maybe_freeze_model(model, freeze_vision, freeze_text):
+    if freeze_vision and hasattr(model, "vision_model"):
+        for param in model.vision_model.parameters():
+            param.requires_grad = False
+
+    if freeze_text and hasattr(model, "text_model"):
+        for param in model.text_model.parameters():
+            param.requires_grad = False
+
+
+def maybe_enable_gradient_checkpointing(model):
+    if hasattr(model, "gradient_checkpointing_enable"):
+        model.gradient_checkpointing_enable()
 
 
 def build_trainer(args, model, processor, train_dataset, eval_dataset):
@@ -118,7 +198,7 @@ def build_trainer(args, model, processor, train_dataset, eval_dataset):
         output_dir=args.output_dir,
         remove_unused_columns=False,
         do_train=True,
-        do_eval=True,
+        do_eval=(args.eval_strategy != "no"),
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.train_batch_size,
         per_device_eval_batch_size=args.eval_batch_size,
@@ -138,12 +218,12 @@ def build_trainer(args, model, processor, train_dataset, eval_dataset):
         dataloader_num_workers=args.workers,
         report_to=args.report_to,
         load_best_model_at_end=args.load_best_model_at_end,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
+        metric_for_best_model="eval_r1",
+        greater_is_better=True,
         seed=args.seed,
     )
 
-    return Trainer(
+    return RetrievalTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
@@ -154,7 +234,7 @@ def build_trainer(args, model, processor, train_dataset, eval_dataset):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Fine-tune MedSigLIP on COVIDx CXR with paired text prompts")
+    parser = argparse.ArgumentParser(description="Fine-tune MedSigLIP on COVIDx CXR for retrieval")
     parser.add_argument("--model-name", default="google/medsiglip-448", help="Hugging Face model id")
     parser.add_argument("--dataset-dir", required=True, help="Root COVIDx dataset directory")
     parser.add_argument("--train-image-list", default="./train_split.txt", help="Training split file")
@@ -163,8 +243,8 @@ def parse_args():
     parser.add_argument("--anomaly", action="store_true", help="Exclude COVID-19 from training")
     parser.add_argument("--output-dir", default="./medsiglip-covidx-ft", help="Where checkpoints will be saved")
     parser.add_argument("--epochs", default=2, type=int, help="Number of training epochs")
-    parser.add_argument("--train-batch-size", default=8, type=int, help="Per-device train batch size")
-    parser.add_argument("--eval-batch-size", default=8, type=int, help="Per-device eval batch size")
+    parser.add_argument("--train-batch-size", default=4, type=int, help="Per-device train batch size")
+    parser.add_argument("--eval-batch-size", default=4, type=int, help="Per-device eval batch size")
     parser.add_argument("--gradient-accumulation-steps", default=8, type=int, help="Gradient accumulation steps")
     parser.add_argument("--lr", default=1e-5, type=float, help="Learning rate")
     parser.add_argument("--weight-decay", default=0.01, type=float, help="Weight decay")
@@ -184,6 +264,9 @@ def parse_args():
     parser.add_argument("--report-to", default="tensorboard", help="Trainer reporting backend")
     parser.add_argument("--seed", default=42, type=int, help="Random seed")
     parser.add_argument("--push-to-hub", action="store_true", help="Push final model to Hugging Face Hub")
+    parser.add_argument("--gradient-checkpointing", action="store_true", help="Enable gradient checkpointing")
+    parser.add_argument("--freeze-vision", action="store_true", help="Freeze the vision tower")
+    parser.add_argument("--freeze-text", action="store_true", help="Freeze the text tower")
     return parser.parse_args()
 
 
@@ -199,12 +282,25 @@ def main():
     processor = AutoProcessor.from_pretrained(args.model_name, trust_remote_code=True)
     model = AutoModel.from_pretrained(args.model_name, trust_remote_code=True)
 
+    if args.gradient_checkpointing:
+        maybe_enable_gradient_checkpointing(model)
+    maybe_freeze_model(model, freeze_vision=args.freeze_vision, freeze_text=args.freeze_text)
+
     train_dataset, eval_dataset = build_datasets(args, processor)
     trainer = build_trainer(args, model, processor, train_dataset, eval_dataset)
 
     trainer.train()
     trainer.save_model(args.output_dir)
     processor.save_pretrained(args.output_dir)
+
+    if args.eval_strategy != "no":
+        metrics = trainer.evaluate()
+        print(
+            f"Final retrieval metrics: "
+            f"R@1={metrics.get('eval_r1', 0.0):.2f}, "
+            f"R@5={metrics.get('eval_r5', 0.0):.2f}, "
+            f"R@10={metrics.get('eval_r10', 0.0):.2f}"
+        )
 
     if args.push_to_hub:
         trainer.push_to_hub()
