@@ -8,7 +8,9 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
-from model import DenseNet121, ResNet50, ConvNeXtV2, MedSigLIP
+import timm
+from timm.data import resolve_model_data_config
+from model import DenseNet121, ResNet50, ConvNeXtV2, DinoV2, MedSigLIP
 from milvus.milvus_setup import MilvusManager, MODEL_CONFIGS
 from transformers import AutoProcessor
 from tqdm import tqdm
@@ -24,7 +26,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def get_model_and_transform(model_type, model_weights, embedding_dim, device):
+def get_model_and_transform(
+    model_type, model_weights, embedding_dim, device, dinov2_model_name
+):
     """Load model and get appropriate transform"""
 
     # Load model
@@ -37,6 +41,11 @@ def get_model_and_transform(model_type, model_weights, embedding_dim, device):
     elif model_type == "convnextv2":
         model = ConvNeXtV2(embedding_dim=embedding_dim)
         img_size = 384
+    elif model_type == "dinov2":
+        model = DinoV2(
+            model_name=dinov2_model_name,
+            embedding_dim=embedding_dim,
+        )
     elif model_type == "medsiglip":
         embed_dim = embedding_dim if embedding_dim is not None else 512
         model = MedSigLIP(embed_dim=embed_dim)
@@ -64,25 +73,44 @@ def get_model_and_transform(model_type, model_weights, embedding_dim, device):
     model.eval()
     model.to(device)
 
-    # Setup transform
-    normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-
-    # For ConvNeXt, resize to slightly larger and then center crop
-    # For other models, use standard 256->224 crop
-    if img_size == 384:
-        resize_size = 432  # ~1.125x the target size
+    if model_type == "dinov2":
+        temp_model = timm.create_model(
+            dinov2_model_name,
+            pretrained=False,
+            num_classes=0,
+        )
+        data_config = resolve_model_data_config(temp_model)
+        img_size = data_config["input_size"][-1]
+        normalize = transforms.Normalize(data_config["mean"], data_config["std"])
+        transform = transforms.Compose(
+            [
+                transforms.Lambda(lambda img: img.convert("RGB")),
+                transforms.Resize(img_size),
+                transforms.CenterCrop(img_size),
+                transforms.ToTensor(),
+                normalize,
+            ]
+        )
     else:
-        resize_size = 256
+        # Setup transform
+        normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
-    transform = transforms.Compose(
-        [
-            transforms.Lambda(lambda img: img.convert("RGB")),
-            transforms.Resize(resize_size),
-            transforms.CenterCrop(img_size),
-            transforms.ToTensor(),
-            normalize,
-        ]
-    )
+        # For ConvNeXt, resize to slightly larger and then center crop
+        # For other models, use standard 256->224 crop
+        if img_size == 384:
+            resize_size = 432  # ~1.125x the target size
+        else:
+            resize_size = 256
+
+        transform = transforms.Compose(
+            [
+                transforms.Lambda(lambda img: img.convert("RGB")),
+                transforms.Resize(resize_size),
+                transforms.CenterCrop(img_size),
+                transforms.ToTensor(),
+                normalize,
+            ]
+        )
 
     return model, transform
 
@@ -286,7 +314,7 @@ def main():
         "--model_type",
         type=str,
         required=True,
-        choices=["densenet121", "resnet50", "convnextv2", "medsiglip"],
+        choices=["densenet121", "resnet50", "convnextv2", "dinov2", "medsiglip"],
         help="Model type to use",
     )
     parser.add_argument(
@@ -306,6 +334,12 @@ def main():
         type=int,
         default=None,
         help="Custom embedding dimension if using projection",
+    )
+    parser.add_argument(
+        "--dinov2-model-name",
+        type=str,
+        default="vit_base_patch14_dinov2.lvd142m",
+        help="timm model name for DINOv2 ingestion",
     )
     parser.add_argument(
         "--batch_size",
@@ -381,7 +415,11 @@ def main():
         print(f"Model: {args.model_type}")
         print(f"Weights: {args.model_weights}")
         model, transform = get_model_and_transform(
-            args.model_type, args.model_weights, args.embedding_dim, device
+            args.model_type,
+            args.model_weights,
+            args.embedding_dim,
+            device,
+            args.dinov2_model_name,
         )
         print("✅ Model loaded")
 

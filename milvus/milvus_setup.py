@@ -1,6 +1,6 @@
 """
 Milvus/Zilliz Setup and Management for Multiple Models and Datasets.
-Supports: DenseNet121 (1024-d), ResNet50 (2048-d), ConvNeXtV2 (1024-d)
+Supports: DenseNet121, ResNet50, ConvNeXtV2, DINOv2, and MedSigLIP.
 """
 
 from pymilvus import (
@@ -43,6 +43,15 @@ MODEL_CONFIGS = {
             "covid": "covid_image_retrieval_convnextv2",
         },
         "description": "ConvNeXtV2 image embeddings",
+    },
+    "dinov2": {
+        "embedding_dim": 768,
+        "collection_names": {
+            "default": "image_retrieval_dinov2",
+            "isic": "isic_image_retrieval_dinov2",
+            "covid": "covid_image_retrieval_dinov2",
+        },
+        "description": "DINOv2 image embeddings",
     },
     "medsiglip": {
         "embedding_dim": 512,
@@ -128,7 +137,7 @@ class MilvusManager:
         Create collection for a specific model
 
         Args:
-            model_type: 'densenet121', 'resnet50', 'convnextv2', or 'medsiglip'
+            model_type: 'densenet121', 'resnet50', 'convnextv2', 'dinov2', or 'medsiglip'
             drop_old: Whether to drop existing collection
         """
         config = self.get_model_config(model_type)
@@ -177,7 +186,7 @@ class MilvusManager:
         Create index for collection
 
         Args:
-            model_type: 'densenet121', 'resnet50', or 'convnextv2'
+            model_type: 'densenet121', 'resnet50', 'convnextv2', 'dinov2', or 'medsiglip'
             index_type: 'IVF_FLAT', 'IVF_SQ8', 'IVF_PQ', 'HNSW', 'FLAT'
             metric_type: 'COSINE', 'L2', or 'IP'
             nlist: Number of cluster units (for IVF indices)
@@ -274,7 +283,7 @@ def main():
         "--model",
         type=str,
         default="all",
-        choices=["all", "densenet121", "resnet50", "convnextv2", "medsiglip"],
+        choices=["all", "densenet121", "resnet50", "convnextv2", "dinov2", "medsiglip"],
         help="Which model collection to setup",
     )
     parser.add_argument(
