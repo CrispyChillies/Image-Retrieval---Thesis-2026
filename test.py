@@ -5,21 +5,9 @@ from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_sc
 
 import torch
 from torch.utils.data import DataLoader
-try:
-    import timm
-    from timm.data import resolve_model_data_config, create_transform
-    TIMM_AVAILABLE = True
-except ImportError:
-    timm = None
-    resolve_model_data_config = None
-    create_transform = None
-    TIMM_AVAILABLE = False
-    print("Warning: timm library not available. DINOv2 will not be available.")
-
-
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
-from model import ResNet50, DenseNet121, ConvNeXtV2, ConvNeXtV2_SRA, SwinV2, MedSigLIP
+from model import ResNet50, DenseNet121, ConvNeXtV2, ConvNeXtV2_SRA, SwinV2, DinoV2, MedSigLIP
 
 def conceptclip_collate_fn(batch):
     """Custom collate function for ConceptCLIP that keeps PIL images as-is."""
@@ -351,85 +339,6 @@ def evaluate_biomedclip_zeroshot(model, tokenizer, preprocess, loader, device, a
             acc=accuracy,
             mAP=mAP,
             pr=pr,
-            classification_k_values=classification_k_values,
-            **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()}
-        )
-        print(f'\n>> Results saved to {save_path}.npz')
-
-
-@torch.no_grad()
-def evaluate_dinov2_zeroshot(model, transform, loader, device, args):
-    """Zero-shot evaluation with DINOv2 as a frozen retrieval backbone."""
-    model.eval()
-
-    print("\n=== DINOv2 Zero-Shot Retrieval Evaluation ===")
-    print(f"Dataset: {args.dataset}")
-    print(f"Backbone: {args.dinov2_model_name}")
-
-    embeds = []
-    labels = []
-
-    for batch_idx, data in enumerate(loader):
-        images = data[0]
-        _labels = data[1].to(device)
-
-        image_tensor = torch.stack([transform(img) for img in images]).to(device)
-        out = model(image_tensor)
-        if isinstance(out, (tuple, list)):
-            out = out[0]
-
-        out = out / out.norm(dim=-1, keepdim=True)
-        embeds.append(out)
-        labels.append(_labels)
-
-        if (batch_idx + 1) % 10 == 0:
-            print(f"Processed {(batch_idx + 1) * args.eval_batch_size} images...")
-
-    embeds = torch.cat(embeds, dim=0)
-    labels = torch.cat(labels, dim=0)
-
-    dists = embeds @ embeds.t()
-    dists.fill_diagonal_(float('-inf'))
-
-    kappas = [1, 5, 10]
-    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
-    accuracy = torch.stack(accuracy).cpu().numpy()
-    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
-
-    ranks = torch.argsort(dists, dim=0, descending=True)
-    mAP, _, pr, _ = compute_map(ranks.cpu().numpy(), labels.cpu().numpy(), kappas)
-    print('>> mAP: {:.2f}%'.format(mAP * 100.0))
-    print('>> mP@K{}: {}%'.format(kappas, np.around(pr * 100.0, 2)))
-
-    print('\n>> Classification Metrics (Majority Voting):')
-    k_values = [1, 5, 10, 15, 20]
-    classification_results = compute_classification_metrics(labels, dists, k_values)
-
-    for k in k_values:
-        metrics = classification_results[k]
-        print(f'\n>> Top-{k} Retrieved Images:')
-        print(f'   Accuracy: {metrics["accuracy"]:.2f}%')
-        print(f'   Precision (macro): {metrics["precision_macro"]:.2f}%')
-        print(f'   Recall (macro): {metrics["recall_macro"]:.2f}%')
-        print(f'   F1 (macro): {metrics["f1_macro"]:.2f}%')
-
-    if args.save_dir:
-        os.makedirs(args.save_dir, exist_ok=True)
-        save_path = os.path.join(args.save_dir, 'dinov2_zeroshot')
-
-        classification_k_values = list(classification_results.keys())
-        classification_metrics = {k: v for k, v in classification_results.items()}
-
-        np.savez(
-            save_path,
-            embeds=embeds.cpu().numpy(),
-            labels=labels.cpu().numpy(),
-            dists=-dists.cpu().numpy(),
-            kappas=kappas,
-            acc=accuracy,
-            mAP=mAP,
-            pr=pr,
-            dinov2_model_name=args.dinov2_model_name,
             classification_k_values=classification_k_values,
             **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()}
         )
@@ -1220,9 +1129,7 @@ def main(args):
     use_two_model_rerank = False
     is_conceptclip = False
     is_biomedclip = False
-    is_dinov2 = False
     is_conceptclip_img = False
-    dinov2_transform = None
     model = None
     processor = None
     tokenizer = None
@@ -1264,6 +1171,13 @@ def main(args):
             is_conceptclip_img = False
         elif args.model == 'swinv2':
             img_model = SwinV2(embedding_dim=args.embedding_dim)
+            is_conceptclip_img = False
+        elif args.model == 'dinov2':
+            img_model = DinoV2(
+                model_name=args.dinov2_model_name,
+                embedding_dim=args.embedding_dim,
+                unfreeze_blocks=args.unfreeze_blocks,
+            )
             is_conceptclip_img = False
         elif args.model == 'medsiglip':
             img_model = MedSigLIP() 
@@ -1323,15 +1237,12 @@ def main(args):
             model.eval()
             is_biomedclip = True
         elif args.model == 'dinov2':
-            if not TIMM_AVAILABLE:
-                raise ImportError('timm is required for DINOv2. Install it with: pip install timm')
-            print(f"Loading DINOv2 model: {args.dinov2_model_name}...")
-            model = timm.create_model(args.dinov2_model_name, pretrained=True, num_classes=0)
-            data_config = resolve_model_data_config(model)
-            dinov2_transform = create_transform(**data_config, is_training=False)
-            model.to(device)
-            model.eval()
-            is_dinov2 = True
+            model = DinoV2(
+                model_name=args.dinov2_model_name,
+                embedding_dim=args.embedding_dim,
+                unfreeze_blocks=args.unfreeze_blocks,
+            )
+            is_conceptclip = False
         elif args.model == 'densenet121':
             model = DenseNet121(embedding_dim=args.embedding_dim)
             is_conceptclip = False
@@ -1354,7 +1265,7 @@ def main(args):
             raise NotImplementedError('Model not supported!')
 
     if not use_two_model_rerank:
-        if not is_conceptclip and not is_biomedclip and not is_dinov2:
+        if not is_conceptclip and not is_biomedclip:
             if os.path.isfile(args.resume):
                 print("=> loading checkpoint")
                 checkpoint = torch.load(args.resume)
@@ -1369,27 +1280,25 @@ def main(args):
             print("=> Using pre-trained ConceptCLIP (zero-shot), no checkpoint needed")
         elif is_biomedclip:
             print("=> Using pre-trained BiomedCLIP (zero-shot), no checkpoint needed")
-        elif is_dinov2:
-            print("=> Using pre-trained DINOv2 (zero-shot), no checkpoint needed")
 
     normalize = transforms.Normalize([0.485, 0.456, 0.406],
                                      [0.229, 0.224, 0.225])
     
     # ConceptCLIP uses PIL images directly (processor handles preprocessing)
-    if (is_conceptclip and not use_two_model_rerank) or (use_two_model_rerank and is_conceptclip_img) or is_biomedclip or is_dinov2:
+    if (is_conceptclip and not use_two_model_rerank) or (use_two_model_rerank and is_conceptclip_img) or is_biomedclip:
         test_transform = transforms.Compose([
             transforms.Lambda(lambda img: img.convert('RGB'))
         ])
     else:
-        # Use 384x384 for ConvNeXtV2 and SwinV2, 448x448 for MedSigLIP, 224x224 for other models
+        # Use 384x384 for ConvNeXtV2, SwinV2 and DINOv2, 448x448 for MedSigLIP, 224x224 for other models
         if args.model == 'medsiglip':
             img_size = 448
-        elif args.model in ['convnextv2', 'convnextv2_sra', 'swinv2']:
+        elif args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'dinov2']:
             img_size = 384
         else:
             img_size = 224
 
-        if args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'medsiglip']:
+        if args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'dinov2', 'medsiglip']:
             test_transform = transforms.Compose([
                 transforms.Lambda(lambda img: img.convert('RGB')),
                 transforms.Resize((img_size, img_size)),
@@ -1422,7 +1331,7 @@ def main(args):
         raise NotImplementedError('Dataset not supported!')
 
     # Use custom collate function for ConceptCLIP to handle PIL images
-    use_conceptclip_collate = (is_conceptclip and not use_two_model_rerank) or (use_two_model_rerank and is_conceptclip_img) or is_biomedclip or is_dinov2
+    use_conceptclip_collate = (is_conceptclip and not use_two_model_rerank) or (use_two_model_rerank and is_conceptclip_img) or is_biomedclip
     effective_workers = args.workers
     if use_conceptclip_collate and args.workers > 0 and not args.allow_pil_multiprocess:
         print("=> PIL-based loading detected. For stability in constrained environments, using num_workers=0.")
@@ -1528,8 +1437,6 @@ def main(args):
             evaluate_conceptclip(model, processor, test_loader, device, args)
     elif is_biomedclip:
         evaluate_biomedclip_zeroshot(model, tokenizer, preprocess, test_loader, device, args)
-    elif is_dinov2:
-        evaluate_dinov2_zeroshot(model, dinov2_transform, test_loader, device, args)
     else:
         evaluate(model, test_loader, device, args)
 
@@ -1550,6 +1457,10 @@ def parse_args():
                         help='Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, swinv2, medsiglip, conceptclip, biomedclip, or dinov2)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
+    parser.add_argument('--dinov2-model-name', default='vit_base_patch14_dinov2.lvd142m', type=str,
+                        help='timm model name for DINOv2 backbone')
+    parser.add_argument('--unfreeze-blocks', default=3, type=int,
+                        help='Number of final DINOv2 transformer blocks kept trainable when loading the model')
     parser.add_argument('--sra-num-heads', default=8, type=int,
                         help='Number of attention heads for SRA (ConvNeXtV2_SRA)')
     parser.add_argument('--sra-lam', default=0.1, type=float,
@@ -1580,8 +1491,6 @@ def parse_args():
                         help='BiomedCLIP model identifier for open_clip')
     parser.add_argument('--biomedclip-prompt-template', default='this is a medical image of {label}', type=str,
                         help='Prompt template for BiomedCLIP zero-shot classification. Must contain {label}.')
-    parser.add_argument('--dinov2-model-name', default='vit_base_patch14_dinov2.lvd142m', type=str,
-                        help='timm model name for DINOv2 backbone')
     parser.add_argument('--eval-batch-size', default=64, type=int)
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                         help='Number of data loading workers')
