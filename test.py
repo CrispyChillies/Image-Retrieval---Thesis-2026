@@ -6,6 +6,8 @@ from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_sc
 import torch
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
+import timm
+from timm.data import resolve_model_data_config
 from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
 from model import ResNet50, DenseNet121, ConvNeXtV2, ConvNeXtV2_SRA, SwinV2, DinoV2, MedSigLIP
 
@@ -1281,36 +1283,52 @@ def main(args):
         elif is_biomedclip:
             print("=> Using pre-trained BiomedCLIP (zero-shot), no checkpoint needed")
 
-    normalize = transforms.Normalize([0.485, 0.456, 0.406],
-                                     [0.229, 0.224, 0.225])
-    
     # ConceptCLIP uses PIL images directly (processor handles preprocessing)
     if (is_conceptclip and not use_two_model_rerank) or (use_two_model_rerank and is_conceptclip_img) or is_biomedclip:
         test_transform = transforms.Compose([
             transforms.Lambda(lambda img: img.convert('RGB'))
         ])
     else:
-        # Use 384x384 for ConvNeXtV2, SwinV2 and DINOv2, 448x448 for MedSigLIP, 224x224 for other models
-        if args.model == 'medsiglip':
-            img_size = 448
-        elif args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'dinov2']:
-            img_size = 384
-        else:
-            img_size = 224
-
-        if args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'dinov2', 'medsiglip']:
+        if args.model == 'dinov2':
+            temp_model = timm.create_model(
+                args.dinov2_model_name,
+                pretrained=False,
+                num_classes=0,
+            )
+            data_config = resolve_model_data_config(temp_model)
+            img_size = data_config['input_size'][-1]
+            normalize = transforms.Normalize(data_config['mean'], data_config['std'])
             test_transform = transforms.Compose([
                 transforms.Lambda(lambda img: img.convert('RGB')),
                 transforms.Resize((img_size, img_size)),
                 transforms.ToTensor(),
-                normalize
+                normalize,
             ])
         else:
-            test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
-                                             transforms.Resize(256),
-                                             transforms.CenterCrop(224),
-                                             transforms.ToTensor(),
-                                             normalize])
+            normalize = transforms.Normalize([0.485, 0.456, 0.406],
+                                             [0.229, 0.224, 0.225])
+
+            # Use 384x384 for ConvNeXtV2 and SwinV2, 448x448 for MedSigLIP, 224x224 for other models
+            if args.model == 'medsiglip':
+                img_size = 448
+            elif args.model in ['convnextv2', 'convnextv2_sra', 'swinv2']:
+                img_size = 384
+            else:
+                img_size = 224
+
+            if args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'medsiglip']:
+                test_transform = transforms.Compose([
+                    transforms.Lambda(lambda img: img.convert('RGB')),
+                    transforms.Resize((img_size, img_size)),
+                    transforms.ToTensor(),
+                    normalize
+                ])
+            else:
+                test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
+                                                 transforms.Resize(256),
+                                                 transforms.CenterCrop(224),
+                                                 transforms.ToTensor(),
+                                                 normalize])
 
     # Set up dataset and dataloader
     if args.dataset == 'covid':
