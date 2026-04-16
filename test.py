@@ -1300,7 +1300,8 @@ def main(args):
             normalize = transforms.Normalize(data_config['mean'], data_config['std'])
             test_transform = transforms.Compose([
                 transforms.Lambda(lambda img: img.convert('RGB')),
-                transforms.Resize((img_size, img_size)),
+                transforms.Resize(img_size),
+                transforms.CenterCrop(img_size),
                 transforms.ToTensor(),
                 normalize,
             ])
