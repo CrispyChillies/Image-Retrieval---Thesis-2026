@@ -531,6 +531,9 @@ def main(args):
     else:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+    if args.val_dataset_dir is None:
+        args.val_dataset_dir = args.dataset_dir
+
     # Set random seed for reproducibility
     random.seed(args.seed + rank)
     torch.manual_seed(args.seed + rank)
@@ -759,7 +762,7 @@ def main(args):
         ]
     )
 
-    test_transform = transforms.Compose(
+    val_transform = transforms.Compose(
         [
             transforms.Lambda(lambda image: image.convert("RGB")),
             transforms.Resize(resize_size),
@@ -778,11 +781,11 @@ def main(args):
             mask_dir=os.path.join(args.mask_dir, "train") if args.mask_dir else None,
             transform=train_transform,
         )
-        test_dataset = ChestXrayDataSet(
-            data_dir=os.path.join(args.dataset_dir, "test"),
-            image_list_file=args.test_image_list,
-            mask_dir=os.path.join(args.mask_dir, "test") if args.mask_dir else None,
-            transform=test_transform,
+        val_dataset = ChestXrayDataSet(
+            data_dir=os.path.join(args.val_dataset_dir, "train"),
+            image_list_file=args.val_image_list,
+            mask_dir=os.path.join(args.mask_dir, "train") if args.mask_dir else None,
+            transform=val_transform,
         )
     elif args.dataset == "isic":
         train_dataset = ISICDataSet(
@@ -792,11 +795,11 @@ def main(args):
             mask_dir=os.path.join(args.mask_dir, "train") if args.mask_dir else None,
             transform=train_transform,
         )
-        test_dataset = ISICDataSet(
-            data_dir=os.path.join(args.dataset_dir, "ISIC-2017_Test_v2_Data"),
-            image_list_file=args.test_image_list,
-            mask_dir=os.path.join(args.mask_dir, "test") if args.mask_dir else None,
-            transform=test_transform,
+        val_dataset = ISICDataSet(
+            data_dir=os.path.join(args.val_dataset_dir, "ISIC-2017_Training_Data"),
+            image_list_file=args.val_image_list,
+            mask_dir=os.path.join(args.mask_dir, "train") if args.mask_dir else None,
+            transform=val_transform,
         )
     elif args.dataset == "tbx11k":
         train_dataset = TBX11kDataSet(
@@ -804,10 +807,10 @@ def main(args):
             csv_file=args.train_image_list,
             transform=train_transform,
         )
-        test_dataset = TBX11kDataSet(
-            data_dir=os.path.join(args.dataset_dir, "test"),
-            csv_file=args.test_image_list,
-            transform=test_transform,
+        val_dataset = TBX11kDataSet(
+            data_dir=os.path.join(args.val_dataset_dir, "train"),
+            csv_file=args.val_image_list,
+            transform=val_transform,
         )
     elif args.dataset == "vindr":
         if args.model == "conceptclip":
@@ -817,9 +820,9 @@ def main(args):
                 csv_file=args.train_image_list,
                 return_pil=True,
             )
-            test_dataset = VINDRConceptCLIPDataSet(
-                data_dir=os.path.join(args.dataset_dir, "test/test"),
-                csv_file=args.test_image_list,
+            val_dataset = VINDRConceptCLIPDataSet(
+                data_dir=os.path.join(args.val_dataset_dir, "train/train"),
+                csv_file=args.val_image_list,
                 return_pil=True,
             )
         else:
@@ -828,10 +831,10 @@ def main(args):
                 csv_file=args.train_image_list,
                 transform=train_transform,
             )
-            test_dataset = VINDRDataSet(
-                data_dir=os.path.join(args.dataset_dir, "test/test"),
-                csv_file=args.test_image_list,
-                transform=test_transform,
+            val_dataset = VINDRDataSet(
+                data_dir=os.path.join(args.val_dataset_dir, "train/train"),
+                csv_file=args.val_image_list,
+                transform=val_transform,
             )
     else:
         raise NotImplementedError("Dataset not supported!")
@@ -861,8 +864,8 @@ def main(args):
             shuffle=True,
             drop_last=True,
         )
-        test_sampler = DistributedSampler(
-            test_dataset, num_replicas=world_size, rank=rank, shuffle=False
+        val_sampler = DistributedSampler(
+            val_dataset, num_replicas=world_size, rank=rank, shuffle=False
         )
         train_loader = DataLoader(
             train_dataset,
@@ -874,10 +877,10 @@ def main(args):
             persistent_workers=True if args.workers > 0 else False,
             collate_fn=collate_fn,
         )
-        test_loader = DataLoader(
-            test_dataset,
+        val_loader = DataLoader(
+            val_dataset,
             batch_size=args.eval_batch_size,
-            sampler=test_sampler,
+            sampler=val_sampler,
             num_workers=args.workers,
             pin_memory=True if not use_conceptclip_collate else False,
             prefetch_factor=2 if args.workers > 0 else None,
@@ -899,8 +902,8 @@ def main(args):
             num_workers=args.workers,
             collate_fn=collate_fn,
         )
-        test_loader = DataLoader(
-            test_dataset,
+        val_loader = DataLoader(
+            val_dataset,
             batch_size=args.eval_batch_size,
             shuffle=False,
             num_workers=args.workers,
@@ -962,16 +965,16 @@ def main(args):
 
             if rank == 0:
                 print(f'\n{"="*60}')
-                print(f"Evaluating epoch {epoch}...")
+                print(f"Validating epoch {epoch}...")
                 print(f'{"="*60}')
 
             if use_conceptclip_collate:
                 current_metric = evaluate_conceptclip(
-                    model, test_loader, device, rank=rank, world_size=world_size
+                    model, val_loader, device, rank=rank, world_size=world_size
                 )
             else:
                 current_metric = evaluate(
-                    model, test_loader, device, rank=rank, world_size=world_size
+                    model, val_loader, device, rank=rank, world_size=world_size
                 )
 
             # Save best model (only from rank 0)
@@ -1030,7 +1033,12 @@ def parse_args():
         "--train-image-list", default="./train_split.txt", help="Train image list"
     )
     parser.add_argument(
-        "--test-image-list", default="./test_COVIDx4.txt", help="Test image list"
+        "--val-image-list", default="./val.txt", help="Validation image list"
+    )
+    parser.add_argument(
+        "--val-dataset-dir",
+        default=None,
+        help="Validation dataset directory path. Defaults to --dataset-dir when omitted",
     )
     parser.add_argument(
         "--mask-dir", default=None, help="Segmentation masks path (if used)"
