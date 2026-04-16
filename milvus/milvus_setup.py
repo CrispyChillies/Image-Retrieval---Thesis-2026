@@ -45,7 +45,7 @@ MODEL_CONFIGS = {
         "description": "ConvNeXtV2 image embeddings",
     },
     "dinov2": {
-        "embedding_dim": 768,
+        "embedding_dim": 512,
         "collection_names": {
             "default": "image_retrieval_dinov2",
             "isic": "isic_image_retrieval_dinov2",
