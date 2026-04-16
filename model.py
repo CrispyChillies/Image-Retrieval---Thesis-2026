@@ -194,6 +194,55 @@ class SwinV2(nn.Module):
         x = F.normalize(x, dim=1)
         return x
 
+
+class DinoV2(nn.Module):
+    """DINOv2 retrieval backbone with partial fine-tuning of the last blocks."""
+
+    def __init__(
+        self,
+        model_name="vit_base_patch14_dinov2.lvd142m",
+        pretrained=True,
+        embedding_dim=None,
+        unfreeze_blocks=3,
+    ):
+        super(DinoV2, self).__init__()
+        self.backbone = timm.create_model(
+            model_name,
+            pretrained=pretrained,
+            num_classes=0,
+        )
+
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+
+        blocks = getattr(self.backbone, "blocks", None)
+        if blocks is None:
+            raise ValueError(
+                f"DINOv2 backbone '{model_name}' does not expose transformer blocks."
+            )
+
+        unfreeze_blocks = max(0, min(unfreeze_blocks, len(blocks)))
+        if unfreeze_blocks > 0:
+            for block in blocks[-unfreeze_blocks:]:
+                for param in block.parameters():
+                    param.requires_grad = True
+
+        if hasattr(self.backbone, "norm"):
+            for param in self.backbone.norm.parameters():
+                param.requires_grad = True
+
+        in_features = self.backbone.num_features
+        self.fc = nn.Linear(
+            in_features, embedding_dim) if embedding_dim else None
+
+    def forward(self, x):
+        x = self.backbone(x)
+        x = torch.flatten(x, 1)
+        if self.fc:
+            x = self.fc(x)
+        x = F.normalize(x, dim=1)
+        return x
+
 def _convert_sdpa_to_eager_attention(model):
     """
     Forcibly replace SDPA attention modules with eager attention.
