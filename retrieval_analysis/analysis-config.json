@@ -1,0 +1,33 @@
+{
+  "query_set_path": "retrieval_analysis/test_queries.txt",
+  "output_dir": "retrieval_analysis_output",
+  "top_k": 5,
+  "correctness_top_k": 1,
+  "skip_missing_queries": true,
+  "conv_search_params": {
+    "metric_type": "COSINE",
+    "params": {
+      "nprobe": 10
+    }
+  },
+  "dino_search_params": {
+    "metric_type": "COSINE",
+    "params": {
+      "nprobe": 10
+    }
+  },
+  "conv": {
+    "name": "convnextv2",
+    "uri": "https://in03-3aeb0fe497a5ec2.serverless.aws-eu-central-1.cloud.zilliz.com",
+    "token": "fd04e95024f15549f34465178ad131d6b646228f429eca8c469a4c218decc776ba584d111e86e1b40a006fad72f4b63822785d27",
+    "collection_name": "image_retrieval_convnextv2",
+    "vector_field": "embedding"
+  },
+  "dino": {
+    "name": "dinov2",
+    "uri": "https://in03-8f209943d959512.serverless.aws-eu-central-1.cloud.zilliz.com",
+    "token": "311672275357fc64ad2f2eebfa9f69c55886a2bb2e001d6966e3d4cbbb235120e0bf4347cb0299295549bb02ab8ef89f201a2053",
+    "collection_name": "image_retrieval_dinov2",
+    "vector_field": "embedding"
+  }
+}
