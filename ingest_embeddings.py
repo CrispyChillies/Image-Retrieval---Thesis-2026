@@ -277,6 +277,22 @@ def upload_images_to_s3(image_paths, args):
     return s3_paths
 
 
+def resolve_stored_image_paths(image_paths, args):
+    """Resolve which image paths should be stored in Milvus."""
+    if args.store_local_paths:
+        print("\nSkipping S3 upload. Storing local image paths in Milvus.")
+        return image_paths
+
+    print("\n" + "=" * 70)
+    print("UPLOADING IMAGES TO S3")
+    print("=" * 70)
+    stored_image_paths = upload_images_to_s3(image_paths, args)
+    print(f"Uploaded {len(stored_image_paths)} images to S3")
+    if stored_image_paths:
+        print(f"   Sample stored path: {stored_image_paths[0]}")
+    return stored_image_paths
+
+
 def ingest_embeddings(
     manager, model_type, embeddings, stored_image_paths, labels, batch_size=100
 ):
@@ -385,6 +401,11 @@ def main():
         default=None,
         help="S3 key prefix to use for uploaded images",
     )
+    parser.add_argument(
+        "--store-local-paths",
+        action="store_true",
+        help="Store local image paths in Milvus instead of uploading images to S3",
+    )
 
     args = parser.parse_args()
 
@@ -442,13 +463,7 @@ def main():
         print(f"✅ Computed {len(embeddings)} embeddings")
         print(f"   Embedding shape: {embeddings.shape}")
 
-        print("\n" + "=" * 70)
-        print("UPLOADING IMAGES TO S3")
-        print("=" * 70)
-        stored_image_paths = upload_images_to_s3(valid_paths, args)
-        print(f"Uploaded {len(stored_image_paths)} images to S3")
-        if stored_image_paths:
-            print(f"   Sample stored path: {stored_image_paths[0]}")
+        stored_image_paths = resolve_stored_image_paths(valid_paths, args)
 
         # Ingest into Milvus
         print("\n" + "=" * 70)
