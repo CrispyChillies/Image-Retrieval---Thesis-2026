@@ -78,7 +78,7 @@ def compute_map(ranks, gnd, kappas=None):
             nempty += 1
             continue
 
-        pos = np.arange(ranks.shape[0])[np.in1d(ranks[:, i], qgnd)]
+        pos = np.arange(ranks.shape[0])[np.isin(ranks[:, i], qgnd)]
         ap = compute_ap(pos, len(qgnd))
         mean_ap += ap
         aps[i] = ap
@@ -147,8 +147,9 @@ def evaluate(model, loader, device, args):
     embeds = torch.cat(embeds, dim=0)
     labels = torch.cat(labels, dim=0)
 
+    # Keep default behavior consistent with train.py validation: negative Euclidean distance.
     dists = embeds @ embeds.t() if args.metric == "cosine" else -torch.cdist(embeds, embeds)
-    dists.fill_diagonal_(torch.tensor(float("-inf")))
+    dists.fill_diagonal_(float("-inf"))
 
     kappas = [1, 5, 10]
     accuracy = retrieval_accuracy(dists, labels, topk=kappas)
@@ -223,7 +224,18 @@ def build_test_transform(args):
     else:
         img_size = 224
 
-    if args.model in ["convnextv2", "convnextv2_sra", "swinv2", "medsiglip"]:
+    if args.model in ["convnextv2", "convnextv2_sra", "swinv2"]:
+        return transforms.Compose(
+            [
+                transforms.Lambda(lambda img: img.convert("RGB")),
+                transforms.Resize(432),
+                transforms.CenterCrop(img_size),
+                transforms.ToTensor(),
+                normalize,
+            ]
+        )
+
+    if args.model == "medsiglip":
         return transforms.Compose(
             [
                 transforms.Lambda(lambda img: img.convert("RGB")),
@@ -280,6 +292,8 @@ def main(args):
             checkpoint = torch.load(args.resume, map_location=device)
             if "state-dict" in checkpoint:
                 checkpoint = checkpoint["state-dict"]
+            elif "state_dict" in checkpoint:
+                checkpoint = checkpoint["state_dict"]
             model.load_state_dict(checkpoint, strict=False)
             print("=> loaded checkpoint")
         else:
@@ -322,7 +336,12 @@ def parse_args():
     parser.add_argument("-j", "--workers", default=4, type=int, metavar="N", help="Number of data loading workers")
     parser.add_argument("--save-dir", default="./results", help="Result save directory")
     parser.add_argument("--resume", default="", help="Resume from checkpoint")
-    parser.add_argument("--metric", default="cosine", choices=["cosine", "cdist"], help="Retrieval similarity metric")
+    parser.add_argument(
+        "--metric",
+        default="cdist",
+        choices=["cosine", "cdist"],
+        help="Retrieval similarity metric (default cdist to match train.py validation)",
+    )
     return parser.parse_args()
 
 
