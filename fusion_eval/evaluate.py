@@ -181,7 +181,7 @@ def confidence_based_fusion(
     conv_similarity: np.ndarray,
     dino_similarity: np.ndarray,
 ) -> Dict[str, np.ndarray | int]:
-    """Select per-query ranking from the model with larger top1-top2 score margin."""
+    """Fuse scores with a query-adaptive alpha from top1-top2 confidence margins."""
     if conv_similarity.shape != dino_similarity.shape:
         raise ValueError("Conv and DINO similarity matrices must have the same shape")
 
@@ -192,13 +192,15 @@ def confidence_based_fusion(
 
     conv_confidence = top12_margin(conv_scores)
     dino_confidence = top12_margin(dino_scores)
-    use_conv = conv_confidence >= dino_confidence
+    alpha = conv_confidence / (conv_confidence + dino_confidence + 1e-8)
+    fused = alpha[:, None] * conv_scores + (1.0 - alpha[:, None]) * dino_scores
 
-    fused = np.where(use_conv[:, None], conv_scores, dino_scores)
     return {
         "similarity": fused,
-        "conv_selected_queries": int(np.sum(use_conv)),
-        "dino_selected_queries": int(np.sum(~use_conv)),
+        "conv_selected_queries": int(np.sum(alpha >= 0.5)),
+        "dino_selected_queries": int(np.sum(alpha < 0.5)),
+        "alpha_mean": float(np.mean(alpha)),
+        "alpha_std": float(np.std(alpha)),
     }
 
 

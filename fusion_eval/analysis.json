@@ -16,7 +16,7 @@
   ],
   "include_score_fusion": true,
   "include_confidence_fusion": true,
-  "score_normalization": "none",
+  "score_normalization": "zscore",
   "save_fused_embeddings": {
     "enabled": false,
     "concat_name": "concat_fusion_embeddings.npz"
