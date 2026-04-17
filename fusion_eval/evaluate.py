@@ -33,6 +33,7 @@ def run_late_fusion_experiments(
     k_values: Iterable[int] = (1, 5, 10),
     include_score_fusion: bool = True,
     score_normalization: str = "none",
+    include_confidence_fusion: bool = True,
 ) -> List[ExperimentResult]:
     """Evaluate baselines and late-fusion variants."""
     results: List[ExperimentResult] = []
@@ -83,6 +84,35 @@ def run_late_fusion_experiments(
                     metrics=metrics,
                 )
             )
+
+    if include_confidence_fusion:
+        conv_similarity = normalize_similarity_matrix(
+            compute_similarity_matrix(conv_baseline),
+            mode=score_normalization,
+        )
+        dino_similarity = normalize_similarity_matrix(
+            compute_similarity_matrix(dino_baseline),
+            mode=score_normalization,
+        )
+        confidence_result = confidence_based_fusion(
+            conv_similarity=conv_similarity,
+            dino_similarity=dino_similarity,
+        )
+        metrics = evaluate_retrieval_metrics_from_similarity(
+            similarity=confidence_result["similarity"],
+            labels=aligned.labels,
+            image_paths=aligned.image_paths,
+            k_values=k_values,
+        )
+        metrics["conv_selected_queries"] = float(confidence_result["conv_selected_queries"])
+        metrics["dino_selected_queries"] = float(confidence_result["dino_selected_queries"])
+        results.append(
+            ExperimentResult(
+                experiment_name="confidence_fusion_top12_margin",
+                num_samples=len(aligned.image_paths),
+                metrics=metrics,
+            )
+        )
 
     for alpha in alpha_values:
         fusion = weighted_sum_fusion(
@@ -145,6 +175,41 @@ def normalize_similarity_matrix(similarity: np.ndarray, mode: str = "none") -> n
 
     np.fill_diagonal(normalized, diag)
     return normalized
+
+
+def confidence_based_fusion(
+    conv_similarity: np.ndarray,
+    dino_similarity: np.ndarray,
+) -> Dict[str, np.ndarray | int]:
+    """Select per-query ranking from the model with larger top1-top2 score margin."""
+    if conv_similarity.shape != dino_similarity.shape:
+        raise ValueError("Conv and DINO similarity matrices must have the same shape")
+
+    conv_scores = conv_similarity.astype(np.float32, copy=True)
+    dino_scores = dino_similarity.astype(np.float32, copy=True)
+    np.fill_diagonal(conv_scores, -np.inf)
+    np.fill_diagonal(dino_scores, -np.inf)
+
+    conv_confidence = top12_margin(conv_scores)
+    dino_confidence = top12_margin(dino_scores)
+    use_conv = conv_confidence >= dino_confidence
+
+    fused = np.where(use_conv[:, None], conv_scores, dino_scores)
+    return {
+        "similarity": fused,
+        "conv_selected_queries": int(np.sum(use_conv)),
+        "dino_selected_queries": int(np.sum(~use_conv)),
+    }
+
+
+def top12_margin(similarity: np.ndarray) -> np.ndarray:
+    """Compute per-query confidence as top1 - top2 score margin."""
+    if similarity.shape[1] < 2:
+        raise ValueError("Need at least two gallery scores per query for confidence margin")
+    top2 = np.partition(similarity, kth=-2, axis=1)[:, -2:]
+    top1 = np.max(top2, axis=1)
+    top2_second = np.min(top2, axis=1)
+    return top1 - top2_second
 
 
 def maybe_save_fused_embeddings(

@@ -22,6 +22,12 @@ Score fusion:
   `score_fusion_alpha_X` experiments using
   `s = alpha * s_conv + (1 - alpha) * s_dino`
 - optional `score_normalization`: `none`, `zscore`, or `minmax`
+
+Confidence fusion:
+- set `include_confidence_fusion` to true in config to run
+  `confidence_fusion_top12_margin`
+- per query, choose the full ranking from the model with larger
+  `top1_score - top2_score`
 """
 
 from __future__ import annotations
@@ -141,6 +147,7 @@ def main() -> None:
         k_values=config.get("k_values", [1, 5, 10]),
         include_score_fusion=config.get("include_score_fusion", True),
         score_normalization=config.get("score_normalization", "none"),
+        include_confidence_fusion=config.get("include_confidence_fusion", True),
     )
 
     rows = experiment_rows(experiments)

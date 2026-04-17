@@ -15,6 +15,7 @@
     0.8
   ],
   "include_score_fusion": true,
+  "include_confidence_fusion": true,
   "score_normalization": "none",
   "save_fused_embeddings": {
     "enabled": false,
