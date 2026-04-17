@@ -94,23 +94,27 @@ def get_model_and_transform(
     else:
         # Setup transform
         normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-
-        # For ConvNeXt, resize to slightly larger and then center crop
-        # For other models, use standard 256->224 crop
-        if img_size == 384:
-            resize_size = 432  # ~1.125x the target size
+        if model_type == "convnextv2":
+            # Match test.py exactly for ConvNeXtV2 so Milvus embeddings are
+            # directly comparable to non-Milvus evaluation.
+            transform = transforms.Compose(
+                [
+                    transforms.Lambda(lambda img: img.convert("RGB")),
+                    transforms.Resize((img_size, img_size)),
+                    transforms.ToTensor(),
+                    normalize,
+                ]
+            )
         else:
-            resize_size = 256
-
-        transform = transforms.Compose(
-            [
-                transforms.Lambda(lambda img: img.convert("RGB")),
-                transforms.Resize(resize_size),
-                transforms.CenterCrop(img_size),
-                transforms.ToTensor(),
-                normalize,
-            ]
-        )
+            transform = transforms.Compose(
+                [
+                    transforms.Lambda(lambda img: img.convert("RGB")),
+                    transforms.Resize(256),
+                    transforms.CenterCrop(img_size),
+                    transforms.ToTensor(),
+                    normalize,
+                ]
+            )
 
     return model, transform
 
