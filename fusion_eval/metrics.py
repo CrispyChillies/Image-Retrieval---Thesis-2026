@@ -1,4 +1,4 @@
-"""Embedding-level retrieval metrics for late-fusion evaluation."""
+"""Embedding-level and score-level retrieval metrics for late-fusion evaluation."""
 
 from __future__ import annotations
 
@@ -29,11 +29,28 @@ def evaluate_retrieval_metrics(
     k_values: Iterable[int] = (1, 5, 10),
 ) -> Dict[str, float]:
     """Evaluate retrieval metrics on one embedding set."""
-    if len(labels) != len(image_paths) or len(labels) != embeddings.shape[0]:
-        raise ValueError("Labels, image_paths, and embeddings must have the same length")
+    similarity = compute_similarity_matrix(embeddings)
+    return evaluate_retrieval_metrics_from_similarity(
+        similarity=similarity,
+        labels=labels,
+        image_paths=image_paths,
+        k_values=k_values,
+    )
+
+
+def evaluate_retrieval_metrics_from_similarity(
+    similarity: np.ndarray,
+    labels: Sequence[str],
+    image_paths: Sequence[str],
+    k_values: Iterable[int] = (1, 5, 10),
+) -> Dict[str, float]:
+    """Evaluate retrieval metrics from a precomputed similarity matrix."""
+    if similarity.ndim != 2 or similarity.shape[0] != similarity.shape[1]:
+        raise ValueError("Similarity matrix must be square")
+    if len(labels) != len(image_paths) or len(labels) != similarity.shape[0]:
+        raise ValueError("Labels, image_paths, and similarity matrix must have matching sizes")
 
     k_values = sorted(set(int(k) for k in k_values))
-    similarity = compute_similarity_matrix(embeddings)
     ranks = rank_indices(similarity)
     labels_np = np.asarray(labels)
     image_paths_np = np.asarray(image_paths)

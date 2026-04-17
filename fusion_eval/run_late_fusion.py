@@ -16,6 +16,12 @@ Produced outputs:
 - `late_fusion_results.json`
 - `late_fusion_results.csv`
 - optional fused embedding `.npz` files if enabled in config
+
+Score fusion:
+- set `include_score_fusion` to true in config to run
+  `score_fusion_alpha_X` experiments using
+  `s = alpha * s_conv + (1 - alpha) * s_dino`
+- optional `score_normalization`: `none`, `zscore`, or `minmax`
 """
 
 from __future__ import annotations
@@ -133,6 +139,8 @@ def main() -> None:
         aligned=aligned,
         alpha_values=config.get("alpha_values", [0.2, 0.4, 0.5, 0.6, 0.8]),
         k_values=config.get("k_values", [1, 5, 10]),
+        include_score_fusion=config.get("include_score_fusion", True),
+        score_normalization=config.get("score_normalization", "none"),
     )
 
     rows = experiment_rows(experiments)
