@@ -13,6 +13,158 @@ from torch.utils.data import Dataset
 import numpy as np
 import cv2
 import pandas as pd
+from pathlib import Path
+from urllib.parse import unquote
+
+
+NIH_RETRIEVAL_PATHOLOGIES = [
+    "Atelectasis",
+    "Consolidation",
+    "Infiltration",
+    "Pneumothorax",
+    "Edema",
+    "Emphysema",
+    "Fibrosis",
+    "Effusion",
+    "Pneumonia",
+    "Pleural thickening",
+    "Cardiomegaly",
+    "Nodule",
+    "Mass",
+]
+
+
+def _resolve_file_list(data_dir=None, image_list_file=None, suffix=".npy"):
+    paths = []
+
+    if image_list_file:
+        manifest_path = Path(image_list_file)
+        if manifest_path.is_file():
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                for raw_line in f:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    candidate = Path(line.split(",")[0].strip())
+                    if not candidate.is_absolute() and data_dir is not None:
+                        candidate = Path(data_dir) / candidate
+                    paths.append(str(candidate))
+
+    if not paths and data_dir:
+        paths = sorted(str(path) for path in Path(data_dir).rglob(f"*{suffix}"))
+
+    if not paths:
+        raise ValueError(
+            "No input files found. Provide a valid data_dir or image_list_file."
+        )
+
+    return paths
+
+
+def _to_uint8_image(array):
+    array = np.asarray(array)
+
+    if array.ndim == 3 and array.shape[0] in (1, 3):
+        array = np.transpose(array, (1, 2, 0))
+    if array.ndim == 3 and array.shape[-1] == 1:
+        array = array[..., 0]
+
+    if array.dtype == np.uint8:
+        return array
+
+    array = array.astype(np.float32)
+    min_value = float(array.min())
+    max_value = float(array.max())
+    if max_value <= min_value:
+        return np.zeros_like(array, dtype=np.uint8)
+
+    array = (array - min_value) / (max_value - min_value)
+    array = np.clip(array * 255.0, 0.0, 255.0)
+    return array.astype(np.uint8)
+
+
+class NIHChestXrayRetrievalDataSet(Dataset):
+    """NIH chest X-ray retrieval dataset stored as .npy files.
+
+    Expected file name format:
+    Chest_X-ray_Atelectasis%7CCardiomegaly%7CConsolidation%7CEffusion_44100.npy
+    """
+
+    def __init__(
+        self,
+        data_dir=None,
+        image_list_file=None,
+        transform=None,
+        pathology_names=None,
+    ):
+        self.image_names = _resolve_file_list(
+            data_dir=data_dir,
+            image_list_file=image_list_file,
+            suffix=".npy",
+        )
+        self.transform = transform
+        self.pathology_names = pathology_names or NIH_RETRIEVAL_PATHOLOGIES
+        self.pathology_to_index = {
+            name: idx for idx, name in enumerate(self.pathology_names)
+        }
+
+        self.labels = []
+        self.label_sets = []
+        for image_path in self.image_names:
+            label_names, multi_hot = self._parse_labels_from_path(image_path)
+            self.label_sets.append(label_names)
+            self.labels.append(multi_hot)
+
+    def _parse_labels_from_path(self, image_path):
+        stem = Path(image_path).stem
+        prefix = "Chest_X-ray_"
+        if not stem.startswith(prefix):
+            raise ValueError(
+                f"Unsupported NIH file name '{Path(image_path).name}'. "
+                f"Expected prefix '{prefix}'."
+            )
+
+        stem_without_prefix = stem[len(prefix):]
+        try:
+            encoded_labels, _ = stem_without_prefix.rsplit("_", 1)
+        except ValueError as exc:
+            raise ValueError(
+                f"Unsupported NIH file name '{Path(image_path).name}'. "
+                "Expected labels and numeric identifier separated by the final underscore."
+            ) from exc
+
+        label_names = [label.strip() for label in unquote(encoded_labels).split("|")]
+        multi_hot = np.zeros(len(self.pathology_names), dtype=np.float32)
+        unknown_labels = []
+        for label in label_names:
+            label_idx = self.pathology_to_index.get(label)
+            if label_idx is None:
+                unknown_labels.append(label)
+                continue
+            multi_hot[label_idx] = 1.0
+
+        if unknown_labels:
+            raise ValueError(
+                f"Unknown pathologies in '{Path(image_path).name}': {unknown_labels}. "
+                f"Known labels: {self.pathology_names}"
+            )
+
+        return label_names, multi_hot
+
+    def __getitem__(self, index):
+        image_path = self.image_names[index]
+        image_array = np.load(image_path)
+        image_array = _to_uint8_image(image_array)
+        image = Image.fromarray(image_array).convert("L")
+
+        if self.transform is not None:
+            image = self.transform(image)
+
+        label = torch.tensor(self.labels[index], dtype=torch.float32)
+        return image, label
+
+    def __len__(self):
+        return len(self.image_names)
 
 
 class ISICDataSet(Dataset):

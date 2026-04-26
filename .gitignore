@@ -8,3 +8,4 @@ medsiglip_fintune/
 eval.ipynb
 .env
 .vscode/
+training_sample/

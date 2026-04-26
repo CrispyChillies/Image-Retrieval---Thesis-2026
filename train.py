@@ -14,8 +14,14 @@ from read_data import (
     TBX11kDataSet,
     VINDRDataSet,
     VINDRConceptCLIPDataSet,
+    NIHChestXrayRetrievalDataSet,
 )
-from loss import TripletMarginLoss, WeightedMultiLabelTripletLoss, ConceptCLIPLoss
+from loss import (
+    TripletMarginLoss,
+    WeightedMultiLabelTripletLoss,
+    ConceptCLIPLoss,
+    NIHMultiLabelMetricLoss,
+)
 from sampler import PKSampler
 
 import timm
@@ -605,9 +611,11 @@ def main(args):
             gradient_as_bucket_view=False,
         )  # Avoids stride mismatch warning
 
-    # Use ConceptCLIPLoss for ConceptCLIP + VinDR, WeightedMultiLabel for other vindr, else standard TripletMarginLoss
+    # Choose loss based on dataset/task.
     if args.model == "conceptclip" and args.dataset == "vindr":
         criterion = ConceptCLIPLoss(alpha=args.rc_alpha)
+    elif args.dataset == "nih":
+        criterion = NIHMultiLabelMetricLoss(margin=args.margin)
     elif args.dataset == "vindr":
         criterion = WeightedMultiLabelTripletLoss(margin=args.margin)
     else:
@@ -746,21 +754,39 @@ def main(args):
         )
         resize_size = 432 if img_size == 384 else 256
 
-    train_transform = transforms.Compose(
-        [
-            transforms.Lambda(lambda image: image.convert("RGB")),
-            transforms.Resize(resize_size),
-            (
-                transforms.RandomCrop(img_size, padding=4)
-                if args.rand_resize
-                else transforms.CenterCrop(img_size)
-            ),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.ColorJitter(brightness=0.1, contrast=0.1),
-            transforms.ToTensor(),
-            normalize,
-        ]
-    )
+    if args.dataset == "nih":
+        train_transform = transforms.Compose(
+            [
+                transforms.Lambda(lambda image: image.convert("RGB")),
+                transforms.Resize(resize_size),
+                (
+                    transforms.RandomResizedCrop(
+                        img_size, scale=(0.9, 1.0), ratio=(0.95, 1.05)
+                    )
+                    if args.rand_resize
+                    else transforms.CenterCrop(img_size)
+                ),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ToTensor(),
+                normalize,
+            ]
+        )
+    else:
+        train_transform = transforms.Compose(
+            [
+                transforms.Lambda(lambda image: image.convert("RGB")),
+                transforms.Resize(resize_size),
+                (
+                    transforms.RandomCrop(img_size, padding=4)
+                    if args.rand_resize
+                    else transforms.CenterCrop(img_size)
+                ),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ColorJitter(brightness=0.1, contrast=0.1),
+                transforms.ToTensor(),
+                normalize,
+            ]
+        )
 
     val_transform = transforms.Compose(
         [
@@ -836,6 +862,17 @@ def main(args):
                 csv_file=args.val_image_list,
                 transform=val_transform,
             )
+    elif args.dataset == "nih":
+        train_dataset = NIHChestXrayRetrievalDataSet(
+            data_dir=args.dataset_dir,
+            image_list_file=args.train_image_list,
+            transform=train_transform,
+        )
+        val_dataset = NIHChestXrayRetrievalDataSet(
+            data_dir=args.val_dataset_dir,
+            image_list_file=args.val_image_list,
+            transform=val_transform,
+        )
     else:
         raise NotImplementedError("Dataset not supported!")
 
@@ -889,7 +926,7 @@ def main(args):
         )
     else:
         # Use RandomSampler or PKSampler based on use_random_sampler flag
-        if args.use_random_sampler or use_conceptclip_collate:
+        if args.use_random_sampler or use_conceptclip_collate or args.dataset == "nih":
             # ConceptCLIP always uses RandomSampler (no PKSampler for CLIP training)
             train_sampler = RandomSampler(train_dataset)
         else:
@@ -1022,7 +1059,7 @@ def parse_args():
     parser.add_argument(
         "--dataset",
         default="covid",
-        help="Dataset to use (covid, isic, tbx11k, or vindr)",
+        help="Dataset to use (covid, isic, tbx11k, vindr, or nih)",
     )
     parser.add_argument(
         "--dataset-dir",
@@ -1030,10 +1067,14 @@ def parse_args():
         help="Dataset directory path",
     )
     parser.add_argument(
-        "--train-image-list", default="./train_split.txt", help="Train image list"
+        "--train-image-list",
+        default="./train_split.txt",
+        help="Train image list/manifest. If omitted or missing, the dataset directory is scanned recursively.",
     )
     parser.add_argument(
-        "--val-image-list", default="./val.txt", help="Validation image list"
+        "--val-image-list",
+        default="./val.txt",
+        help="Validation image list/manifest. If omitted or missing, the validation directory is scanned recursively.",
     )
     parser.add_argument(
         "--val-dataset-dir",

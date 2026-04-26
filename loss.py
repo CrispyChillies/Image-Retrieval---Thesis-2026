@@ -185,6 +185,65 @@ class WeightedMultiLabelTripletLoss(nn.Module):
         return loss / (count + 1e-8), torch.tensor(0.0) 
 
 
+class NIHMultiLabelMetricLoss(nn.Module):
+    """Metric loss for multi-label retrieval on NIH chest X-rays.
+
+    Jaccard overlap is used as the positive strength. For each anchor-positive
+    pair, negatives are any samples with lower overlap than that positive.
+    """
+
+    def __init__(self, margin=0.3):
+        super(NIHMultiLabelMetricLoss, self).__init__()
+        self.margin = margin
+
+    def compute_jaccard_sim(self, labels):
+        intersection = torch.matmul(labels, labels.t())
+        label_sums = labels.sum(dim=1, keepdim=True)
+        union = label_sums + label_sums.t() - intersection
+        return intersection / (union + 1e-8)
+
+    def forward(self, embeddings, labels):
+        embeddings = F.normalize(embeddings, p=2, dim=1)
+        dist_matrix = torch.cdist(embeddings, embeddings, p=2)
+        jaccard_matrix = self.compute_jaccard_sim(labels)
+
+        total_loss = embeddings.new_tensor(0.0)
+        valid_triplets = 0
+        batch_size = embeddings.size(0)
+
+        for i in range(batch_size):
+            pos_mask = jaccard_matrix[i] > 0
+            pos_mask[i] = False
+
+            positive_indices = torch.where(pos_mask)[0]
+            if positive_indices.numel() == 0:
+                continue
+
+            for pos_idx in positive_indices:
+                pos_sim = jaccard_matrix[i, pos_idx]
+                neg_mask = jaccard_matrix[i] < pos_sim
+                neg_mask[i] = False
+
+                negative_indices = torch.where(neg_mask)[0]
+                if negative_indices.numel() == 0:
+                    continue
+
+                d_p = dist_matrix[i, pos_idx]
+                d_n = dist_matrix[i, negative_indices].min()
+                weight = pos_sim.clamp_min(1e-6)
+
+                total_loss = total_loss + weight * F.relu(d_p - d_n + self.margin)
+                valid_triplets += 1
+
+        if valid_triplets == 0:
+            zero = embeddings.new_tensor(0.0)
+            return zero, zero
+
+        return total_loss / valid_triplets, embeddings.new_tensor(
+            valid_triplets / max(batch_size, 1)
+        )
+
+
 # ============================================================================
 # ConceptCLIP Losses: IT-Align + RC-Align (from ConceptCLIP paper, arXiv:2501.15579)
 # ============================================================================
