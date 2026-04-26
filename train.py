@@ -20,13 +20,21 @@ from loss import (
     TripletMarginLoss,
     WeightedMultiLabelTripletLoss,
     ConceptCLIPLoss,
-    NIHMultiLabelMetricLoss,
+    JaccardSupConLoss,
 )
 from sampler import PKSampler
 
 import timm
 from timm.data import resolve_model_data_config
-from model import ResNet50, DenseNet121, ConvNeXtV2, ConvNeXtV2_SRA, SwinV2, DinoV2, conceptCLIP
+from model import (
+    ResNet50,
+    DenseNet121,
+    ConvNeXtV2,
+    ConvNeXtV2_SRA,
+    SwinV2,
+    DinoV2,
+    conceptCLIP,
+)
 
 from sklearn.metrics import average_precision_score
 import numpy as np
@@ -48,7 +56,8 @@ def train_epoch(
 ):
     model.train()
     running_loss = 0
-    running_frac_pos_triplets = 0
+    running_aux_metric = 0
+    aux_metric_name = None
     for i, data in enumerate(data_loader):
         optimizer.zero_grad()
         samples, targets = data[0].to(device), data[1].to(device)
@@ -61,8 +70,17 @@ def train_epoch(
             embeddings = output
             has_attention = False
 
-        # Metric Loss
-        loss, frac_pos_triplets = criterion(embeddings, targets)
+        criterion_output = criterion(embeddings, targets)
+        if isinstance(criterion_output, tuple):
+            loss, aux_metric = criterion_output
+            if isinstance(criterion, (TripletMarginLoss, WeightedMultiLabelTripletLoss)):
+                aux_metric_name = "% avg hard triplets"
+            else:
+                aux_metric_name = "aux"
+        else:
+            loss = criterion_output
+            aux_metric = None
+            aux_metric_name = None
 
         # Attention Loss (only if model supports it)
         if has_attention:
@@ -76,20 +94,31 @@ def train_epoch(
         optimizer.step()
 
         running_loss += loss.item()
-        running_frac_pos_triplets += float(frac_pos_triplets)
+        if aux_metric is not None:
+            running_aux_metric += float(aux_metric)
 
         if i % print_freq == print_freq - 1:
             i += 1
             avg_loss = running_loss / print_freq
-            avg_trip = 100.0 * running_frac_pos_triplets / print_freq
             if rank == 0:
-                print(
-                    "[{:d}, {:d}] | loss: {:.4f} | % avg hard triplets: {:.2f}%".format(
-                        epoch, i, avg_loss, avg_trip
+                if aux_metric_name == "% avg hard triplets":
+                    avg_aux = running_aux_metric / print_freq
+                    print(
+                        "[{:d}, {:d}] | loss: {:.4f} | {}: {:.2f}%".format(
+                            epoch, i, avg_loss, aux_metric_name, 100.0 * avg_aux
+                        )
                     )
-                )
+                elif aux_metric_name is not None:
+                    avg_aux = running_aux_metric / print_freq
+                    print(
+                        "[{:d}, {:d}] | loss: {:.4f} | {}: {:.4f}".format(
+                            epoch, i, avg_loss, aux_metric_name, avg_aux
+                        )
+                    )
+                else:
+                    print("[{:d}, {:d}] | loss: {:.4f}".format(epoch, i, avg_loss))
             running_loss = 0
-            running_frac_pos_triplets = 0
+            running_aux_metric = 0
 
 
 # ============================================================================
@@ -540,6 +569,16 @@ def main(args):
     if args.val_dataset_dir is None:
         args.val_dataset_dir = args.dataset_dir
 
+    if args.loss_name is None:
+        if args.model == "conceptclip" and args.dataset == "vindr":
+            args.loss_name = "conceptclip"
+        elif args.dataset == "nih":
+            args.loss_name = "jaccard_supcon"
+        elif args.dataset == "vindr":
+            args.loss_name = "weighted_multilabel_triplet"
+        else:
+            args.loss_name = "triplet"
+
     # Set random seed for reproducibility
     random.seed(args.seed + rank)
     torch.manual_seed(args.seed + rank)
@@ -614,9 +653,9 @@ def main(args):
     # Choose loss based on dataset/task.
     if args.model == "conceptclip" and args.dataset == "vindr":
         criterion = ConceptCLIPLoss(alpha=args.rc_alpha)
-    elif args.dataset == "nih":
-        criterion = NIHMultiLabelMetricLoss(margin=args.margin)
-    elif args.dataset == "vindr":
+    elif args.loss_name == "jaccard_supcon":
+        criterion = JaccardSupConLoss(temperature=args.supcon_temperature)
+    elif args.loss_name == "weighted_multilabel_triplet":
         criterion = WeightedMultiLabelTripletLoss(margin=args.margin)
     else:
         criterion = TripletMarginLoss(margin=args.margin)
@@ -1163,6 +1202,18 @@ def parse_args():
     )
     parser.add_argument("--lr", default=0.0001, type=float, help="Learning rate")
     parser.add_argument("--margin", default=0.2, type=float, help="Triplet loss margin")
+    parser.add_argument(
+        "--loss-name",
+        default=None,
+        choices=["triplet", "weighted_multilabel_triplet", "jaccard_supcon"],
+        help="Metric loss to use. Defaults to a dataset-appropriate choice when omitted.",
+    )
+    parser.add_argument(
+        "--supcon-temperature",
+        default=0.07,
+        type=float,
+        help="Temperature for JaccardSupConLoss.",
+    )
     parser.add_argument("--print-freq", default=5, type=int, help="Print frequency")
     parser.add_argument("--seed", type=int, default=0, help="Random seed to use")
     parser.add_argument(
