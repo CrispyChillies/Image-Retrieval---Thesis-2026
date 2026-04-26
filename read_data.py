@@ -137,13 +137,14 @@ class NIHChestXrayRetrievalDataSet(Dataset):
     def _parse_labels_from_path(self, image_path):
         stem = Path(image_path).stem
         prefix = "Chest_X-ray_"
-        if not stem.startswith(prefix):
+        prefix_index = stem.find(prefix)
+        if prefix_index < 0:
             raise ValueError(
                 f"Unsupported NIH file name '{Path(image_path).name}'. "
-                f"Expected prefix '{prefix}'."
+                f"Expected token '{prefix}'."
             )
 
-        stem_without_prefix = stem[len(prefix):]
+        stem_without_prefix = stem[prefix_index + len(prefix):]
         try:
             encoded_labels, _ = stem_without_prefix.rsplit("_", 1)
         except ValueError as exc:
