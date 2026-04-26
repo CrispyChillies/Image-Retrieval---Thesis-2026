@@ -33,6 +33,12 @@ NIH_RETRIEVAL_PATHOLOGIES = [
     "Mass",
 ]
 
+NIH_PATHOLOGY_ALIASES = {
+    "pleural_thickening": "Pleural thickening",
+    "pleural thickening": "Pleural thickening",
+    "pleuralthickening": "Pleural thickening",
+}
+
 
 def _resolve_file_list(data_dir=None, image_list_file=None, suffix=".npy"):
     paths = []
@@ -107,6 +113,10 @@ class NIHChestXrayRetrievalDataSet(Dataset):
         self.pathology_to_index = {
             name: idx for idx, name in enumerate(self.pathology_names)
         }
+        self.pathology_aliases = NIH_PATHOLOGY_ALIASES.copy()
+        for name in self.pathology_names:
+            normalized = self._normalize_pathology_name(name)
+            self.pathology_aliases[normalized] = name
 
         self.labels = []
         self.label_sets = []
@@ -114,6 +124,15 @@ class NIHChestXrayRetrievalDataSet(Dataset):
             label_names, multi_hot = self._parse_labels_from_path(image_path)
             self.label_sets.append(label_names)
             self.labels.append(multi_hot)
+
+    def _normalize_pathology_name(self, label_name):
+        return (
+            label_name.strip()
+            .replace("%20", " ")
+            .replace("_", " ")
+            .replace("-", " ")
+            .lower()
+        )
 
     def _parse_labels_from_path(self, image_path):
         stem = Path(image_path).stem
@@ -133,15 +152,22 @@ class NIHChestXrayRetrievalDataSet(Dataset):
                 "Expected labels and numeric identifier separated by the final underscore."
             ) from exc
 
-        label_names = [label.strip() for label in unquote(encoded_labels).split("|")]
+        raw_label_names = [label.strip() for label in unquote(encoded_labels).split("|")]
+        label_names = []
         multi_hot = np.zeros(len(self.pathology_names), dtype=np.float32)
         unknown_labels = []
-        for label in label_names:
-            label_idx = self.pathology_to_index.get(label)
+        for raw_label in raw_label_names:
+            normalized_label = self._normalize_pathology_name(raw_label)
+            canonical_label = self.pathology_aliases.get(normalized_label)
+            if canonical_label is None:
+                unknown_labels.append(raw_label)
+                continue
+            label_idx = self.pathology_to_index.get(canonical_label)
             if label_idx is None:
-                unknown_labels.append(label)
+                unknown_labels.append(raw_label)
                 continue
             multi_hot[label_idx] = 1.0
+            label_names.append(canonical_label)
 
         if unknown_labels:
             raise ValueError(
