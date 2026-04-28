@@ -35,7 +35,7 @@ class ComparisonConfig:
     correctness: CorrectnessConfig = CorrectnessConfig()
     skip_missing_queries: bool = True
     preload_batch_size: int = 100
-    search_batch_size: int = 50
+    search_batch_size: int = 10
 
 
 def load_query_set(path: str | Path) -> List[QueryRecord]:
@@ -164,6 +164,7 @@ def compare_models(
                 search_params=config.conv_search_params,
                 reranker=reranker,
                 exclude_self=True,
+                batch_size=config.search_batch_size,
             )
             dino_results = dino_adapter.search_by_embeddings(
                 queries=aligned_queries,
@@ -172,6 +173,7 @@ def compare_models(
                 search_params=config.dino_search_params,
                 reranker=reranker,
                 exclude_self=True,
+                batch_size=config.search_batch_size,
             )
 
             for aligned_query, conv_result, dino_result in zip(

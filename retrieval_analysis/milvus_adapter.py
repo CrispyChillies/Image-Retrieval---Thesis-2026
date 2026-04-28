@@ -224,6 +224,7 @@ class MilvusCollectionAdapter:
         reranker: Optional[Any] = None,
         exclude_self: bool = True,
         metadata_fields: Optional[Sequence[str]] = None,
+        batch_size: Optional[int] = None,
     ) -> List[SearchResult]:
         """Search this collection for multiple query embeddings in one request."""
         if not queries:
@@ -237,33 +238,40 @@ class MilvusCollectionAdapter:
         if self.config.label_field not in fields:
             fields.append(self.config.label_field)
 
-        raw_hits = self.client.search(
-            collection_name=self.config.collection_name,
-            data=[list(query_embedding) for query_embedding in query_embeddings],
-            anns_field=self.config.vector_field,
-            search_params=search_params or {},
-            limit=top_k + 1 if exclude_self else top_k,
-            output_fields=fields,
-        )
-
         results: List[SearchResult] = []
-        for query, hits in zip(queries, raw_hits or []):
-            retrieved = [self._normalize_hit(hit) for hit in hits]
-            if exclude_self:
-                retrieved = [
-                    item for item in retrieved if item.image_path != query.image_path
-                ]
-            if reranker is not None:
-                retrieved = list(reranker.rerank(query=query, results=retrieved))
+        effective_batch_size = max(1, int(batch_size or len(queries)))
+        for start in range(0, len(queries), effective_batch_size):
+            batch_queries = queries[start : start + effective_batch_size]
+            batch_embeddings = query_embeddings[start : start + effective_batch_size]
 
-            results.append(
-                SearchResult(
-                    query=query,
-                    query_source=self.config.name,
-                    retrieved=retrieved[:top_k],
-                    query_embedding=query_embeddings[len(results)],
-                )
+            raw_hits = self.client.search(
+                collection_name=self.config.collection_name,
+                data=[list(query_embedding) for query_embedding in batch_embeddings],
+                anns_field=self.config.vector_field,
+                search_params=search_params or {},
+                limit=top_k + 1 if exclude_self else top_k,
+                output_fields=fields,
             )
+
+            for query, query_embedding, hits in zip(
+                batch_queries, batch_embeddings, raw_hits or []
+            ):
+                retrieved = [self._normalize_hit(hit) for hit in hits]
+                if exclude_self:
+                    retrieved = [
+                        item for item in retrieved if item.image_path != query.image_path
+                    ]
+                if reranker is not None:
+                    retrieved = list(reranker.rerank(query=query, results=retrieved))
+
+                results.append(
+                    SearchResult(
+                        query=query,
+                        query_source=self.config.name,
+                        retrieved=retrieved[:top_k],
+                        query_embedding=query_embedding,
+                    )
+                )
         return results
 
     def _normalize_hit(self, hit: Dict[str, Any]) -> RetrievedItem:
