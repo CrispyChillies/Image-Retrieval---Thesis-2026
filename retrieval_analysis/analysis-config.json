@@ -4,6 +4,8 @@
   "top_k": 5,
   "correctness_top_k": 1,
   "skip_missing_queries": true,
+  "preload_batch_size": 100,
+  "search_batch_size": 50,
   "conv_search_params": {
     "metric_type": "COSINE",
     "params": {

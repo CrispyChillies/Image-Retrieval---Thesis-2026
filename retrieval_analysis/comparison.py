@@ -14,7 +14,6 @@ from retrieval_analysis.milvus_adapter import (
     MilvusCollectionAdapter,
     QueryRecord,
     SearchResult,
-    compare_collection_coverage,
     filter_present_queries,
 )
 from retrieval_analysis.rerank import IdentityReranker, Reranker
@@ -35,6 +34,8 @@ class ComparisonConfig:
     dino_search_params: Optional[Dict] = None
     correctness: CorrectnessConfig = CorrectnessConfig()
     skip_missing_queries: bool = True
+    preload_batch_size: int = 100
+    search_batch_size: int = 50
 
 
 def load_query_set(path: str | Path) -> List[QueryRecord]:
@@ -90,7 +91,25 @@ def compare_models(
 ) -> Dict[str, object]:
     """Run aligned retrieval analysis for ConvNeXt and DINO collections."""
     reranker = reranker or IdentityReranker()
-    coverage = compare_collection_coverage(conv_adapter, dino_adapter)
+    requested_paths = [query.image_path for query in queries if query.image_path]
+    conv_records = conv_adapter.fetch_records_by_image_paths(
+        requested_paths,
+        include_embedding=True,
+        batch_size=config.preload_batch_size,
+    )
+    dino_records = dino_adapter.fetch_records_by_image_paths(
+        requested_paths,
+        include_embedding=True,
+        batch_size=config.preload_batch_size,
+    )
+
+    conv_paths = set(conv_records)
+    dino_paths = set(dino_records)
+    coverage = {
+        "conv_only": sorted(conv_paths - dino_paths),
+        "dino_only": sorted(dino_paths - conv_paths),
+        "present_in_both": sorted(conv_paths & dino_paths),
+    }
     query_partition = filter_present_queries(queries, coverage)
     valid_queries = query_partition["valid"]
     missing_queries = query_partition["missing"]
@@ -106,66 +125,85 @@ def compare_models(
     summary = Counter()
     per_query_errors: List[Dict[str, str]] = []
 
-    for query in valid_queries:
+    for start in range(0, len(valid_queries), config.search_batch_size):
+        query_batch = valid_queries[start : start + config.search_batch_size]
         try:
-            conv_record = conv_adapter.fetch_record_by_image_path(query.image_path)
-            dino_record = dino_adapter.fetch_record_by_image_path(query.image_path)
-            if conv_record is None or dino_record is None:
-                per_query_errors.append(
-                    {
-                        "query_image_path": query.image_path,
-                        "error": "missing_query_embedding_on_one_side",
-                    }
+            aligned_queries: List[QueryRecord] = []
+            conv_embeddings = []
+            dino_embeddings = []
+
+            for query in query_batch:
+                conv_record = conv_records.get(query.image_path)
+                dino_record = dino_records.get(query.image_path)
+                if conv_record is None or dino_record is None:
+                    per_query_errors.append(
+                        {
+                            "query_image_path": query.image_path,
+                            "error": "missing_query_embedding_on_one_side",
+                        }
+                    )
+                    continue
+
+                query_label = (
+                    query.label
+                    or conv_record.get(conv_adapter.config.label_field)
+                    or dino_record.get(dino_adapter.config.label_field)
                 )
+                aligned_query = QueryRecord(image_path=query.image_path, label=query_label)
+                aligned_queries.append(aligned_query)
+                conv_embeddings.append(conv_record[conv_adapter.config.vector_field])
+                dino_embeddings.append(dino_record[dino_adapter.config.vector_field])
+
+            if not aligned_queries:
                 continue
 
-            query_label = (
-                query.label
-                or conv_record.get(conv_adapter.config.label_field)
-                or dino_record.get(dino_adapter.config.label_field)
-            )
-            aligned_query = QueryRecord(image_path=query.image_path, label=query_label)
-
-            conv_result = conv_adapter.search_by_embedding(
-                query=aligned_query,
-                query_embedding=conv_record[conv_adapter.config.vector_field],
+            conv_results = conv_adapter.search_by_embeddings(
+                queries=aligned_queries,
+                query_embeddings=conv_embeddings,
                 top_k=config.top_k,
                 search_params=config.conv_search_params,
                 reranker=reranker,
                 exclude_self=True,
             )
-            dino_result = dino_adapter.search_by_embedding(
-                query=aligned_query,
-                query_embedding=dino_record[dino_adapter.config.vector_field],
+            dino_results = dino_adapter.search_by_embeddings(
+                queries=aligned_queries,
+                query_embeddings=dino_embeddings,
                 top_k=config.top_k,
                 search_params=config.dino_search_params,
                 reranker=reranker,
                 exclude_self=True,
             )
 
-            conv_correct = is_retrieval_correct(
-                query_label, conv_result.retrieved, config.correctness
-            )
-            dino_correct = is_retrieval_correct(
-                query_label, dino_result.retrieved, config.correctness
-            )
-            assigned_group = assign_group(conv_correct=conv_correct, dino_correct=dino_correct)
-            summary[assigned_group] += 1
-
-            results.append(
-                build_query_analysis_row(
-                    query=aligned_query,
-                    conv_result=conv_result,
-                    dino_result=dino_result,
+            for aligned_query, conv_result, dino_result in zip(
+                aligned_queries, conv_results, dino_results
+            ):
+                conv_correct = is_retrieval_correct(
+                    aligned_query.label, conv_result.retrieved, config.correctness
+                )
+                dino_correct = is_retrieval_correct(
+                    aligned_query.label, dino_result.retrieved, config.correctness
+                )
+                assigned_group = assign_group(
                     conv_correct=conv_correct,
                     dino_correct=dino_correct,
-                    assigned_group=assigned_group,
                 )
-            )
+                summary[assigned_group] += 1
+
+                results.append(
+                    build_query_analysis_row(
+                        query=aligned_query,
+                        conv_result=conv_result,
+                        dino_result=dino_result,
+                        conv_correct=conv_correct,
+                        dino_correct=dino_correct,
+                        assigned_group=assigned_group,
+                    )
+                )
         except Exception as exc:
-            per_query_errors.append(
-                {"query_image_path": query.image_path, "error": str(exc)}
-            )
+            for query in query_batch:
+                per_query_errors.append(
+                    {"query_image_path": query.image_path, "error": str(exc)}
+                )
 
     return {
         "coverage": {

@@ -136,6 +136,43 @@ class MilvusCollectionAdapter:
             )
         return rows[0]
 
+    def fetch_records_by_image_paths(
+        self,
+        image_paths: Sequence[str],
+        include_embedding: bool = True,
+        batch_size: int = 100,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Fetch multiple rows keyed by image_path in batched queries."""
+        output_fields = list(self.config.output_fields)
+        if include_embedding and self.config.vector_field not in output_fields:
+            output_fields.append(self.config.vector_field)
+
+        indexed: Dict[str, Dict[str, Any]] = {}
+        for start in range(0, len(image_paths), batch_size):
+            chunk = [
+                image_path
+                for image_path in image_paths[start : start + batch_size]
+                if image_path
+            ]
+            if not chunk:
+                continue
+            rows = self.client.query(
+                collection_name=self.config.collection_name,
+                filter=self._in_expr(self.config.image_path_field, chunk),
+                output_fields=output_fields,
+                limit=len(chunk),
+            )
+            for row in rows:
+                image_path = row.get(self.config.image_path_field)
+                if image_path is None:
+                    continue
+                if image_path in indexed:
+                    raise ValueError(
+                        f"{self.config.name}: multiple rows found for image_path={image_path}"
+                    )
+                indexed[image_path] = row
+        return indexed
+
     def search_by_embedding(
         self,
         query: QueryRecord,
@@ -178,6 +215,57 @@ class MilvusCollectionAdapter:
             query_embedding=query_embedding,
         )
 
+    def search_by_embeddings(
+        self,
+        queries: Sequence[QueryRecord],
+        query_embeddings: Sequence[Sequence[float]],
+        top_k: int,
+        search_params: Optional[Dict[str, Any]] = None,
+        reranker: Optional[Any] = None,
+        exclude_self: bool = True,
+        metadata_fields: Optional[Sequence[str]] = None,
+    ) -> List[SearchResult]:
+        """Search this collection for multiple query embeddings in one request."""
+        if not queries:
+            return []
+        if len(queries) != len(query_embeddings):
+            raise ValueError("queries and query_embeddings must have the same length")
+
+        fields = list(metadata_fields or self.config.output_fields)
+        if self.config.image_path_field not in fields:
+            fields.append(self.config.image_path_field)
+        if self.config.label_field not in fields:
+            fields.append(self.config.label_field)
+
+        raw_hits = self.client.search(
+            collection_name=self.config.collection_name,
+            data=[list(query_embedding) for query_embedding in query_embeddings],
+            anns_field=self.config.vector_field,
+            search_params=search_params or {},
+            limit=top_k + 1 if exclude_self else top_k,
+            output_fields=fields,
+        )
+
+        results: List[SearchResult] = []
+        for query, hits in zip(queries, raw_hits or []):
+            retrieved = [self._normalize_hit(hit) for hit in hits]
+            if exclude_self:
+                retrieved = [
+                    item for item in retrieved if item.image_path != query.image_path
+                ]
+            if reranker is not None:
+                retrieved = list(reranker.rerank(query=query, results=retrieved))
+
+            results.append(
+                SearchResult(
+                    query=query,
+                    query_source=self.config.name,
+                    retrieved=retrieved[:top_k],
+                    query_embedding=query_embeddings[len(results)],
+                )
+            )
+        return results
+
     def _normalize_hit(self, hit: Dict[str, Any]) -> RetrievedItem:
         entity = hit.get("entity", {})
         score = hit.get("score")
@@ -194,8 +282,20 @@ class MilvusCollectionAdapter:
 
     @staticmethod
     def _eq_expr(field_name: str, value: str) -> str:
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        escaped = MilvusCollectionAdapter._escape_expr_value(value)
         return f'{field_name} == "{escaped}"'
+
+    @staticmethod
+    def _in_expr(field_name: str, values: Sequence[str]) -> str:
+        escaped_values = [
+            f'"{MilvusCollectionAdapter._escape_expr_value(value)}"'
+            for value in values
+        ]
+        return f"{field_name} in [{', '.join(escaped_values)}]"
+
+    @staticmethod
+    def _escape_expr_value(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def compare_collection_coverage(

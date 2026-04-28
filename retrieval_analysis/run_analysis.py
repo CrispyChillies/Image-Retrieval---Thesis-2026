@@ -126,6 +126,8 @@ def main() -> None:
             top_k=raw_config.get("correctness_top_k", 1)
         ),
         skip_missing_queries=raw_config.get("skip_missing_queries", True),
+        preload_batch_size=raw_config.get("preload_batch_size", 100),
+        search_batch_size=raw_config.get("search_batch_size", 50),
     )
 
     payload = compare_models(
