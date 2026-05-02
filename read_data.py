@@ -19,24 +19,25 @@ from urllib.parse import unquote
 
 NIH_RETRIEVAL_PATHOLOGIES = [
     "Atelectasis",
-    "Consolidation",
+    "Cardiomegaly",
+    "Effusion",
     "Infiltration",
+    "Mass",
+    "Nodule",
+    "Pneumonia",
     "Pneumothorax",
+    "Consolidation",
     "Edema",
     "Emphysema",
     "Fibrosis",
-    "Effusion",
-    "Pneumonia",
-    "Pleural thickening",
-    "Cardiomegaly",
-    "Nodule",
-    "Mass",
+    "Pleural Thickening",
+    "Hernia",
 ]
 
 NIH_PATHOLOGY_ALIASES = {
-    "pleural_thickening": "Pleural thickening",
-    "pleural thickening": "Pleural thickening",
-    "pleuralthickening": "Pleural thickening",
+    "pleural_thickening": "Pleural Thickening",
+    "pleural thickening": "Pleural Thickening",
+    "pleuralthickening": "Pleural Thickening",
 }
 
 
