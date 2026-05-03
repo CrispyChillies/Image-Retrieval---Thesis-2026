@@ -9,3 +9,5 @@ eval.ipynb
 .env
 .vscode/
 training_sample/
+ChestMIR/weights/*
+ChestMIR/yolov5
