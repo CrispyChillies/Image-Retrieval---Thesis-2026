@@ -168,13 +168,17 @@ def preprocess_region_for_embedding(
     input_hw: tuple[int, int],
 ) -> np.ndarray:
     """Convert a BGR crop into the ConvNeXtV2 ONNX input tensor."""
-    helper_output = _run_global_helper_if_available("preprocess_image", region_bgr, input_hw)
+    helper_output = _run_global_helper_if_available(
+        "preprocess_bgr_image",
+        region_bgr,
+        input_size=input_hw,
+    )
     if isinstance(helper_output, np.ndarray):
         return helper_output.astype(np.float32, copy=False)
 
     h, w = input_hw
     rgb = cv2.cvtColor(region_bgr, cv2.COLOR_BGR2RGB)
-    rgb = cv2.resize(rgb, (w, h), interpolation=cv2.INTER_CUBIC)
+    rgb = cv2.resize(rgb, (w, h), interpolation=cv2.INTER_LINEAR)
     x = rgb.astype(np.float32) / 255.0
     x = (x - IMAGENET_MEAN) / IMAGENET_STD
     x = np.transpose(x, (2, 0, 1))

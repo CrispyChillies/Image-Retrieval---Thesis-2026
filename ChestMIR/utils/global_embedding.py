@@ -13,6 +13,7 @@ import argparse
 import ctypes
 import os
 import site
+import warnings
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Sequence, Tuple, Union
@@ -81,6 +82,7 @@ DEFAULT_MODEL_PATH = (
 PathLike = Union[str, Path]
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+DEFAULT_INPUT_SIZE = (384, 384)
 
 
 def _prepare_cuda_library_path() -> None:
@@ -147,6 +149,23 @@ def create_session(model_path: PathLike = DEFAULT_MODEL_PATH, device: str = "") 
         raise ValueError("Unsupported device. Use '', 'auto', 'cpu', or 'cuda'.")
 
     session = ort.InferenceSession(model_path, providers=providers)
+    input_hw = _parse_hw_from_shape(session.get_inputs()[0].shape)
+    is_default_retrieval_model = Path(model_path).name == Path(DEFAULT_MODEL_PATH).name
+    allow_size_mismatch = os.environ.get("CHESTMIR_ALLOW_ONNX_INPUT_MISMATCH", "").strip() == "1"
+    if is_default_retrieval_model and input_hw is not None and input_hw != DEFAULT_INPUT_SIZE:
+        msg = (
+            f"Unexpected ONNX input size {input_hw} for {Path(model_path).name}. "
+            f"Expected {DEFAULT_INPUT_SIZE} to match test.py ConvNeXtV2 pipeline. "
+            "This usually causes significant retrieval metric drop."
+        )
+        if allow_size_mismatch:
+            warnings.warn(msg, RuntimeWarning, stacklevel=2)
+        else:
+            raise RuntimeError(
+                msg
+                + " Re-export the retrieval ONNX with 384x384 input, or set "
+                "CHESTMIR_ALLOW_ONNX_INPUT_MISMATCH=1 to bypass this check."
+            )
     if device_l in {"cuda", "gpu"}:
         if "CUDAExecutionProvider" not in session.get_providers():
             raise RuntimeError(
@@ -187,6 +206,8 @@ def preprocess_bgr_image(
     if target_size is None and session is not None:
         model_input_shape = session.get_inputs()[0].shape
         target_size = _parse_hw_from_shape(model_input_shape)
+    if target_size is None:
+        target_size = DEFAULT_INPUT_SIZE
 
     if target_size is not None:
         h, w = target_size
