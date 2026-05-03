@@ -11,3 +11,5 @@ eval.ipynb
 training_sample/
 ChestMIR/weights/*
 ChestMIR/yolov5
+ChestMIR/datasets/*
+.milvus-data

@@ -1,11 +1,61 @@
 import base64
+import ctypes
 import io
+import os
+import site
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
 import cv2
 import numpy as np
+
+
+def _bootstrap_cuda_libs() -> None:
+    existing = os.environ.get("LD_LIBRARY_PATH", "")
+    existing_parts = [p for p in existing.split(":") if p]
+    prepend: list[str] = []
+    for sp in site.getsitepackages():
+        nvidia_root = Path(sp) / "nvidia"
+        if not nvidia_root.exists():
+            continue
+        for rel in (
+            "cublas/lib",
+            "cudnn/lib",
+            "cuda_runtime/lib",
+            "cufft/lib",
+            "curand/lib",
+            "cusolver/lib",
+            "cusparse/lib",
+            "nvjitlink/lib",
+        ):
+            p = str(nvidia_root / rel)
+            if Path(p).exists() and p not in prepend:
+                prepend.append(p)
+    if prepend:
+        merged = prepend + [p for p in existing_parts if p not in prepend]
+        os.environ["LD_LIBRARY_PATH"] = ":".join(merged)
+    for sp in site.getsitepackages():
+        nvidia_root = Path(sp) / "nvidia"
+        if not nvidia_root.exists():
+            continue
+        for rel, soname in (
+            ("cuda_runtime/lib", "libcudart.so.12"),
+            ("cublas/lib", "libcublasLt.so.12"),
+            ("cublas/lib", "libcublas.so.12"),
+            ("cudnn/lib", "libcudnn.so.9"),
+            ("curand/lib", "libcurand.so.10"),
+            ("cufft/lib", "libcufft.so.11"),
+            ("cusolver/lib", "libcusolver.so.11"),
+            ("cusparse/lib", "libcusparse.so.12"),
+            ("nvjitlink/lib", "libnvJitLink.so.12"),
+        ):
+            so = nvidia_root / rel / soname
+            if so.exists():
+                ctypes.CDLL(str(so), mode=ctypes.RTLD_GLOBAL)
+
+
+_bootstrap_cuda_libs()
 import onnxruntime as ort
 from ensemble_boxes import weighted_boxes_fusion
 
@@ -223,11 +273,21 @@ def non_max_suppression_numpy(
 
 @lru_cache(maxsize=16)
 def create_session(weights_path: str, device: str):
+    def _prepare_cuda_library_path() -> None:
+        _bootstrap_cuda_libs()
+
     available = ort.get_available_providers()
     if device.lower() == "cpu":
         providers = ["CPUExecutionProvider"]
-    elif device.lower() in {"cuda", "gpu"} and "CUDAExecutionProvider" in available:
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    elif device.lower() in {"cuda", "gpu"}:
+        _prepare_cuda_library_path()
+        if "CUDAExecutionProvider" not in available:
+            raise RuntimeError(
+                "CUDAExecutionProvider is unavailable. "
+                "Install GPU-enabled onnxruntime and CUDA libraries."
+            )
+        # Strict CUDA path (no CPU fallback) to guarantee GPU inference.
+        providers = ["CUDAExecutionProvider"]
     elif device and device.lower() not in {"", "cpu", "cuda", "gpu"}:
         raise ValueError(f"Unsupported device: {device}. Use '', 'cpu', or 'cuda'.")
     else:
@@ -237,7 +297,14 @@ def create_session(weights_path: str, device: str):
             else ["CPUExecutionProvider"]
         )
 
-    return ort.InferenceSession(weights_path, providers=providers)
+    session = ort.InferenceSession(weights_path, providers=providers)
+    if device.lower() in {"cuda", "gpu"}:
+        if "CUDAExecutionProvider" not in session.get_providers():
+            raise RuntimeError(
+                "Requested CUDA execution, but ONNX Runtime is not using CUDAExecutionProvider."
+            )
+        session.disable_fallback()
+    return session
 
 
 def prepare_input(image_bgr, img_size):
