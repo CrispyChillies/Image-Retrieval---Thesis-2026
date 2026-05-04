@@ -2,8 +2,8 @@ from pathlib import Path
 import torch
 from model import ConvNeXtV2
 
-ckpt_path = Path("/home/tuktu/Image-Retrieval---Thesis-2026/covid_convnextv2_seed_0_epoch_16_ckpt.pth")  # <-- sửa
-out_path = Path("/home/tuktu/Image-Retrieval---Thesis-2026/ChestMIR/weights/retrieval_model/covid_convnextv2_seed_0_epoch_16_backbone.onnx")
+ckpt_path = Path("/home/tuktu/Image-Retrieval---Thesis-2026/vindr_densenet121_seed_0_best_ckpt.pth")  # <-- sửa
+out_path = Path("/home/tuktu/Image-Retrieval---Thesis-2026/ChestMIR/weights/retrieval_model/vindr_densenet121_seed_0_best_backbone.onnx")
 
 model = ConvNeXtV2(embedding_dim=None)
 ckpt = torch.load(ckpt_path, map_location="cpu")
@@ -14,7 +14,7 @@ elif isinstance(ckpt, dict) and "state_dict" in ckpt:
 model.load_state_dict(ckpt, strict=False)
 model.eval()
 
-dummy = torch.randn(1, 3, 384, 384, dtype=torch.float32)
+dummy = torch.randn(1, 3, 224, 224, dtype=torch.float32)
 torch.onnx.export(
     model,
     dummy,

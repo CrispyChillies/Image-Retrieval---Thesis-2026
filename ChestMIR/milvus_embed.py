@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import importlib
 import inspect
 import json
@@ -19,8 +20,13 @@ except Exception:  # pragma: no cover - defensive fallback
 
 
 HERE = Path(__file__).resolve().parent
+REPO_ROOT = HERE.parent
+DEFAULT_COLLECTION_NAME = "covid_test_mir"
 DEFAULT_SPLIT_FILE = HERE / "datasets" / "covid" / "test_split.txt"
 DEFAULT_DATA_DIR = HERE / "datasets" / "covid" / "data" / "test"
+DEFAULT_VINDR_LABELS_FILE = REPO_ROOT / "vindr" / "image_labels_test.csv"
+DEFAULT_VINDR_GLOBAL_DIR = HERE / "datasets" / "vindr-384" / "test_png_384"
+DEFAULT_VINDR_REGION_DIR = HERE / "datasets" / "vindr-640" / "test_png_640"
 VARCHAR_LONG = 65535
 
 
@@ -368,11 +374,115 @@ def parse_test_split(split_path: Path, data_dir: Path) -> list[dict[str, str]]:
                     "image_id": image_id,
                     "image_name": filename,
                     "image_path": str(image_path.resolve()),
+                    "region_image_path": str(image_path.resolve()),
                     "label": label,
                 }
             )
 
     return rows
+
+
+def _is_positive_label(value: str) -> bool:
+    normalized = value.strip().lower()
+    return normalized in {"1", "1.0", "true", "yes", "y"}
+
+
+def _compact_label_text(labels: list[str], max_len: int = 120) -> str:
+    if not labels:
+        return "No finding"
+
+    chosen: list[str] = []
+    for label in labels:
+        candidate = ", ".join(chosen + [label]) if chosen else label
+        if len(candidate) > max_len:
+            break
+        chosen.append(label)
+
+    if not chosen:
+        return labels[0][:max_len]
+
+    remaining = len(labels) - len(chosen)
+    if remaining <= 0:
+        return ", ".join(chosen)
+
+    suffix = f" (+{remaining} more)"
+    base = ", ".join(chosen)
+    if len(base) + len(suffix) <= max_len:
+        return f"{base}{suffix}"
+
+    trimmed_base = base[: max(0, max_len - len(suffix))].rstrip(", ")
+    return f"{trimmed_base}{suffix}"
+
+
+def parse_vindr_labels(
+    labels_csv_path: Path,
+    global_dir: Path,
+    region_dir: Path,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+
+    if not labels_csv_path.exists():
+        raise FileNotFoundError(f"Missing ViNDR labels file: {labels_csv_path}")
+    if not global_dir.exists():
+        raise FileNotFoundError(f"Missing ViNDR global image directory: {global_dir}")
+    if not region_dir.exists():
+        raise FileNotFoundError(f"Missing ViNDR region image directory: {region_dir}")
+
+    with labels_csv_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames or "image_id" not in reader.fieldnames:
+            raise ValueError(f"Invalid ViNDR labels CSV (missing image_id): {labels_csv_path}")
+
+        label_columns = [name for name in reader.fieldnames if name != "image_id"]
+        for line_no, record in enumerate(reader, start=2):
+            image_id = (record.get("image_id") or "").strip()
+            if not image_id:
+                print(f"[vindr] Skipping row {line_no}: missing image_id")
+                continue
+
+            image_name = f"{image_id}.png"
+            global_path = global_dir / image_name
+            region_path = region_dir / image_name
+
+            if not global_path.exists():
+                continue
+
+            if not region_path.exists():
+                print(
+                    f"[vindr] Missing region image for {image_name}; "
+                    "falling back to global image path"
+                )
+                region_path = global_path
+
+            positive_labels = [
+                col for col in label_columns if _is_positive_label(str(record.get(col, "")))
+            ]
+            label = _compact_label_text(positive_labels, max_len=120)
+
+            rows.append(
+                {
+                    "image_id": image_id,
+                    "image_name": image_name,
+                    "image_path": str(global_path.resolve()),
+                    "region_image_path": str(region_path.resolve()),
+                    "label": label,
+                }
+            )
+
+    return rows
+
+
+def load_dataset_rows(args: argparse.Namespace) -> list[dict[str, str]]:
+    dataset = args.dataset.lower()
+    if dataset == "covid":
+        return parse_test_split(Path(args.split_file), Path(args.data_dir))
+    if dataset == "vindr":
+        return parse_vindr_labels(
+            Path(args.vindr_labels_file),
+            Path(args.vindr_global_dir),
+            Path(args.vindr_region_dir),
+        )
+    raise ValueError(f"Unsupported dataset: {args.dataset}")
 
 
 def _build_collection(collection_name: str, global_dim: int, drop_old: bool) -> Collection:
@@ -409,7 +519,7 @@ def _build_collection(collection_name: str, global_dim: int, drop_old: bool) -> 
         FieldSchema(name="region_vectors_json", dtype=DataType.VARCHAR, max_length=VARCHAR_LONG),
     ]
 
-    schema = CollectionSchema(fields=fields, description="COVID test embeddings with global + region vectors")
+    schema = CollectionSchema(fields=fields, description="Image embeddings with global + region vectors")
     print(f"[milvus] Creating collection: {collection_name} (global dim={global_dim})")
     return Collection(name=collection_name, schema=schema, using="default")
 
@@ -489,14 +599,16 @@ def _insert_batch(collection: Collection, batch: dict[str, list[Any]]) -> int:
 
 
 def run(args: argparse.Namespace) -> None:
-    split_path = DEFAULT_SPLIT_FILE
-    data_dir = DEFAULT_DATA_DIR
-
-    rows = parse_test_split(split_path, data_dir)
+    rows = load_dataset_rows(args)
     if args.limit is not None:
         rows = rows[: args.limit]
 
-    print(f"[data] Split entries with existing files: {len(rows)}")
+    effective_collection_name = args.collection_name
+    if args.dataset.lower() == "vindr" and args.collection_name == DEFAULT_COLLECTION_NAME:
+        effective_collection_name = "vindr_test_mir"
+        print(f"[config] Using default ViNDR collection name: {effective_collection_name}")
+
+    print(f"[data] Dataset={args.dataset} entries with existing files: {len(rows)}")
     if not rows:
         print("[data] Nothing to ingest")
         return
@@ -526,6 +638,7 @@ def run(args: argparse.Namespace) -> None:
     for row in rows:
         processed += 1
         image_path = row["image_path"]
+        region_image_path = row.get("region_image_path", image_path)
         image_name = row["image_name"]
         label = row["label"]
 
@@ -534,7 +647,7 @@ def run(args: argparse.Namespace) -> None:
             global_vector = _normalize_global_vector(g_raw)
 
             if collection is None:
-                collection = _build_collection(args.collection_name, len(global_vector), args.drop_old)
+                collection = _build_collection(effective_collection_name, len(global_vector), args.drop_old)
                 _ensure_index(
                     collection,
                     metric_type=args.metric_type,
@@ -547,7 +660,7 @@ def run(args: argparse.Namespace) -> None:
                     f"Embedding dim mismatch for {image_name}: got {len(global_vector)}"
                 )
 
-            r_raw = region_embed(image_path)
+            r_raw = region_embed(region_image_path)
             region_labels, region_boxes, region_vectors = _normalize_region_output(r_raw)
             detected_count = max(len(region_labels), len(region_boxes), len(region_vectors))
             (
@@ -602,7 +715,7 @@ def run(args: argparse.Namespace) -> None:
 
     print("=" * 72)
     print("[done] Ingestion finished")
-    print(f"[done] Collection: {args.collection_name}")
+    print(f"[done] Collection: {effective_collection_name}")
     print(f"[done] Total candidates: {total}")
     print(f"[done] Inserted: {inserted_total}")
     print(f"[done] Failed: {failed_total}")
@@ -611,14 +724,45 @@ def run(args: argparse.Namespace) -> None:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Ingest COVID test split embeddings into local Milvus")
-    parser.add_argument("--collection-name", type=str, default="covid_test_mir")
+    parser = argparse.ArgumentParser(description="Ingest dataset embeddings into local Milvus")
+    parser.add_argument("--dataset", type=str, default="covid", choices=["covid", "vindr"])
+    parser.add_argument("--collection-name", type=str, default=DEFAULT_COLLECTION_NAME)
     parser.add_argument("--drop-old", action="store_true")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=19530)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--split-file",
+        type=str,
+        default=str(DEFAULT_SPLIT_FILE),
+        help="COVID split file path (used when --dataset=covid)",
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=str,
+        default=str(DEFAULT_DATA_DIR),
+        help="COVID image directory path (used when --dataset=covid)",
+    )
+    parser.add_argument(
+        "--vindr-labels-file",
+        type=str,
+        default=str(DEFAULT_VINDR_LABELS_FILE),
+        help="ViNDR labels CSV (image_labels_test.csv, used when --dataset=vindr)",
+    )
+    parser.add_argument(
+        "--vindr-global-dir",
+        type=str,
+        default=str(DEFAULT_VINDR_GLOBAL_DIR),
+        help="ViNDR 384 PNG directory for global embeddings (used when --dataset=vindr)",
+    )
+    parser.add_argument(
+        "--vindr-region-dir",
+        type=str,
+        default=str(DEFAULT_VINDR_REGION_DIR),
+        help="ViNDR 640 PNG directory for region embeddings (used when --dataset=vindr)",
+    )
     parser.add_argument(
         "--metric-type",
         type=str,

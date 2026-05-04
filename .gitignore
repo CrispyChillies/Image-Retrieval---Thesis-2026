@@ -16,3 +16,6 @@ ChestMIR/convnextv2.tar.gz
 .milvus-data
 covid_convnextv2_seed_0_epoch_16_ckpt.pth
 ChestMIR/vindr-physionet-384-with-annotations.zip
+vindr_densenet121_seed_0_best_ckpt.pth
+covid_convnextv2_seed_0_epoch_16_ckpt.pth
+ChestMIR/vintest-384.zip

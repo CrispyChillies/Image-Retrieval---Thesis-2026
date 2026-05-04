@@ -1,21 +1,45 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 from pymilvus import Collection, connections
 
 
-DEFAULT_LESIONS = [
+HERE = Path(__file__).resolve().parent
+REPO_ROOT = HERE.parent
+DEFAULT_VINDR_LABELS_FILE = REPO_ROOT / "vindr" / "image_labels_test.csv"
+
+DEFAULT_COVID_LESIONS = [
     "Consolidation",
     "Lung Opacity",
     "Infiltration",
     "Atelectasis",
     "Pleural effusion",
+]
+DEFAULT_VINDR_LESIONS = [
+    "Consolidation",
+    "Lung Opacity",
+    "Infiltration",
+    "Atelectasis",
+    "Pleural effusion",
+    "Nodule/Mass",
+    "Cardiomegaly",
+    "Edema",
+    "Pneumothorax",
+    "Pleural thickening",
+    "Pulmonary fibrosis",
+    "Enlarged PA",
+    "ILD",
+    "Calcification",
+    "Lung cavity",
+    "Lung cyst",
 ]
 
 LESION_ALIAS_GROUPS = {
@@ -42,6 +66,52 @@ LESION_ALIAS_GROUPS = {
         "pleural_effusion",
         "effusion",
         "plural effusion",
+    ],
+    "nodule mass": [
+        "nodule mass",
+        "nodule/mass",
+        "nodule_mass",
+        "mass",
+        "nodule",
+    ],
+    "cardiomegaly": [
+        "cardiomegaly",
+    ],
+    "edema": [
+        "edema",
+    ],
+    "pneumothorax": [
+        "pneumothorax",
+    ],
+    "pleural thickening": [
+        "pleural thickening",
+        "pleural_thickening",
+    ],
+    "pulmonary fibrosis": [
+        "pulmonary fibrosis",
+        "pulmonary_fibrosis",
+        "fibrosis",
+    ],
+    "enlarged pa": [
+        "enlarged pa",
+        "enlarged_pa",
+    ],
+    "ild": [
+        "ild",
+        "interstitial lung disease",
+    ],
+    "calcification": [
+        "calcification",
+    ],
+    "lung cavity": [
+        "lung cavity",
+        "lung_cavity",
+        "cavity",
+    ],
+    "lung cyst": [
+        "lung cyst",
+        "lung_cyst",
+        "cyst",
     ],
 }
 
@@ -251,11 +321,47 @@ def build_lesion_vector_map(region_labels_json: str, region_vectors_json: str) -
     return out
 
 
+def _is_positive_label(value: str) -> bool:
+    normalized = str(value).strip().lower()
+    return normalized in {"1", "1.0", "true", "yes", "y"}
+
+
+def build_vindr_label_lookup(labels_csv_path: Path) -> dict[str, str]:
+    if not labels_csv_path.exists():
+        raise FileNotFoundError(f"Missing ViNDR labels file: {labels_csv_path}")
+
+    lookup: dict[str, str] = {}
+    with labels_csv_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames or "image_id" not in reader.fieldnames:
+            raise ValueError(f"Invalid ViNDR labels CSV (missing image_id): {labels_csv_path}")
+
+        label_columns = [name for name in reader.fieldnames if name != "image_id"]
+        for row in reader:
+            image_id = str(row.get("image_id", "")).strip()
+            if not image_id:
+                continue
+
+            positive = [c for c in label_columns if _is_positive_label(row.get(c, ""))]
+            if not positive:
+                lookup[image_id] = "No finding"
+                continue
+
+            non_no_finding = [c for c in positive if c.lower() != "no finding"]
+            if non_no_finding:
+                lookup[image_id] = " | ".join(non_no_finding)
+            else:
+                lookup[image_id] = "No finding"
+
+    return lookup
+
+
 def load_eval_dataset(
     host: str,
     port: int,
     collection_name: str,
     fetch_batch_size: int = 2048,
+    label_overrides: dict[str, str] | None = None,
 ) -> EvalDataset:
     connections.connect(alias="default", host=host, port=str(port))
     collection = Collection(collection_name)
@@ -290,8 +396,14 @@ def load_eval_dataset(
         g = np.asarray(r["global_vector"], dtype=np.float32)
         if g.ndim != 1 or g.size == 0:
             continue
-        image_names.append(str(r.get("image_name", "")))
-        labels.append(str(r.get("label", "unknown")))
+        image_name = str(r.get("image_name", ""))
+        image_stem = Path(image_name).stem
+        label = str(r.get("label", "unknown"))
+        if label_overrides is not None and image_stem in label_overrides:
+            label = label_overrides[image_stem]
+
+        image_names.append(image_name)
+        labels.append(label)
         vectors.append(g)
         lesion_maps.append(
             build_lesion_vector_map(
@@ -405,11 +517,15 @@ def rerank_with_specific_lesion(
 
     fallback_queries = 0
     reranked_queries = 0
+    matched_candidate_queries = 0
+    total_matched_candidates = 0
+    total_topk_candidates = 0
 
     for i in range(n):
         base_rank = ranks_base[:, i]
         topk = min(rerank_topk, n - 1)
         top_idx = base_rank[:topk]
+        total_topk_candidates += int(topk)
 
         q_vec = choose_query_lesion_vector(lesion_maps[i], lesion_name)
         if q_vec is None:
@@ -417,14 +533,24 @@ def rerank_with_specific_lesion(
             ranks_new[:, i] = base_rank
             continue
 
-        reranked_queries += 1
+        matched_candidates = 0
         combined_scores: list[tuple[int, float, float]] = []
         for j in top_idx:
             region_score = best_candidate_lesion_score(q_vec, lesion_maps[j], lesion_name)
+            if region_score >= 0.0:
+                matched_candidates += 1
             # still cosine-based; combine global cosine + lesion cosine for reranking
             score = (global_weight * float(base_sim[j, i])) + ((1.0 - global_weight) * region_score)
             combined_scores.append((int(j), score, float(base_sim[j, i])))
 
+        if matched_candidates == 0:
+            fallback_queries += 1
+            ranks_new[:, i] = base_rank
+            continue
+
+        reranked_queries += 1
+        matched_candidate_queries += 1
+        total_matched_candidates += matched_candidates
         combined_scores.sort(key=lambda x: (x[1], x[2]), reverse=True)
         new_top = [x[0] for x in combined_scores]
 
@@ -438,6 +564,11 @@ def rerank_with_specific_lesion(
         "queries_total": n,
         "queries_reranked": reranked_queries,
         "queries_fallback_global": fallback_queries,
+        "queries_with_candidate_match": matched_candidate_queries,
+        "matched_candidates_in_topk": total_matched_candidates,
+        "candidate_match_rate_pct": (
+            (100.0 * total_matched_candidates / total_topk_candidates) if total_topk_candidates > 0 else 0.0
+        ),
         "rerank_topk": rerank_topk,
         "global_weight": global_weight,
         "region_weight": 1.0 - global_weight,
@@ -459,11 +590,15 @@ def rerank_with_adaptive_lesion(
     fallback_queries = 0
     reranked_queries = 0
     lesion_usage: Counter[str] = Counter()
+    matched_candidate_queries = 0
+    total_matched_candidates = 0
+    total_topk_candidates = 0
 
     for i in range(n):
         base_rank = ranks_base[:, i]
         topk = min(rerank_topk, n - 1)
         top_idx = base_rank[:topk]
+        total_topk_candidates += int(topk)
 
         chosen_lesion, q_vec = choose_query_adaptive_lesion_vector(lesion_maps[i], target_lesions)
         if q_vec is None or chosen_lesion is None:
@@ -471,15 +606,24 @@ def rerank_with_adaptive_lesion(
             ranks_new[:, i] = base_rank
             continue
 
-        lesion_usage[chosen_lesion] += 1
-        reranked_queries += 1
-
+        matched_candidates = 0
         combined_scores: list[tuple[int, float, float]] = []
         for j in top_idx:
             region_score = best_candidate_lesion_score(q_vec, lesion_maps[j], chosen_lesion)
+            if region_score >= 0.0:
+                matched_candidates += 1
             score = (global_weight * float(base_sim[j, i])) + ((1.0 - global_weight) * region_score)
             combined_scores.append((int(j), score, float(base_sim[j, i])))
 
+        if matched_candidates == 0:
+            fallback_queries += 1
+            ranks_new[:, i] = base_rank
+            continue
+
+        lesion_usage[chosen_lesion] += 1
+        reranked_queries += 1
+        matched_candidate_queries += 1
+        total_matched_candidates += matched_candidates
         combined_scores.sort(key=lambda x: (x[1], x[2]), reverse=True)
         new_top = [x[0] for x in combined_scores]
 
@@ -493,6 +637,11 @@ def rerank_with_adaptive_lesion(
         "queries_total": n,
         "queries_reranked": reranked_queries,
         "queries_fallback_global": fallback_queries,
+        "queries_with_candidate_match": matched_candidate_queries,
+        "matched_candidates_in_topk": total_matched_candidates,
+        "candidate_match_rate_pct": (
+            (100.0 * total_matched_candidates / total_topk_candidates) if total_topk_candidates > 0 else 0.0
+        ),
         "rerank_topk": rerank_topk,
         "global_weight": global_weight,
         "region_weight": 1.0 - global_weight,
@@ -520,6 +669,7 @@ def print_stage_report(title: str, report: dict[str, Any], kappas: list[int], cl
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="ChestMIR two-stage evaluation from Milvus")
+    parser.add_argument("--dataset", type=str, default="covid", choices=["covid", "vindr"])
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=19530)
     parser.add_argument("--collection-name", type=str, default="covid_test_mir")
@@ -530,8 +680,14 @@ def main() -> int:
         "--lesions",
         type=str,
         nargs="+",
-        default=DEFAULT_LESIONS,
+        default=DEFAULT_COVID_LESIONS,
         help="Target lesions for stage-2 reranking",
+    )
+    parser.add_argument(
+        "--vindr-labels-file",
+        type=str,
+        default=str(DEFAULT_VINDR_LABELS_FILE),
+        help="ViNDR labels CSV used to reconstruct multi-label ground truth for evaluation.",
     )
     parser.add_argument(
         "--global-weight",
@@ -544,9 +700,27 @@ def main() -> int:
     if not (0.0 <= args.global_weight <= 1.0):
         raise ValueError("--global-weight must be in [0, 1]")
 
+    collection_name = args.collection_name
+    lesions = list(args.lesions)
+    label_overrides: dict[str, str] | None = None
+    if args.dataset == "vindr":
+        if collection_name == "covid_test_mir":
+            collection_name = "vindr_test_mir"
+            print(f"[config] Using default ViNDR collection name: {collection_name}")
+        if lesions == DEFAULT_COVID_LESIONS:
+            lesions = list(DEFAULT_VINDR_LESIONS)
+            print(f"[config] Using ViNDR lesion targets: {', '.join(lesions)}")
+        label_overrides = build_vindr_label_lookup(Path(args.vindr_labels_file))
+        print(f"[config] Loaded ViNDR label overrides: {len(label_overrides)} image_ids")
+
     dataset: EvalDataset | None = None
     try:
-        dataset = load_eval_dataset(args.host, args.port, args.collection_name)
+        dataset = load_eval_dataset(
+            args.host,
+            args.port,
+            collection_name,
+            label_overrides=label_overrides,
+        )
 
         sim_global = dataset.global_vectors @ dataset.global_vectors.T
         np.fill_diagonal(sim_global, -np.inf)
@@ -563,7 +737,7 @@ def main() -> int:
         ranks_adaptive, adaptive_stats = rerank_with_adaptive_lesion(
             base_sim=sim_global,
             lesion_maps=dataset.lesion_vectors,
-            target_lesions=args.lesions,
+            target_lesions=lesions,
             rerank_topk=args.rerank_topk,
             global_weight=args.global_weight,
         )
@@ -577,6 +751,8 @@ def main() -> int:
         print(
             f"Fallback(global-only): {adaptive_stats['queries_fallback_global']}/{adaptive_stats['queries_total']} | "
             f"Reranked: {adaptive_stats['queries_reranked']}/{adaptive_stats['queries_total']} | "
+            f"Candidate-match queries: {adaptive_stats['queries_with_candidate_match']} | "
+            f"Candidate match rate in topK: {adaptive_stats['candidate_match_rate_pct']:.2f}% | "
             f"topK={adaptive_stats['rerank_topk']}"
         )
         if adaptive_stats["lesion_usage"]:
@@ -586,7 +762,7 @@ def main() -> int:
         lesion_reports: list[dict[str, Any]] = []
         summary_rows: list[dict[str, Any]] = []
 
-        for lesion in args.lesions:
+        for lesion in lesions:
             ranks_rerank, stats = rerank_with_specific_lesion(
                 base_sim=sim_global,
                 lesion_maps=dataset.lesion_vectors,
@@ -617,6 +793,8 @@ def main() -> int:
             print(
                 f"Fallback(global-only): {stats['queries_fallback_global']}/{stats['queries_total']} | "
                 f"Reranked: {stats['queries_reranked']}/{stats['queries_total']} | "
+                f"Candidate-match queries: {stats['queries_with_candidate_match']} | "
+                f"Candidate match rate in topK: {stats['candidate_match_rate_pct']:.2f}% | "
                 f"topK={stats['rerank_topk']}"
             )
 
@@ -626,7 +804,7 @@ def main() -> int:
             valid_r5 = [r["R@5"] for r in summary_rows if not np.isnan(r["R@5"])]
             mean_r5 = float(np.mean(valid_r5)) if valid_r5 else float("nan")
 
-            print("\n=== Final Summary Across 5 Lesions ===")
+            print(f"\n=== Final Summary Across {len(summary_rows)} Lesions ===")
             print(f"Mean mAP: {mean_map:.2f}%")
             print(f"Mean R@1: {mean_r1:.2f}%")
             if not np.isnan(mean_r5):

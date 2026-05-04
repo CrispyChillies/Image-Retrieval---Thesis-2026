@@ -83,11 +83,11 @@ except Exception:
 
 WEIGHTS_DIR = CHESTMIR_ROOT / "weights"
 DEFAULT_REGION_EMBEDDING_ONNX = (
-    WEIGHTS_DIR / "retrieval_model" / "covid_convnextv2_seed_0_epoch_16_backbone.onnx"
+    WEIGHTS_DIR / "retrieval_model" / "vindr_densenet121_seed_0_best_backbone.onnx"
 )
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-DEFAULT_INPUT_SIZE = 384
+DEFAULT_INPUT_SIZE = 224
 
 
 def _get_model_input_hw(session: ort.InferenceSession) -> tuple[int, int]:

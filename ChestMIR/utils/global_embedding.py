@@ -75,14 +75,14 @@ DEFAULT_MODEL_PATH = (
     CUR_PATH
     / "weights"
     / "retrieval_model"
-    / "covid_convnextv2_seed_0_epoch_16_backbone.onnx"
+    / "vindr_densenet121_seed_0_best_backbone.onnx"
 )
 
 
 PathLike = Union[str, Path]
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-DEFAULT_INPUT_SIZE = (384, 384)
+DEFAULT_INPUT_SIZE = (224, 224)
 
 
 def _prepare_cuda_library_path() -> None:
