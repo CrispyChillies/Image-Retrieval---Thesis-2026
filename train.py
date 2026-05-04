@@ -73,7 +73,9 @@ def train_epoch(
         criterion_output = criterion(embeddings, targets)
         if isinstance(criterion_output, tuple):
             loss, aux_metric = criterion_output
-            if isinstance(criterion, (TripletMarginLoss, WeightedMultiLabelTripletLoss)):
+            if isinstance(
+                criterion, (TripletMarginLoss, WeightedMultiLabelTripletLoss)
+            ):
                 aux_metric_name = "% avg hard triplets"
             else:
                 aux_metric_name = "aux"
