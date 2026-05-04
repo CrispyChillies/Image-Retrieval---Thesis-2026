@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import torch
+from tqdm import tqdm
 
 from nih_multilabel_training import set_seed
 from nih_zilliz_utils import (
@@ -47,11 +48,12 @@ def main(args: argparse.Namespace) -> None:
             image_paths=query_paths,
             device=device,
             batch_size=args.batch_size,
+            progress_desc="Encoding queries",
         )
         effective_top_k = args.top_k if args.top_k and args.top_k > 0 else collection.num_entities
 
         all_results = []
-        for row in query_rows:
+        for row in tqdm(query_rows, desc="Searching queries", unit="query"):
             hits = search_collection(
                 collection=collection,
                 query_vector=row["embedding"].tolist(),

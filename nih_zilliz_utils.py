@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from PIL import Image
 from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, utility
+from tqdm import tqdm
 
 from nih_multilabel_retrieval import (
     NIH_RETRIEVAL_PATHOLOGIES,
@@ -204,9 +205,14 @@ def encode_npy_paths(
     image_paths: Sequence[str],
     device: torch.device,
     batch_size: int,
+    progress_desc: str = "Encoding",
 ) -> List[Dict[str, object]]:
     rows: List[Dict[str, object]] = []
-    for start in range(0, len(image_paths), batch_size):
+    for start in tqdm(
+        range(0, len(image_paths), batch_size),
+        desc=progress_desc,
+        unit="batch",
+    ):
         batch_paths = image_paths[start : start + batch_size]
         tensors = []
         batch_rows = []

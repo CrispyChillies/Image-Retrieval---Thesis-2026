@@ -50,6 +50,7 @@ def main(args: argparse.Namespace) -> None:
             image_paths=gallery_paths,
             device=device,
             batch_size=args.batch_size,
+            progress_desc="Encoding gallery",
         )
         insert_rows(collection, rows)
         print(f"collection={collection_name}")
