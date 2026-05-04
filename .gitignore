@@ -9,3 +9,10 @@ eval.ipynb
 .env
 .vscode/
 training_sample/
+ChestMIR/weights/*
+ChestMIR/yolov5
+ChestMIR/datasets/*
+ChestMIR/convnextv2.tar.gz
+.milvus-data
+covid_convnextv2_seed_0_epoch_16_ckpt.pth
+ChestMIR/vindr-physionet-384-with-annotations.zip
