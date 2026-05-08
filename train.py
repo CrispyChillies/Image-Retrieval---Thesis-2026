@@ -856,14 +856,18 @@ def main(args):
         )
     elif args.dataset == "isic":
         train_dataset = ISICDataSet(
-            data_dir=os.path.join(args.dataset_dir, "ISIC-2017_Training_Data"),
+            data_dir=os.path.join(
+                args.dataset_dir, "ISIC-2017_Training_Data/ISIC-2017_Training_Data"
+            ),
             image_list_file=args.train_image_list,
             use_melanoma=not args.anomaly,  # whether or not to use melanoma in training
             mask_dir=os.path.join(args.mask_dir, "train") if args.mask_dir else None,
             transform=train_transform,
         )
         val_dataset = ISICDataSet(
-            data_dir=os.path.join(args.val_dataset_dir, "ISIC-2017_Training_Data"),
+            data_dir=os.path.join(
+                args.val_dataset_dir, "ISIC-2017_Training_Data/ISIC-2017_Training_Data"
+            ),
             image_list_file=args.val_image_list,
             mask_dir=os.path.join(args.mask_dir, "train") if args.mask_dir else None,
             transform=val_transform,
