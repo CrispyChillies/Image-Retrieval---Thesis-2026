@@ -156,11 +156,15 @@ def pairwise_distance(query_codes, gallery_codes, binary_codes):
     if binary_codes:
         query_binary = query_codes.to(torch.int16)
         gallery_binary = gallery_codes.to(torch.int16)
-        return (query_binary[:, None, :] != gallery_binary[None, :, :]).sum(dim=2).float()
+        return (
+            (query_binary[:, None, :] != gallery_binary[None, :, :]).sum(dim=2).float()
+        )
     return torch.cdist(query_codes.float(), gallery_codes.float(), p=2)
 
 
-def compute_retrieval_metrics(query_codes, query_labels, gallery_codes, gallery_labels, topk_values, binary_codes):
+def compute_retrieval_metrics(
+    query_codes, query_labels, gallery_codes, gallery_labels, topk_values, binary_codes
+):
     distances = pairwise_distance(query_codes, gallery_codes, binary_codes)
     sorted_indices = torch.argsort(distances, dim=1, descending=False)
 
@@ -329,7 +333,9 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_transform, eval_transform = build_transforms(args.image_size)
-    train_base, gallery_base, query_base = build_datasets(args, train_transform, eval_transform)
+    train_base, gallery_base, query_base = build_datasets(
+        args, train_transform, eval_transform
+    )
 
     num_classes = len(set(int(label) for label in train_base.labels))
     args.num_classes = num_classes
@@ -378,13 +384,20 @@ def main():
             optimizer.load_state_dict(checkpoint["optimizer"])
         start_epoch = int(checkpoint.get("epoch", 0))
         saved_metrics = checkpoint.get("metrics", {})
-        best_score = saved_metrics.get("retrieval", {}).get(max(args.eval_topk), {}).get("map", float("-inf"))
+        best_score = (
+            saved_metrics.get("retrieval", {})
+            .get(max(args.eval_topk), {})
+            .get("map", float("-inf"))
+        )
         print(f"Loaded checkpoint from {args.resume} at epoch {start_epoch}.")
 
     best_checkpoint_path = os.path.join(args.output_dir, f"ath_{args.dataset}_best.pth")
     last_checkpoint_path = os.path.join(args.output_dir, f"ath_{args.dataset}_last.pth")
-    metrics_path = os.path.join(args.output_dir, f"ath_{args.dataset}_best_metrics.json")
+    metrics_path = os.path.join(
+        args.output_dir, f"ath_{args.dataset}_best_metrics.json"
+    )
 
+    print("Starting training...")
     for epoch in range(start_epoch, args.epochs):
         train_loss = train_one_epoch(
             model=model,
@@ -406,11 +419,15 @@ def main():
             f"mAP@{selected_topk}={score * 100.0:.2f}%"
         )
 
-        save_checkpoint(model, optimizer, args, epoch + 1, metrics, last_checkpoint_path)
+        save_checkpoint(
+            model, optimizer, args, epoch + 1, metrics, last_checkpoint_path
+        )
 
         if score > best_score:
             best_score = score
-            save_checkpoint(model, optimizer, args, epoch + 1, metrics, best_checkpoint_path)
+            save_checkpoint(
+                model, optimizer, args, epoch + 1, metrics, best_checkpoint_path
+            )
             with open(metrics_path, "w", encoding="utf-8") as f:
                 json.dump(metrics, f, indent=2)
 
