@@ -105,19 +105,25 @@ def build_datasets(args, train_transform, eval_transform):
         )
     elif args.dataset == "isic":
         train_dataset = ISICDataSet(
-            data_dir=os.path.join(args.dataset_dir, "ISIC-2017_Training_Data"),
+            data_dir=os.path.join(
+                args.dataset_dir, "ISIC-2017_Training_Data/ISIC-2017_Training_Data"
+            ),
             image_list_file=args.train_image_list,
             use_melanoma=True,
             transform=train_transform,
         )
         train_eval_dataset = ISICDataSet(
-            data_dir=os.path.join(args.dataset_dir, "ISIC-2017_Training_Data"),
+            data_dir=os.path.join(
+                args.dataset_dir, "ISIC-2017_Training_Data/ISIC-2017_Training_Data"
+            ),
             image_list_file=args.train_image_list,
             use_melanoma=True,
             transform=eval_transform,
         )
         query_dataset = ISICDataSet(
-            data_dir=os.path.join(args.dataset_dir, "ISIC-2017_Test_v2_Data"),
+            data_dir=os.path.join(
+                args.dataset_dir, "ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data"
+            ),
             image_list_file=args.val_image_list,
             use_melanoma=True,
             transform=eval_transform,
