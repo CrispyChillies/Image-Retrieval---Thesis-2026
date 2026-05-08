@@ -879,7 +879,7 @@ def main(args):
             transform=train_transform,
         )
         val_dataset = TBX11kDataSet(
-            data_dir=os.path.join(args.val_dataset_dir, "train"),
+            data_dir=os.path.join(args.val_dataset_dir, "test"),
             csv_file=args.val_image_list,
             transform=val_transform,
         )
