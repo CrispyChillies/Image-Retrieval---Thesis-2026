@@ -81,13 +81,30 @@ def pairwise_distance(query_codes, gallery_codes, binary_codes):
     if binary_codes:
         query_binary = query_codes.to(torch.int16)
         gallery_binary = gallery_codes.to(torch.int16)
-        return (query_binary[:, None, :] != gallery_binary[None, :, :]).sum(dim=2).float()
+        return (
+            (query_binary[:, None, :] != gallery_binary[None, :, :]).sum(dim=2).float()
+        )
     return torch.cdist(query_codes.float(), gallery_codes.float(), p=2)
 
 
-def compute_metrics(query_codes, query_labels, gallery_codes, gallery_labels, query_logits, topk_values, binary_codes):
+def compute_metrics(
+    query_codes,
+    query_labels,
+    gallery_codes,
+    gallery_labels,
+    query_logits,
+    topk_values,
+    binary_codes,
+):
     distances = pairwise_distance(query_codes, gallery_codes, binary_codes)
     sorted_indices = torch.argsort(distances, dim=1)
+
+    # Precompute total relevant items for each query (for recall calculation)
+    total_relevant_per_query = {}
+    for row, label_tensor in enumerate(query_labels):
+        label = int(label_tensor.item())
+        total_relevant = (gallery_labels == label).sum().item()
+        total_relevant_per_query[row] = total_relevant
 
     retrieval = {}
     for topk in topk_values:
@@ -95,6 +112,8 @@ def compute_metrics(query_codes, query_labels, gallery_codes, gallery_labels, qu
         ap_scores = []
         rr_scores = []
         vote_scores = []
+        precision_at_k_scores = []
+        recall_at_k_scores = []
 
         for row, label_tensor in enumerate(query_labels):
             label = int(label_tensor.item())
@@ -103,6 +122,18 @@ def compute_metrics(query_codes, query_labels, gallery_codes, gallery_labels, qu
             matches = (ranked_labels == label).cpu().numpy().astype(np.int32)
 
             hit_scores.append(float(matches.any()))
+
+            # Precision@K: number of relevant items in top-K / K
+            num_relevant_at_k = matches.sum()
+            precision_at_k = num_relevant_at_k / topk
+            precision_at_k_scores.append(precision_at_k)
+
+            # Recall@K: number of relevant items in top-K / total relevant items
+            total_relevant = total_relevant_per_query[row]
+            recall_at_k = (
+                num_relevant_at_k / total_relevant if total_relevant > 0 else 0.0
+            )
+            recall_at_k_scores.append(recall_at_k)
 
             if matches.sum() == 0:
                 ap_scores.append(0.0)
@@ -127,10 +158,14 @@ def compute_metrics(query_codes, query_labels, gallery_codes, gallery_labels, qu
             "mhr": float(np.mean(hit_scores)),
             "map": float(np.mean(ap_scores)),
             "mrr": float(np.mean(rr_scores)),
+            "mp@k": float(np.mean(precision_at_k_scores)),
+            "r@k": float(np.mean(recall_at_k_scores)),
             "majority_acc": float(np.mean(vote_scores)),
         }
 
-    classification_acc = query_logits.argmax(dim=1).eq(query_labels).float().mean().item()
+    classification_acc = (
+        query_logits.argmax(dim=1).eq(query_labels).float().mean().item()
+    )
     return {
         "classification_acc": classification_acc,
         "retrieval": retrieval,
@@ -138,7 +173,9 @@ def compute_metrics(query_codes, query_labels, gallery_codes, gallery_labels, qu
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Test ATH retrieval on COVIDx CXR or ISIC.")
+    parser = argparse.ArgumentParser(
+        description="Test ATH retrieval on COVIDx CXR or ISIC."
+    )
     parser.add_argument("--dataset", choices=["covid", "isic"], required=True)
     parser.add_argument("--dataset-dir", required=True)
     parser.add_argument("--resume", required=True)
@@ -227,6 +264,8 @@ def main():
         print(
             f"Top-{topk} | "
             f"mHR={result['mhr'] * 100.0:.2f}% | "
+            f"mP@K={result['mp@k'] * 100.0:.2f}% | "
+            f"R@K={result['r@k'] * 100.0:.2f}% | "
             f"mAP={result['map'] * 100.0:.2f}% | "
             f"mRR={result['mrr'] * 100.0:.2f}% | "
             f"vote_acc={result['majority_acc'] * 100.0:.2f}%"
