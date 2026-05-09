@@ -108,7 +108,7 @@ def get_model_and_transform(
             # )
             img_size_convnext = 384
             resize_size = 432
-            val_transform = transforms.Compose(
+            transform = transforms.Compose(
                 [
                     transforms.Lambda(lambda image: image.convert("RGB")),
                     transforms.Resize(resize_size),
