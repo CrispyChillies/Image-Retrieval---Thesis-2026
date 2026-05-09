@@ -419,7 +419,6 @@
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s2888.png sick_but_no_tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s1779.png sick_but_no_tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s3334.png sick_but_no_tb
-/kaggle/input/tbx11k-retrieval/kaggle/data/test/tb0190.png tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h3684.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/tb0150.png tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h2538.png healthy
