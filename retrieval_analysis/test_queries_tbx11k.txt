@@ -517,13 +517,11 @@
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h0665.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h1351.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/tb0943.png tb
-/kaggle/input/tbx11k-retrieval/kaggle/data/test/tb0624.png tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s1916.png sick_but_no_tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h2874.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/tb0242.png tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s3498.png sick_but_no_tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/tb0844.png tb
-/kaggle/input/tbx11k-retrieval/kaggle/data/test/tb0203.png tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h2886.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h2378.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s4148.png sick_but_no_tb
@@ -666,7 +664,6 @@
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h2747.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h0997.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h4841.png healthy
-/kaggle/input/tbx11k-retrieval/kaggle/data/test/tb0581.png tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h4933.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h1457.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h0787.png healthy
@@ -875,7 +872,6 @@
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s0468.png sick_but_no_tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h4266.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h2008.png healthy
-/kaggle/input/tbx11k-retrieval/kaggle/data/test/tb0715.png tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s2863.png sick_but_no_tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h0053.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/tb0795.png tb
@@ -1008,7 +1004,6 @@
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s2146.png sick_but_no_tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s2444.png sick_but_no_tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h2269.png healthy
-/kaggle/input/tbx11k-retrieval/kaggle/data/test/tb0150.png tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h3005.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s2978.png sick_but_no_tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h2837.png healthy
@@ -1318,7 +1313,6 @@
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s1720.png sick_but_no_tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s3579.png sick_but_no_tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s2411.png sick_but_no_tb
-/kaggle/input/tbx11k-retrieval/kaggle/data/test/tb0876.png tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/h4189.png healthy
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s2521.png sick_but_no_tb
 /kaggle/input/tbx11k-retrieval/kaggle/data/test/s3228.png sick_but_no_tb
