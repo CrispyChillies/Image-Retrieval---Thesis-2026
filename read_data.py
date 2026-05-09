@@ -337,11 +337,31 @@ class TBX11kDataSet(Dataset):
         self.type_map = {"tb": 0, "healthy": 1, "sick_but_no_tb": 2}
 
         import csv
-        with open(csv_file, newline="") as f:
+        with open(csv_file, newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
+            if reader.fieldnames is None:
+                raise ValueError(f"CSV has no header row: {csv_file}")
+
+            # Normalize headers to avoid BOM/case/whitespace issues.
+            normalized_field_map = {
+                name.strip().lstrip("\ufeff").lower(): name
+                for name in reader.fieldnames
+                if name is not None
+            }
+            fname_key = normalized_field_map.get("fname")
+            image_type_key = normalized_field_map.get("image_type")
+
+            if fname_key is None or image_type_key is None:
+                raise ValueError(
+                    "TBX11k CSV must contain 'fname' and 'image_type' columns. "
+                    f"Found columns: {reader.fieldnames}"
+                )
+
             for row in reader:
-                fname = row["fname"]
-                image_type = row["image_type"].strip()
+                fname = row.get(fname_key, "").strip()
+                image_type = row.get(image_type_key, "").strip()
+                if not fname or not image_type:
+                    continue
                 # Only use images with valid image_type
                 if image_type not in self.type_map:
                     continue
