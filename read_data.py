@@ -9,13 +9,13 @@ import csv
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
+
 # from segmentation import segment_and_mask
 import numpy as np
 import cv2
 import pandas as pd
 from pathlib import Path
 from urllib.parse import unquote
-
 
 NIH_RETRIEVAL_PATHOLOGIES = [
     "Atelectasis",
@@ -145,7 +145,7 @@ class NIHChestXrayRetrievalDataSet(Dataset):
                 f"Expected token '{prefix}'."
             )
 
-        stem_without_prefix = stem[prefix_index + len(prefix):]
+        stem_without_prefix = stem[prefix_index + len(prefix) :]
         try:
             encoded_labels, _ = stem_without_prefix.rsplit("_", 1)
         except ValueError as exc:
@@ -154,7 +154,9 @@ class NIHChestXrayRetrievalDataSet(Dataset):
                 "Expected labels and numeric identifier separated by the final underscore."
             ) from exc
 
-        raw_label_names = [label.strip() for label in unquote(encoded_labels).split("|")]
+        raw_label_names = [
+            label.strip() for label in unquote(encoded_labels).split("|")
+        ]
         label_names = []
         multi_hot = np.zeros(len(self.pathology_names), dtype=np.float32)
         unknown_labels = []
@@ -196,7 +198,14 @@ class NIHChestXrayRetrievalDataSet(Dataset):
 
 
 class ISICDataSet(Dataset):
-    def __init__(self, data_dir, image_list_file, use_melanoma=True, mask_dir=None, transform=None):
+    def __init__(
+        self,
+        data_dir,
+        image_list_file,
+        use_melanoma=True,
+        mask_dir=None,
+        transform=None,
+    ):
         """
         Args:
             data_dir: path to image directory.
@@ -209,11 +218,11 @@ class ISICDataSet(Dataset):
         image_names = []
         labels = []
         mask_names = []
-        with open(image_list_file, newline='') as f:
+        with open(image_list_file, newline="") as f:
             reader = csv.reader(f)
             next(reader, None)  # skip header
             for line in reader:
-                image_name = line[0]+'.jpg'
+                image_name = line[0] + ".jpg"
                 if float(line[1]) == 1:
                     label = 2  # melanoma
                 elif float(line[2]) == 1:
@@ -242,12 +251,12 @@ class ISICDataSet(Dataset):
             image and its labels
         """
         image_name = self.image_names[index]
-        image = Image.open(image_name).convert('RGB')
+        image = Image.open(image_name).convert("RGB")
         label = self.labels[index]
         if self.mask_names:
             mask_name = self.mask_names[index]
             mask = Image.open(mask_name).resize(image.size)
-            image = Image.composite(image, Image.new('RGB', image.size), mask)
+            image = Image.composite(image, Image.new("RGB", image.size), mask)
         if self.transform is not None:
             image = self.transform(image)
         return image, torch.tensor(label, dtype=torch.long)
@@ -257,7 +266,9 @@ class ISICDataSet(Dataset):
 
 
 class ChestXrayDataSet(Dataset):
-    def __init__(self, data_dir, image_list_file, use_covid=True, mask_dir=None, transform=None):
+    def __init__(
+        self, data_dir, image_list_file, use_covid=True, mask_dir=None, transform=None
+    ):
         """
         Args:
             data_dir: path to image directory.
@@ -285,7 +296,8 @@ class ChestXrayDataSet(Dataset):
                     continue
                 if mask_dir is not None:
                     mask_name = os.path.join(
-                        mask_dir, os.path.splitext(image_name)[0] + '_xslor.png')
+                        mask_dir, os.path.splitext(image_name)[0] + "_xslor.png"
+                    )
                     mask_names.append(mask_name)
                 image_name = os.path.join(data_dir, image_name)
                 image_names.append(image_name)
@@ -305,16 +317,16 @@ class ChestXrayDataSet(Dataset):
             image and its labels
         """
         image_name = self.image_names[index]
-        image = Image.open(image_name).convert('RGB')
+        image = Image.open(image_name).convert("RGB")
         label = self.labels[index]
         if self.mask_names:
             mask_name = self.mask_names[index]
             mask = Image.open(mask_name).resize(image.size)
-            image = Image.composite(image, Image.new('RGB', image.size), mask)
+            image = Image.composite(image, Image.new("RGB", image.size), mask)
         if self.transform is not None:
             image = self.transform(image)
         return image, torch.tensor(label, dtype=torch.long)
-    
+
     def __len__(self):
         return len(self.image_names)
 
@@ -337,6 +349,7 @@ class TBX11kDataSet(Dataset):
         self.type_map = {"tb": 0, "healthy": 1, "sick_but_no_tb": 2}
 
         import csv
+
         with open(csv_file, newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
             if reader.fieldnames is None:
@@ -371,7 +384,7 @@ class TBX11kDataSet(Dataset):
 
     def __getitem__(self, index):
         image_name = self.image_names[index]
-        image = Image.open(image_name).convert('RGB')
+        image = Image.open(image_name).convert("RGB")
         label = self.labels[index]
         if self.transform is not None:
             image = self.transform(image)
@@ -391,34 +404,37 @@ class VINDRDataSet(Dataset):
         """
         self.data_dir = data_dir
         self.transform = transform
-        
+
         self.label_columns = [
-            "Aortic enlargement", "Cardiomegaly", 
-            "Pleural effusion", "Pleural thickening", 
-            "Lung Opacity", "No finding"
+            "Aortic enlargement",
+            "Cardiomegaly",
+            "Pleural effusion",
+            "Pleural thickening",
+            "Lung Opacity",
+            "No finding",
         ]
-        
+
         df = pd.read_csv(csv_file)
         # Normalize column name: "Other disease" -> "Other diseases"
         if "Other disease" in df.columns and "Other diseases" not in df.columns:
             df = df.rename(columns={"Other disease": "Other diseases"})
-        
+
         if "rad_id" in df.columns:
             self.data = df.groupby("image_id")[self.label_columns].max().reset_index()
         else:
             self.data = df[["image_id"] + self.label_columns].copy()
-        
+
         self.image_ids = self.data["image_id"].tolist()
         self.labels = self.data[self.label_columns].values
 
     def __getitem__(self, index):
         img_id = self.image_ids[index]
         img_path = os.path.join(self.data_dir, f"{img_id}.png")
-        
-        image = Image.open(img_path).convert('RGB')
-        
+
+        image = Image.open(img_path).convert("RGB")
+
         label = self.labels[index]
-        
+
         if self.transform is not None:
             image = self.transform(image)
 
@@ -469,30 +485,50 @@ DISEASE_DESCRIPTIONS = {
 
 class VINDRConceptCLIPDataSet(Dataset):
     """VinDR dataset for ConceptCLIP fine-tuning.
-    
+
     Returns PIL images (not tensor-transformed) for processing by ConceptCLIP's
     AutoProcessor, along with concept-rich text descriptions, concept labels,
     and disease labels. Separates 22 visual concepts from 6 disease labels.
     """
-    
+
     # 22 visual concepts (radiographic findings)
     CONCEPT_COLUMNS = [
-        "Aortic enlargement", "Atelectasis", "Calcification", "Cardiomegaly",
-        "Clavicle fracture", "Consolidation", "Edema", "Emphysema",
-        "Enlarged PA", "ILD", "Infiltration", "Lung Opacity",
-        "Lung cavity", "Lung cyst", "Mediastinal shift", "Nodule/Mass",
-        "Pleural effusion", "Pleural thickening", "Pneumothorax",
-        "Pulmonary fibrosis", "Rib fracture", "Other lesion",
+        "Aortic enlargement",
+        "Atelectasis",
+        "Calcification",
+        "Cardiomegaly",
+        "Clavicle fracture",
+        "Consolidation",
+        "Edema",
+        "Emphysema",
+        "Enlarged PA",
+        "ILD",
+        "Infiltration",
+        "Lung Opacity",
+        "Lung cavity",
+        "Lung cyst",
+        "Mediastinal shift",
+        "Nodule/Mass",
+        "Pleural effusion",
+        "Pleural thickening",
+        "Pneumothorax",
+        "Pulmonary fibrosis",
+        "Rib fracture",
+        "Other lesion",
     ]
-    
+
     # 6 disease labels (clinical diagnoses)
     DISEASE_COLUMNS = [
-        "COPD", "Lung tumor", "Pneumonia", "Tuberculosis",
-        "Other diseases", "No finding",
+        "COPD",
+        "Lung tumor",
+        "Pneumonia",
+        "Tuberculosis",
+        "Other diseases",
+        "No finding",
     ]
-    
+
     ALL_COLUMNS = CONCEPT_COLUMNS + DISEASE_COLUMNS  # 28 total
-    
+
     def __init__(self, data_dir, csv_file, transform=None, return_pil=True):
         """
         Args:
@@ -505,39 +541,39 @@ class VINDRConceptCLIPDataSet(Dataset):
         self.data_dir = data_dir
         self.transform = transform
         self.return_pil = return_pil
-        
+
         df = pd.read_csv(csv_file)
-        
+
         # Normalize column name: test CSV has "Other disease" (singular)
         if "Other disease" in df.columns and "Other diseases" not in df.columns:
             df = df.rename(columns={"Other disease": "Other diseases"})
-        
+
         # Aggregate multi-annotator labels (train has rad_id, test does not)
         if "rad_id" in df.columns:
             self.data = df.groupby("image_id")[self.ALL_COLUMNS].max().reset_index()
         else:
             self.data = df[["image_id"] + self.ALL_COLUMNS].copy()
-        
+
         self.image_ids = self.data["image_id"].tolist()
         self.concept_labels = self.data[self.CONCEPT_COLUMNS].values  # (N, 22)
         self.disease_labels = self.data[self.DISEASE_COLUMNS].values  # (N, 6)
-        self.all_labels = self.data[self.ALL_COLUMNS].values          # (N, 28)
-        
+        self.all_labels = self.data[self.ALL_COLUMNS].values  # (N, 28)
+
         # For compatibility with PKSampler/train.py (use all labels)
         self.labels = self.all_labels
-    
+
     def build_text(self, concept_vec, disease_vec):
         """Generate concept-rich text description from label vectors.
-        
+
         Format:  "A chest X-ray showing {disease(s)} with findings of
                   {concept1_description}, {concept2_description}, ..."
-                  
+
         For normal images: "A normal chest X-ray without significant pathological findings."
-        
+
         Args:
             concept_vec: numpy array of shape (22,) with 0/1 values
             disease_vec: numpy array of shape (6,) with 0/1 values
-        
+
         Returns:
             text: concept-rich text description
             concept_names: list of active concept names (for RC-Align)
@@ -548,10 +584,10 @@ class VINDRConceptCLIPDataSet(Dataset):
         active_diseases = [
             self.DISEASE_COLUMNS[i] for i, v in enumerate(disease_vec) if v == 1
         ]
-        
+
         # Check if it's a normal/no-finding image
         is_normal = ("No finding" in active_diseases) and len(active_concepts) == 0
-        
+
         if is_normal:
             text = "A normal chest X-ray without significant pathological findings."
             concept_names = []
@@ -565,47 +601,50 @@ class VINDRConceptCLIPDataSet(Dataset):
                 disease_part = "unspecified condition"
             else:
                 disease_part = "unspecified condition"
-            
+
             # Build concept part with enriched descriptions
             if active_concepts:
                 concept_strs = [CONCEPT_DESCRIPTIONS.get(c, c) for c in active_concepts]
                 concept_part = ", ".join(concept_strs)
-                text = (f"A chest X-ray showing {disease_part} "
-                        f"with findings of {concept_part}.")
+                text = (
+                    f"A chest X-ray showing {disease_part} "
+                    f"with findings of {concept_part}."
+                )
             else:
                 text = f"A chest X-ray showing {disease_part}."
-            
+
             concept_names = active_concepts
-        
+
         return text, concept_names
-    
+
     def __getitem__(self, index):
         img_id = self.image_ids[index]
         img_path = os.path.join(self.data_dir, f"{img_id}.png")
-        
-        image = Image.open(img_path).convert('RGB')
-        
+
+        image = Image.open(img_path).convert("RGB")
+
         concept_vec = self.concept_labels[index]
         disease_vec = self.disease_labels[index]
         all_labels = self.all_labels[index]
-        
+
         # Generate concept-rich text
         text, concept_names = self.build_text(concept_vec, disease_vec)
-        
+
         if not self.return_pil and self.transform is not None:
             image = self.transform(image)
-        
+
         return {
-            'image': image,                                               # PIL Image or Tensor
-            'text': text,                                                  # concept-rich description
-            'concept_names': concept_names,                                # list of active concept names
-            'concept_labels': torch.tensor(concept_vec, dtype=torch.float32),  # (22,)
-            'disease_labels': torch.tensor(disease_vec, dtype=torch.float32),  # (6,)
-            'all_labels': torch.tensor(all_labels, dtype=torch.float32),       # (28,)
+            "image": image,  # PIL Image or Tensor
+            "text": text,  # concept-rich description
+            "concept_names": concept_names,  # list of active concept names
+            "concept_labels": torch.tensor(concept_vec, dtype=torch.float32),  # (22,)
+            "disease_labels": torch.tensor(disease_vec, dtype=torch.float32),  # (6,)
+            "all_labels": torch.tensor(all_labels, dtype=torch.float32),  # (28,)
         }
-    
+
     def __len__(self):
         return len(self.image_ids)
+
 
 # if __name__ == "__main__":
 #     dataset = VINDRDataSet(data_dir='', csv_file='/home/aaronpham5504/Coding/Image-Retrieval---Thesis-2026/vindr/image_labels_train.csv')

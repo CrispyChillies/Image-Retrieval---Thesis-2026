@@ -98,10 +98,21 @@ def get_model_and_transform(
         if model_type == "convnextv2":
             # Match test.py exactly for ConvNeXtV2 so Milvus embeddings are
             # directly comparable to non-Milvus evaluation.
-            transform = transforms.Compose(
+            # transform = transforms.Compose(
+            #     [
+            #         transforms.Lambda(lambda img: img.convert("RGB")),
+            #         transforms.Resize((img_size, img_size)),
+            #         transforms.ToTensor(),
+            #         normalize,
+            #     ]
+            # )
+            img_size_convnext = 384
+            resize_size = 432
+            val_transform = transforms.Compose(
                 [
-                    transforms.Lambda(lambda img: img.convert("RGB")),
-                    transforms.Resize((img_size, img_size)),
+                    transforms.Lambda(lambda image: image.convert("RGB")),
+                    transforms.Resize(resize_size),
+                    transforms.CenterCrop(img_size_convnext),
                     transforms.ToTensor(),
                     normalize,
                 ]
