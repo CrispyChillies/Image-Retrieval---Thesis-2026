@@ -152,6 +152,9 @@ def load_image_list(image_list_file, data_dir):
                     continue
 
                 image_name = line[0]
+                # Add .jpg extension if not already present
+                if not image_name.lower().endswith((".jpg", ".jpeg", ".png")):
+                    image_name = image_name + ".jpg"
 
                 try:
                     # Determine label based on columns
