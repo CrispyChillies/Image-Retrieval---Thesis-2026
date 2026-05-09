@@ -15,6 +15,7 @@ from milvus.milvus_setup import MilvusManager, MODEL_CONFIGS
 from transformers import AutoProcessor
 from tqdm import tqdm
 import argparse
+import sys
 
 try:
     import boto3
@@ -119,8 +120,76 @@ def get_model_and_transform(
     return model, transform
 
 
+def load_dataset(dataset_type, data_dir, image_list_file):
+    """Load dataset using the appropriate dataset class from read_data.py
+
+    Args:
+        dataset_type: Type of dataset (isic, tbx11k, chestxray)
+        data_dir: Directory containing images
+        image_list_file: Path to the CSV or list file
+
+    Returns:
+        image_paths: list of full image file paths
+        labels: list of labels (as strings for consistency)
+    """
+    sys.path.insert(0, os.path.dirname(__file__))
+    from read_data import ISICDataSet, TBX11kDataSet, ChestXrayDataSet
+
+    dataset_type_lower = dataset_type.lower()
+
+    if dataset_type_lower == "isic":
+        dataset = ISICDataSet(
+            data_dir=data_dir,
+            image_list_file=image_list_file,
+            use_melanoma=True,
+            mask_dir=None,
+            transform=None,
+        )
+        # image_names already contain full paths
+        image_paths = dataset.image_names
+        # Convert integer labels to human-readable strings
+        label_map = {0: "nevus", 1: "seborrheic_keratosis", 2: "melanoma"}
+        labels = [label_map.get(int(label), str(label)) for label in dataset.labels]
+
+    elif dataset_type_lower == "tbx11k":
+        dataset = TBX11kDataSet(
+            data_dir=data_dir,
+            csv_file=image_list_file,
+            transform=None,
+        )
+        image_paths = dataset.image_names
+        # Convert integer labels to human-readable strings
+        label_map = {0: "tb", 1: "healthy", 2: "sick_but_no_tb"}
+        labels = [label_map.get(int(label), str(label)) for label in dataset.labels]
+
+    elif dataset_type_lower == "chestxray":
+        dataset = ChestXrayDataSet(
+            data_dir=data_dir,
+            image_list_file=image_list_file,
+            use_covid=True,
+            mask_dir=None,
+            transform=None,
+        )
+        image_paths = dataset.image_names
+        # Convert integer labels to human-readable strings
+        label_map = {0: "normal", 1: "pneumonia", 2: "covid-19"}
+        labels = [label_map.get(int(label), str(label)) for label in dataset.labels]
+
+    else:
+        raise ValueError(
+            f"Unknown dataset type: {dataset_type}. Supported: isic, tbx11k, chestxray"
+        )
+
+    print(f"✅ Loaded {dataset_type.upper()} dataset with {len(image_paths)} images")
+    if len(image_paths) > 0:
+        print(f"   Sample image: {image_paths[0]}")
+        print(f"   Sample label: {labels[0]}")
+
+    return image_paths, labels
+
+
 def load_image_list(image_list_file, data_dir):
-    """Load image paths and labels from file
+    """Load image paths and labels from file (DEPRECATED - use load_dataset instead)
 
     Supports two formats:
     1. CSV format (ISIC dataset): image_id, melanoma, seborrheic_keratosis, ...
@@ -341,6 +410,13 @@ def main():
         help="Model type to use",
     )
     parser.add_argument(
+        "--dataset",
+        type=str,
+        required=True,
+        choices=["isic", "tbx11k", "chestxray"],
+        help="Dataset type (determines label mapping and data loading)",
+    )
+    parser.add_argument(
         "--model_weights", type=str, required=True, help="Path to model weights"
     )
     parser.add_argument(
@@ -350,7 +426,7 @@ def main():
         "--image_list",
         type=str,
         required=True,
-        help="Text file with image list (format: idx filename label)",
+        help="CSV or text file with image list",
     )
     parser.add_argument(
         "--embedding_dim",
@@ -451,13 +527,11 @@ def main():
         )
         print("✅ Model loaded")
 
-        # Load image list
+        # Load image list using the appropriate dataset loader
         print("\n" + "=" * 70)
         print("LOADING IMAGE LIST")
         print("=" * 70)
-        image_data = load_image_list(args.image_list, args.data_dir)
-        image_paths = [path for path, _ in image_data]
-        labels = [label for _, label in image_data]
+        image_paths, labels = load_dataset(args.dataset, args.data_dir, args.image_list)
         print(f"Found {len(image_paths)} images")
 
         # Compute embeddings
