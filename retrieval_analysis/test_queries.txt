@@ -172,7 +172,7 @@
 /kaggle/input/rsna-png/data/test/3c8cc0d1-be7f-493d-9570-542d851f623b.png pneumonia
 /kaggle/input/rsna-png/data/test/6565a9e6-3f01-4de8-a18d-ade3121c5d7c.png pneumonia
 /kaggle/input/rsna-png/data/test/ed0c5d1e-934a-4e31-9221-3a6a69ec9c1b.png pneumonia
-/kaggle/input/rsna-png/data/test/4bc8ce99-2420-48c2-a768-d067da67ced2.png pneumonia
+/kaggle/input/rsna-png/data/test/4bc8ce99-2420-48c2-a768-d067da67ced2.png 
 /kaggle/input/rsna-png/data/test/6df82c7a-a91e-487c-ae3a-9022b17d7c7a.png pneumonia
 /kaggle/input/rsna-png/data/test/a6c364d2-b2d6-4b0b-a439-40b992ff65c7.png pneumonia
 /kaggle/input/rsna-png/data/test/32a5977f-f8ab-41c9-9b51-5387248e4675.png pneumonia

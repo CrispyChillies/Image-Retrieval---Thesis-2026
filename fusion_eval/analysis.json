@@ -1,6 +1,6 @@
 {
   "output_dir": "fusion_eval_output",
-  "query_set_path": "retrieval_analysis/test_queries.txt",
+  "query_set_path": "retrieval_analysis/test_queries_isic.txt",
   "strict_label_check": true,
   "k_values": [
     1,

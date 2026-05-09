@@ -1,0 +1,270 @@
+﻿/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015040.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016041.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015943.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015625.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015274.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015152.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014938.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014949.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016028.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014728.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015984.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014942.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015948.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015060.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015347.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015993.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016051.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015641.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013159.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016002.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016046.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014961.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013164.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015021.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014693.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013269.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016012.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015279.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012493.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013738.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016011.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016056.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015331.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015940.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015963.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015997.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015139.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014807.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014879.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016016.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015202.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012656.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016025.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015991.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016063.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015447.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014835.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016040.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015466.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013191.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013109.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016009.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015985.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015217.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015383.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015031.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012803.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016055.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014944.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013891.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014977.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014698.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015936.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015645.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015999.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014768.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015942.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014697.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012837.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014755.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016026.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015582.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015171.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015291.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015954.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016022.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014854.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015957.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015237.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015959.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013511.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014921.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012941.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0016034.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015201.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015404.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015258.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015020.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014958.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015960.jpg nevus
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014631.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014567.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014392.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014648.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012272.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014177.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014386.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014503.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012432.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013085.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012314.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014649.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014634.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013393.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013465.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013030.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012786.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012510.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014647.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014586.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014619.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012448.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012548.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014645.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014629.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014006.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014590.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014278.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013271.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013170.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014626.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014500.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014600.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013270.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014588.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012273.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012178.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014643.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014251.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012537.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013203.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012199.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012248.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012375.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012323.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012428.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012848.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013708.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013319.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013977.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013673.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012134.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014409.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014457.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012955.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012207.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012265.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012240.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012136.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012387.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014644.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012364.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012852.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012705.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013764.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013281.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014627.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012223.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012757.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014575.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012266.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012388.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012372.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014574.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013169.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012358.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013035.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012215.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012447.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014419.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014652.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012086.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014587.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012414.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014474.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014653.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012974.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012330.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012928.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012522.jpg seborrheic keratosis
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013766.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015004.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014548.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015185.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014336.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013459.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014233.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014784.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014703.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013867.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015132.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014148.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013696.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015163.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014027.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013953.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014129.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014506.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012989.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013988.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013242.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013565.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013277.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013948.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014219.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015127.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014982.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014772.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014790.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014423.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015156.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012258.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013588.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013767.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012425.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015229.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013813.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013473.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013411.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014489.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013917.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014559.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013814.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014110.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015180.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014826.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014434.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013833.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014059.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013678.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014541.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013925.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013636.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014928.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013374.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014546.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014103.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013414.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014319.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014270.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015142.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013577.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013617.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013987.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014912.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015136.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014963.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015071.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014695.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013073.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014369.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013733.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014186.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013472.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0012356.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014284.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014349.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014288.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015251.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014727.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014542.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014872.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014932.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015050.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015119.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0013908.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015193.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0014766.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015133.jpg melanoma
+/kaggle/input/isic-2017/ISIC-2017_Test_v2_Data/ISIC-2017_Test_v2_Data/ISIC_0015041.jpg melanoma
