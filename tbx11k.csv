@@ -1,0 +1,1382 @@
+fname,image_height,image_width,source,bbox,target,tb_type,image_type
+tb0151.png,512,512,val,"{'xmin': 266.1749267578125, 'ymin': 199.2958984375, 'width': 99.12429809570312, 'height': 181.69943237304688}",tb,latent_tb,tb
+h0521.png,512,512,val,none,no_tb,none,healthy
+s4857.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4431.png,512,512,val,none,no_tb,none,healthy
+s2638.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0180.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0631.png,512,512,val,"{'xmin': 296.769775390625, 'ymin': 52.16594314575195, 'width': 105.7484130859375, 'height': 117.44374084472656}",tb,latent_tb,tb
+tb0611.png,512,512,val,"{'xmin': 125.27318572998047, 'ymin': 156.15554809570312, 'width': 97.34906768798828, 'height': 103.64443969726562}",tb,active_tb,tb
+h0283.png,512,512,val,none,no_tb,none,healthy
+h3135.png,512,512,val,none,no_tb,none,healthy
+s3144.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1409.png,512,512,val,none,no_tb,none,healthy
+s3895.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4845.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1888.png,512,512,val,none,no_tb,none,healthy
+h2413.png,512,512,val,none,no_tb,none,healthy
+h2545.png,512,512,val,none,no_tb,none,healthy
+h2014.png,512,512,val,none,no_tb,none,healthy
+s3098.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3713.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1543.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0333.png,512,512,val,none,no_tb,none,healthy
+s2794.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0668.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2023.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4099.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1276.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0837.png,512,512,val,"{'xmin': 371.9691162109375, 'ymin': 180.55490112304688, 'width': 80.19943237304688, 'height': 65.07615661621094}",tb,active_tb,tb
+tb0091.png,512,512,val,"{'xmin': 74.31005096435547, 'ymin': 38.788856506347656, 'width': 151.16189575195312, 'height': 211.20626831054688}",tb,latent_tb,tb
+h1660.png,512,512,val,none,no_tb,none,healthy
+s0515.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0031.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1868.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0882.png,512,512,val,"{'xmin': 414.8043212890625, 'ymin': 419.8427429199219, 'width': 45.821014404296875, 'height': 39.50146484375}",tb,active_tb,tb
+s2491.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2075.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4896.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3070.png,512,512,val,none,no_tb,none,healthy
+h2866.png,512,512,val,none,no_tb,none,healthy
+s4363.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2011.png,512,512,val,none,no_tb,none,healthy
+h0931.png,512,512,val,none,no_tb,none,healthy
+tb0095.png,512,512,val,"{'xmin': 308.12689208984375, 'ymin': 33.437191009521484, 'width': 96.89462280273438, 'height': 77.48367309570312}",tb,active_tb,tb
+tb1143.png,512,512,val,"{'xmin': 101.9103012084961, 'ymin': 40.02077102661133, 'width': 153.08969116210938, 'height': 124.07518005371094}",tb,active_tb,tb
+s4771.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1392.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4680.png,512,512,val,none,no_tb,none,healthy
+s2240.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1089.png,512,512,val,none,no_tb,none,healthy
+s4192.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3468.png,512,512,val,none,no_tb,none,healthy
+s0476.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3089.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb1070.png,512,512,val,"{'xmin': 105.59210968017578, 'ymin': 44.273719787597656, 'width': 99.43485260009766, 'height': 78.84749603271484}",tb,active_tb,tb
+s0731.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0567.png,512,512,val,"{'xmin': 291.3504638671875, 'ymin': 57.33344650268555, 'width': 92.98153686523438, 'height': 93.74406433105469}",tb,active_tb,tb
+h2504.png,512,512,val,none,no_tb,none,healthy
+h0876.png,512,512,val,none,no_tb,none,healthy
+tb1115.png,512,512,val,"{'xmin': 90.0, 'ymin': 63.5, 'width': 129.1999969482422, 'height': 126.83332824707031}",tb,active_tb,tb
+tb0439.png,512,512,val,"{'xmin': 106.35896301269531, 'ymin': 61.21514129638672, 'width': 126.53019714355469, 'height': 143.29879760742188}",tb,active_tb,tb
+tb1022.png,512,512,val,"{'xmin': 295.3462829589844, 'ymin': 96.99406433105469, 'width': 90.06881713867188, 'height': 89.384765625}",tb,latent_tb,tb
+h1444.png,512,512,val,none,no_tb,none,healthy
+tb0750.png,512,512,val,"{'xmin': 129.0623016357422, 'ymin': 100.28585815429688, 'width': 99.26530456542969, 'height': 125.34124755859375}",tb,active_tb,tb
+h1641.png,512,512,val,none,no_tb,none,healthy
+s0307.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2415.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2613.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4540.png,512,512,val,none,no_tb,none,healthy
+h3920.png,512,512,val,none,no_tb,none,healthy
+s3760.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0033.png,512,512,val,none,no_tb,none,healthy
+h0814.png,512,512,val,none,no_tb,none,healthy
+s0001.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0759.png,512,512,val,"{'xmin': 72.38954162597656, 'ymin': 59.977779388427734, 'width': 157.1399688720703, 'height': 299.73333740234375}",tb,active_tb,tb
+s2164.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0460.png,512,512,val,"{'xmin': 283.1189880371094, 'ymin': 65.34223175048828, 'width': 131.514892578125, 'height': 105.59050750732422}",tb,active_tb,tb
+h0312.png,512,512,val,none,no_tb,none,healthy
+h2377.png,512,512,val,none,no_tb,none,healthy
+tb0382.png,512,512,val,"{'xmin': 94.26876831054688, 'ymin': 207.90208435058594, 'width': 90.25462341308594, 'height': 67.10188293457031}",tb,active_tb,tb
+tb0921.png,512,512,val,"{'xmin': 139.1513214111328, 'ymin': 66.58025360107422, 'width': 121.87864685058594, 'height': 222.02267456054688}",tb,latent_tb,tb
+s1600.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4504.png,512,512,val,none,no_tb,none,healthy
+tb0929.png,512,512,val,"{'xmin': 116.24137878417969, 'ymin': 82.05440521240234, 'width': 155.58619689941406, 'height': 150.15628051757812}",tb,active_tb,tb
+h2157.png,512,512,val,none,no_tb,none,healthy
+tb0369.png,512,512,val,"{'xmin': 251.21408081054688, 'ymin': 116.34466552734375, 'width': 132.32675170898438, 'height': 147.63302612304688}",tb,active_tb,tb
+h1694.png,512,512,val,none,no_tb,none,healthy
+h0254.png,512,512,val,none,no_tb,none,healthy
+s0930.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2407.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4571.png,512,512,val,none,no_tb,none,healthy
+h1486.png,512,512,val,none,no_tb,none,healthy
+s3468.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0482.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0658.png,512,512,val,none,no_tb,none,healthy
+s1823.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3915.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0879.png,512,512,val,"{'xmin': 269.0882568359375, 'ymin': 58.15538024902344, 'width': 140.1209716796875, 'height': 157.06773376464844}",tb,active_tb,tb
+s1106.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0998.png,512,512,val,"{'xmin': 314.3829040527344, 'ymin': 64.07616424560547, 'width': 108.53717041015625, 'height': 80.01583099365234}",tb,active_tb,tb
+h4751.png,512,512,val,none,no_tb,none,healthy
+tb0406.png,512,512,val,"{'xmin': 164.17762756347656, 'ymin': 71.4552230834961, 'width': 43.321136474609375, 'height': 50.66798400878906}",tb,active_tb,tb
+h4079.png,512,512,val,none,no_tb,none,healthy
+s1189.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3050.png,512,512,val,none,no_tb,none,healthy
+h4812.png,512,512,val,none,no_tb,none,healthy
+s0098.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0203.png,512,512,val,"{'xmin': 288.7454528808594, 'ymin': 48.630069732666016, 'width': 150.10910034179688, 'height': 130.91197204589844}",tb,active_tb,tb
+s3020.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3177.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2855.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2176.png,512,512,val,none,no_tb,none,healthy
+h3525.png,512,512,val,none,no_tb,none,healthy
+s0339.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3725.png,512,512,val,none,no_tb,none,healthy
+s2475.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4963.png,512,512,val,none,no_tb,none,healthy
+h4805.png,512,512,val,none,no_tb,none,healthy
+s0831.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2693.png,512,512,val,none,no_tb,none,healthy
+tb0398.png,512,512,val,"{'xmin': 143.83642578125, 'ymin': 99.62222290039062, 'width': 116.128173828125, 'height': 115.91111755371094}",tb,active_tb,tb
+h2691.png,512,512,val,none,no_tb,none,healthy
+s4432.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1448.png,512,512,val,none,no_tb,none,healthy
+s1747.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2976.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4289.png,512,512,val,none,no_tb,none,healthy
+h3395.png,512,512,val,none,no_tb,none,healthy
+s3690.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4035.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3770.png,512,512,val,none,no_tb,none,healthy
+h2168.png,512,512,val,none,no_tb,none,healthy
+s2829.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1405.png,512,512,val,none,no_tb,none,healthy
+s2139.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0609.png,512,512,val,"{'xmin': 290.6123046875, 'ymin': 69.39366912841797, 'width': 131.06500244140625, 'height': 149.39663696289062}",tb,latent_tb,tb
+s3247.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0153.png,512,512,val,none,no_tb,none,healthy
+s0742.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0789.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0702.png,512,512,val,"{'xmin': 312.20068359375, 'ymin': 109.57777404785156, 'width': 138.57672119140625, 'height': 160.88890075683594}",tb,active_tb,tb
+s4160.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1798.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4951.png,512,512,val,none,no_tb,none,healthy
+h3840.png,512,512,val,none,no_tb,none,healthy
+s1482.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1882.png,512,512,val,none,no_tb,none,healthy
+tb1041.png,512,512,val,"{'xmin': 299.4654235839844, 'ymin': 101.57777404785156, 'width': 142.67791748046875, 'height': 200.7111053466797}",tb,active_tb,tb
+h4899.png,512,512,val,none,no_tb,none,healthy
+h1104.png,512,512,val,none,no_tb,none,healthy
+s2358.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0320.png,512,512,val,none,no_tb,none,healthy
+s3216.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2763.png,512,512,val,none,no_tb,none,healthy
+s1042.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1712.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0732.png,512,512,val,"{'xmin': 299.25201416015625, 'ymin': 88.13155364990234, 'width': 144.473876953125, 'height': 186.87240600585938}",tb,active_tb,tb
+h3454.png,512,512,val,none,no_tb,none,healthy
+s3074.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1174.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2001.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4563.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb1098.png,512,512,val,"{'xmin': 127.43785858154297, 'ymin': 67.87438201904297, 'width': 62.467506408691406, 'height': 58.492584228515625}",tb,active_tb,tb
+tb0146.png,512,512,val,"{'xmin': 134.52130126953125, 'ymin': 144.59841918945312, 'width': 28.153091430664062, 'height': 24.561813354492188}",tb,latent_tb,tb
+s2709.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0762.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3244.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0388.png,512,512,val,"{'xmin': 107.7654037475586, 'ymin': 67.11473846435547, 'width': 114.0237808227539, 'height': 145.85162353515625}",tb,active_tb,tb
+s1660.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0417.png,512,512,val,"{'xmin': 71.85935974121094, 'ymin': 48.88328552246094, 'width': 176.90365600585938, 'height': 192.18991088867188}",tb,active_tb,tb
+h2998.png,512,512,val,none,no_tb,none,healthy
+s1625.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3076.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0449.png,512,512,val,"{'xmin': 118.86866760253906, 'ymin': 106.26727294921875, 'width': 102.326904296875, 'height': 210.41607666015625}",tb,latent_tb,tb
+h4238.png,512,512,val,none,no_tb,none,healthy
+s3841.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2982.png,512,512,val,none,no_tb,none,healthy
+h0141.png,512,512,val,none,no_tb,none,healthy
+tb1127.png,512,512,val,"{'xmin': 264.3323669433594, 'ymin': 37.21971893310547, 'width': 188.11151123046875, 'height': 285.7464599609375}",tb,active_tb,tb
+s0452.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1430.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3341.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3511.png,512,512,val,none,no_tb,none,healthy
+s2576.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2194.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0832.png,512,512,val,none,no_tb,none,healthy
+h1614.png,512,512,val,none,no_tb,none,healthy
+tb0962.png,512,512,val,"{'xmin': 103.32328033447266, 'ymin': 51.41543197631836, 'width': 141.33181762695312, 'height': 109.8951416015625}",tb,active_tb,tb
+s1732.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3261.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2128.png,512,512,val,none,no_tb,none,healthy
+h1665.png,512,512,val,none,no_tb,none,healthy
+h4013.png,512,512,val,none,no_tb,none,healthy
+h3741.png,512,512,val,none,no_tb,none,healthy
+s1797.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4771.png,512,512,val,none,no_tb,none,healthy
+h3339.png,512,512,val,none,no_tb,none,healthy
+h4958.png,512,512,val,none,no_tb,none,healthy
+tb0653.png,512,512,val,"{'xmin': 73.59988403320312, 'ymin': 124.8476791381836, 'width': 157.65054321289062, 'height': 96.47476959228516}",tb,latent_tb,tb
+h1608.png,512,512,val,none,no_tb,none,healthy
+h1769.png,512,512,val,none,no_tb,none,healthy
+s3677.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4017.png,512,512,val,none,no_tb,none,healthy
+h2317.png,512,512,val,none,no_tb,none,healthy
+s3914.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1169.png,512,512,val,none,no_tb,none,healthy
+h3870.png,512,512,val,none,no_tb,none,healthy
+s3541.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4469.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3822.png,512,512,val,none,no_tb,none,healthy
+h4287.png,512,512,val,none,no_tb,none,healthy
+s3269.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1265.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2842.png,512,512,val,none,no_tb,none,healthy
+tb0390.png,512,512,val,"{'xmin': 101.28634643554688, 'ymin': 79.77546691894531, 'width': 126.43728637695312, 'height': 130.91197204589844}",tb,active_tb,tb
+h2841.png,512,512,val,none,no_tb,none,healthy
+s4045.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2454.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4671.png,512,512,val,none,no_tb,none,healthy
+h1450.png,512,512,val,none,no_tb,none,healthy
+s3959.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3780.png,512,512,val,none,no_tb,none,healthy
+s4146.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0405.png,512,512,val,none,no_tb,none,healthy
+h4855.png,512,512,val,none,no_tb,none,healthy
+s0815.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2757.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0715.png,512,512,val,"{'xmin': 331.5796203613281, 'ymin': 285.0209655761719, 'width': 33.239593505859375, 'height': 33.914154052734375}",tb,active_tb,tb
+s0617.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0940.png,512,512,val,none,no_tb,none,healthy
+s1098.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0456.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2716.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3721.png,512,512,val,none,no_tb,none,healthy
+s4715.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1403.png,512,512,val,none,no_tb,none,healthy
+tb0088.png,512,512,val,"{'xmin': 127.68743133544922, 'ymin': 98.76657104492188, 'width': 62.968849182128906, 'height': 62.03758239746094}",tb,active_tb,tb
+h0689.png,512,512,val,none,no_tb,none,healthy
+h0269.png,512,512,val,none,no_tb,none,healthy
+s1439.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4292.png,512,512,val,none,no_tb,none,healthy
+tb0098.png,512,512,val,"{'xmin': 91.90629577636719, 'ymin': 142.70591735839844, 'width': 69.29896545410156, 'height': 64.34971618652344}",tb,active_tb,tb
+s2933.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3971.png,512,512,val,none,no_tb,none,healthy
+h2025.png,512,512,val,none,no_tb,none,healthy
+tb0330.png,512,512,val,"{'xmin': 72.4354248046875, 'ymin': 110.07719421386719, 'width': 136.04571533203125, 'height': 276.44366455078125}",tb,latent_tb,tb
+h1139.png,512,512,val,none,no_tb,none,healthy
+h3182.png,512,512,val,none,no_tb,none,healthy
+h0056.png,512,512,val,none,no_tb,none,healthy
+s2511.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3250.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4381.png,512,512,val,none,no_tb,none,healthy
+s2439.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb1196.png,512,512,val,"{'xmin': 101.80715942382812, 'ymin': 67.45327758789062, 'width': 113.49502563476562, 'height': 129.52684020996094}",tb,active_tb,tb
+h4008.png,512,512,val,none,no_tb,none,healthy
+h0360.png,512,512,val,none,no_tb,none,healthy
+s4790.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4900.png,512,512,val,none,no_tb,none,healthy
+s4734.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0834.png,512,512,val,"{'xmin': 115.21304321289062, 'ymin': 68.04512023925781, 'width': 100.41213989257812, 'height': 79.19880676269531}",tb,active_tb,tb
+h1636.png,512,512,val,none,no_tb,none,healthy
+s3517.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2421.png,512,512,val,none,no_tb,none,healthy
+s4364.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1461.png,512,512,val,none,no_tb,none,healthy
+h3487.png,512,512,val,none,no_tb,none,healthy
+h4459.png,512,512,val,none,no_tb,none,healthy
+h2003.png,512,512,val,none,no_tb,none,healthy
+h3654.png,512,512,val,none,no_tb,none,healthy
+s2039.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0217.png,512,512,val,"{'xmin': 422.9453430175781, 'ymin': 384.5992126464844, 'width': 55.690185546875, 'height': 52.453765869140625}",tb,active_tb,tb
+h1070.png,512,512,val,none,no_tb,none,healthy
+s1216.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1479.png,512,512,val,none,no_tb,none,healthy
+s4092.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3935.png,512,512,val,none,no_tb,none,healthy
+s4670.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3995.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3049.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1915.png,512,512,val,none,no_tb,none,healthy
+s4153.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3730.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0682.png,512,512,val,none,no_tb,none,healthy
+h0857.png,512,512,val,none,no_tb,none,healthy
+s4452.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1819.png,512,512,val,none,no_tb,none,healthy
+h2773.png,512,512,val,none,no_tb,none,healthy
+h3186.png,512,512,val,none,no_tb,none,healthy
+s3694.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2272.png,512,512,val,none,no_tb,none,healthy
+s4689.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2894.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0991.png,512,512,val,none,no_tb,none,healthy
+h3213.png,512,512,val,none,no_tb,none,healthy
+tb0391.png,512,512,val,"{'xmin': 67.00715637207031, 'ymin': 111.38050842285156, 'width': 136.93023681640625, 'height': 98.00857543945312}",tb,active_tb,tb
+h4729.png,512,512,val,none,no_tb,none,healthy
+s3170.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4641.png,512,512,val,none,no_tb,none,healthy
+s1363.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4272.png,512,512,val,none,no_tb,none,healthy
+s1645.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0243.png,512,512,val,none,no_tb,none,healthy
+tb0711.png,512,512,val,"{'xmin': 111.79956817626953, 'ymin': 73.22859954833984, 'width': 101.79473114013672, 'height': 107.92281341552734}",tb,active_tb,tb
+s0317.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2855.png,512,512,val,none,no_tb,none,healthy
+tb0907.png,512,512,val,"{'xmin': 118.88079833984375, 'ymin': 45.0499267578125, 'width': 86.96807861328125, 'height': 103.56533813476562}",tb,active_tb,tb
+s0091.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3545.png,512,512,val,none,no_tb,none,healthy
+s0612.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2587.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1184.png,512,512,val,none,no_tb,none,healthy
+tb0120.png,512,512,val,"{'xmin': 78.65010070800781, 'ymin': 82.72167205810547, 'width': 114.76739501953125, 'height': 149.88470458984375}",tb,active_tb,tb
+h4371.png,512,512,val,none,no_tb,none,healthy
+s3160.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3357.png,512,512,val,none,no_tb,none,healthy
+s4475.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1291.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4257.png,512,512,val,none,no_tb,none,healthy
+s4327.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2770.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4623.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2845.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2507.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2554.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3305.png,512,512,val,none,no_tb,none,healthy
+s2506.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1049.png,512,512,val,none,no_tb,none,healthy
+s4288.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3867.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2590.png,512,512,val,none,no_tb,none,healthy
+tb0205.png,512,512,val,"{'xmin': 282.0473937988281, 'ymin': 83.0672607421875, 'width': 92.98458862304688, 'height': 86.59941101074219}",tb,active_tb,tb
+h0846.png,512,512,val,none,no_tb,none,healthy
+s0446.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3376.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2437.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2650.png,512,512,val,none,no_tb,none,healthy
+h1130.png,512,512,val,none,no_tb,none,healthy
+h0912.png,512,512,val,none,no_tb,none,healthy
+s3961.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1392.png,512,512,val,none,no_tb,none,healthy
+s4186.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3928.png,512,512,val,none,no_tb,none,healthy
+h2344.png,512,512,val,none,no_tb,none,healthy
+h1633.png,512,512,val,none,no_tb,none,healthy
+h4987.png,512,512,val,none,no_tb,none,healthy
+h0379.png,512,512,val,none,no_tb,none,healthy
+s4292.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0583.png,512,512,val,"{'xmin': 314.1443176269531, 'ymin': 95.47477722167969, 'width': 121.50143432617188, 'height': 116.73194885253906}",tb,active_tb,tb
+s1442.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4100.png,512,512,val,none,no_tb,none,healthy
+h1688.png,512,512,val,none,no_tb,none,healthy
+s0466.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2826.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4764.png,512,512,val,none,no_tb,none,healthy
+h3713.png,512,512,val,none,no_tb,none,healthy
+s2260.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0654.png,512,512,val,none,no_tb,none,healthy
+s0965.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1892.png,512,512,val,none,no_tb,none,healthy
+h2599.png,512,512,val,none,no_tb,none,healthy
+s2258.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4714.png,512,512,val,none,no_tb,none,healthy
+s3272.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2036.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4668.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3067.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2994.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1445.png,512,512,val,none,no_tb,none,healthy
+tb0895.png,512,512,val,"{'xmin': 160.5904541015625, 'ymin': 31.57256507873535, 'width': 93.64613342285156, 'height': 150.3936309814453}",tb,active_tb,tb
+h4090.png,512,512,val,none,no_tb,none,healthy
+s4136.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3029.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2512.png,512,512,val,none,no_tb,none,healthy
+s1132.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2589.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0314.png,512,512,val,none,no_tb,none,healthy
+h3024.png,512,512,val,none,no_tb,none,healthy
+h1554.png,512,512,val,none,no_tb,none,healthy
+h0863.png,512,512,val,none,no_tb,none,healthy
+s2592.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4574.png,512,512,val,none,no_tb,none,healthy
+s2571.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3530.png,512,512,val,none,no_tb,none,healthy
+s2038.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4783.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4222.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4228.png,512,512,val,none,no_tb,none,healthy
+h1706.png,512,512,val,none,no_tb,none,healthy
+h2970.png,512,512,val,none,no_tb,none,healthy
+tb1179.png,512,512,val,"{'xmin': 278.9581298828125, 'ymin': 25.80628204345703, 'width': 108.73297119140625, 'height': 119.62303924560547}",tb,latent_tb,tb
+s0095.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4286.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0982.png,512,512,val,"{'xmin': 121.50135803222656, 'ymin': 109.90801239013672, 'width': 134.47308349609375, 'height': 119.0108871459961}",tb,active_tb,tb
+s0270.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0204.png,512,512,val,none,no_tb,none,healthy
+s1765.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1175.png,512,512,val,none,no_tb,none,healthy
+s2895.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4796.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1383.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0476.png,512,512,val,"{'xmin': 78.70909118652344, 'ymin': 47.80747604370117, 'width': 150.9818115234375, 'height': 118.66915893554688}",tb,active_tb,tb
+h2193.png,512,512,val,none,no_tb,none,healthy
+s3224.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0990.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1494.png,512,512,val,none,no_tb,none,healthy
+h1699.png,512,512,val,none,no_tb,none,healthy
+s1755.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1734.png,512,512,val,none,no_tb,none,healthy
+tb1084.png,512,512,val,"{'xmin': 320.3180847167969, 'ymin': 79.52225494384766, 'width': 144.69564819335938, 'height': 116.98516082763672}",tb,active_tb,tb
+s0228.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0624.png,512,512,val,"{'xmin': 330.22552490234375, 'ymin': 206.12957763671875, 'width': 114.00454711914062, 'height': 149.64984130859375}",tb,latent_tb,tb
+h1395.png,512,512,val,none,no_tb,none,healthy
+h3804.png,512,512,val,none,no_tb,none,healthy
+s2283.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2412.png,512,512,val,none,no_tb,none,healthy
+s0929.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3689.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4218.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0609.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2888.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1779.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3334.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0190.png,512,512,val,"{'xmin': 91.82719421386719, 'ymin': 63.569732666015625, 'width': 151.71444702148438, 'height': 227.8931884765625}",tb,active_tb,tb
+h3684.png,512,512,val,none,no_tb,none,healthy
+tb0150.png,512,512,val,"{'xmin': 269.2455139160156, 'ymin': 28.88877296447754, 'width': 144.13092041015625, 'height': 165.18411254882812}",tb,latent_tb,tb
+h2538.png,512,512,val,none,no_tb,none,healthy
+h0003.png,512,512,val,none,no_tb,none,healthy
+s4733.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1506.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1073.png,512,512,val,none,no_tb,none,healthy
+s1620.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0917.png,512,512,val,none,no_tb,none,healthy
+s3080.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0201.png,512,512,val,none,no_tb,none,healthy
+h1489.png,512,512,val,none,no_tb,none,healthy
+s1831.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4748.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1262.png,512,512,val,none,no_tb,none,healthy
+tb0499.png,512,512,val,"{'xmin': 282.4703063964844, 'ymin': 129.91197204589844, 'width': 111.63470458984375, 'height': 68.11473083496094}",tb,active_tb,tb
+tb0115.png,512,512,val,"{'xmin': 345.2259826660156, 'ymin': 149.39999389648438, 'width': 105.76727294921875, 'height': 161.24444580078125}",tb,latent_tb,tb
+h4493.png,512,512,val,none,no_tb,none,healthy
+s1900.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2312.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2612.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4616.png,512,512,val,none,no_tb,none,healthy
+s1475.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4634.png,512,512,val,none,no_tb,none,healthy
+h1923.png,512,512,val,none,no_tb,none,healthy
+s3476.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3637.png,512,512,val,none,no_tb,none,healthy
+h4009.png,512,512,val,none,no_tb,none,healthy
+h1981.png,512,512,val,none,no_tb,none,healthy
+h3020.png,512,512,val,none,no_tb,none,healthy
+h2984.png,512,512,val,none,no_tb,none,healthy
+s4503.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4111.png,512,512,val,none,no_tb,none,healthy
+tb1106.png,512,512,val,"{'xmin': 109.88457489013672, 'ymin': 99.52621459960938, 'width': 109.71428680419922, 'height': 73.68545532226562}",tb,latent_tb,tb
+h1349.png,512,512,val,none,no_tb,none,healthy
+s3567.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3017.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2611.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4868.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1645.png,512,512,val,none,no_tb,none,healthy
+h4722.png,512,512,val,none,no_tb,none,healthy
+s4680.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0893.png,512,512,val,"{'xmin': 315.84796142578125, 'ymin': 79.68446350097656, 'width': 123.7059326171875, 'height': 146.76708984375}",tb,active_tb,tb
+s1863.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2084.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1581.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4729.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4676.png,512,512,val,none,no_tb,none,healthy
+h3982.png,512,512,val,none,no_tb,none,healthy
+s4347.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2889.png,512,512,val,none,no_tb,none,healthy
+h2359.png,512,512,val,none,no_tb,none,healthy
+s3647.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3806.png,512,512,val,none,no_tb,none,healthy
+tb0825.png,512,512,val,"{'xmin': 299.24957275390625, 'ymin': 99.44444274902344, 'width': 149.58517456054688, 'height': 140.977783203125}",tb,active_tb,tb
+h0232.png,512,512,val,none,no_tb,none,healthy
+tb0562.png,512,512,val,"{'xmin': 111.73161315917969, 'ymin': 66.9443359375, 'width': 132.32603454589844, 'height': 169.7335968017578}",tb,active_tb,tb
+s4213.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0212.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1243.png,512,512,val,none,no_tb,none,healthy
+h0391.png,512,512,val,none,no_tb,none,healthy
+h1059.png,512,512,val,none,no_tb,none,healthy
+s3401.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0355.png,512,512,val,"{'xmin': 142.2781219482422, 'ymin': 63.82294845581055, 'width': 70.46945190429688, 'height': 69.38081359863281}",tb,active_tb,tb
+h2853.png,512,512,val,none,no_tb,none,healthy
+tb1049.png,512,512,val,"{'xmin': 94.62226104736328, 'ymin': 94.46666717529297, 'width': 150.44857788085938, 'height': 132.62222290039062}",tb,active_tb,tb
+h3224.png,512,512,val,none,no_tb,none,healthy
+h1863.png,512,512,val,none,no_tb,none,healthy
+s1729.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0405.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3141.png,512,512,val,none,no_tb,none,healthy
+h4778.png,512,512,val,none,no_tb,none,healthy
+s4125.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2670.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4887.png,512,512,val,none,no_tb,none,healthy
+h4965.png,512,512,val,none,no_tb,none,healthy
+s3314.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3151.png,512,512,val,none,no_tb,none,healthy
+s2610.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0858.png,512,512,val,"{'xmin': 110.37942504882812, 'ymin': 50.911109924316406, 'width': 132.96458435058594, 'height': 320.8888854980469}",tb,active_tb,tb
+h2265.png,512,512,val,none,no_tb,none,healthy
+h4320.png,512,512,val,none,no_tb,none,healthy
+tb0086.png,512,512,val,"{'xmin': 288.225830078125, 'ymin': 83.57369232177734, 'width': 120.02288818359375, 'height': 112.42729949951172}",tb,active_tb,tb
+h1920.png,512,512,val,none,no_tb,none,healthy
+tb0574.png,512,512,val,"{'xmin': 369.7290954589844, 'ymin': 145.35806274414062, 'width': 79.34002685546875, 'height': 89.89118957519531}",tb,active_tb,tb
+s4371.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0904.png,512,512,val,none,no_tb,none,healthy
+tb0897.png,512,512,val,"{'xmin': 107.40556335449219, 'ymin': 73.81510925292969, 'width': 118.07554626464844, 'height': 124.4373779296875}",tb,active_tb,tb
+h1775.png,512,512,val,none,no_tb,none,healthy
+s0086.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3054.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0214.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4528.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0746.png,512,512,val,"{'xmin': 329.16278076171875, 'ymin': 153.9673614501953, 'width': 83.0506591796875, 'height': 98.75370788574219}",tb,latent_tb,tb
+h1989.png,512,512,val,none,no_tb,none,healthy
+h0665.png,512,512,val,none,no_tb,none,healthy
+h1351.png,512,512,val,none,no_tb,none,healthy
+tb0943.png,512,512,val,"{'xmin': 308.0994873046875, 'ymin': 40.24444580078125, 'width': 158.00338745117188, 'height': 198.2222137451172}",tb,active_tb,tb
+tb0624.png,512,512,val,"{'xmin': 78.89066314697266, 'ymin': 116.49159240722656, 'width': 150.45101928710938, 'height': 143.5727081298828}",tb,latent_tb,tb
+s1916.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2874.png,512,512,val,none,no_tb,none,healthy
+tb0242.png,512,512,val,"{'xmin': 321.6981506347656, 'ymin': 110.64444732666016, 'width': 128.43170166015625, 'height': 122.31110382080078}",tb,active_tb,tb
+s3498.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0844.png,512,512,val,"{'xmin': 86.77934265136719, 'ymin': 57.2393684387207, 'width': 129.03839111328125, 'height': 149.6498565673828}",tb,active_tb,tb
+tb0203.png,512,512,val,"{'xmin': 78.70909118652344, 'ymin': 50.909000396728516, 'width': 136.43637084960938, 'height': 152.941650390625}",tb,active_tb,tb
+h2886.png,512,512,val,none,no_tb,none,healthy
+h2378.png,512,512,val,none,no_tb,none,healthy
+s4148.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1075.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3499.png,512,512,val,none,no_tb,none,healthy
+s0220.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3462.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1604.png,512,512,val,none,no_tb,none,healthy
+h3702.png,512,512,val,none,no_tb,none,healthy
+s1159.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2482.png,512,512,val,none,no_tb,none,healthy
+h0646.png,512,512,val,none,no_tb,none,healthy
+tb1036.png,512,512,val,"{'xmin': 69.35506439208984, 'ymin': 39.66501998901367, 'width': 167.157470703125, 'height': 162.8707733154297}",tb,active_tb,tb
+tb0318.png,512,512,val,"{'xmin': 55.82413101196289, 'ymin': 46.097923278808594, 'width': 176.88333129882812, 'height': 152.1820068359375}",tb,active_tb,tb
+s4277.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3478.png,512,512,val,none,no_tb,none,healthy
+h2161.png,512,512,val,none,no_tb,none,healthy
+tb0535.png,512,512,val,"{'xmin': 123.49848175048828, 'ymin': 99.24456787109375, 'width': 66.91793060302734, 'height': 65.68928527832031}",tb,active_tb,tb
+tb0875.png,512,512,val,"{'xmin': 91.60033416748047, 'ymin': 39.17777633666992, 'width': 128.64755249023438, 'height': 136.0}",tb,active_tb,tb
+h0413.png,512,512,val,none,no_tb,none,healthy
+h1516.png,512,512,val,none,no_tb,none,healthy
+h4717.png,512,512,val,none,no_tb,none,healthy
+h1326.png,512,512,val,none,no_tb,none,healthy
+h2935.png,512,512,val,none,no_tb,none,healthy
+tb1166.png,512,512,val,"{'xmin': 124.50108337402344, 'ymin': 76.23046112060547, 'width': 94.95878601074219, 'height': 92.67656707763672}",tb,active_tb,tb
+h1632.png,512,512,val,none,no_tb,none,healthy
+tb0876.png,512,512,val,"{'xmin': 303.97137451171875, 'ymin': 50.909000396728516, 'width': 128.1466064453125, 'height': 104.32443237304688}",tb,active_tb,tb
+s0486.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4532.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0102.png,512,512,val,none,no_tb,none,healthy
+s2456.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4880.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4187.png,512,512,val,none,no_tb,none,healthy
+s4905.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3732.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1517.png,512,512,val,none,no_tb,none,healthy
+s1884.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0030.png,512,512,val,none,no_tb,none,healthy
+tb0814.png,512,512,val,"{'xmin': 95.62029266357422, 'ymin': 84.83975982666016, 'width': 157.92019653320312, 'height': 167.88131713867188}",tb,active_tb,tb
+s1683.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0884.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2847.png,512,512,val,none,no_tb,none,healthy
+h3252.png,512,512,val,none,no_tb,none,healthy
+h0656.png,512,512,val,none,no_tb,none,healthy
+s4552.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0673.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3296.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0199.png,512,512,val,"{'xmin': 96.99662780761719, 'ymin': 101.93333435058594, 'width': 142.8937530517578, 'height': 199.99998474121094}",tb,active_tb,tb
+tb1170.png,512,512,val,"{'xmin': 90.47032165527344, 'ymin': 61.290802001953125, 'width': 132.38356018066406, 'height': 113.18693542480469}",tb,active_tb,tb
+h2555.png,512,512,val,none,no_tb,none,healthy
+s1099.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1967.png,512,512,val,none,no_tb,none,healthy
+s2230.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0407.png,512,512,val,none,no_tb,none,healthy
+tb0315.png,512,512,val,"{'xmin': 142.75717163085938, 'ymin': 61.0444450378418, 'width': 99.07588195800781, 'height': 98.13333129882812}",tb,active_tb,tb
+h3945.png,512,512,val,none,no_tb,none,healthy
+h4934.png,512,512,val,none,no_tb,none,healthy
+s1948.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3252.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3309.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0445.png,512,512,val,none,no_tb,none,healthy
+s0071.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2878.png,512,512,val,none,no_tb,none,healthy
+s3137.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4086.png,512,512,val,none,no_tb,none,healthy
+h1061.png,512,512,val,none,no_tb,none,healthy
+s4003.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2158.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0139.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0739.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1694.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4948.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0874.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0598.png,512,512,val,none,no_tb,none,healthy
+tb0053.png,512,512,val,"{'xmin': 82.23004913330078, 'ymin': 32.08212661743164, 'width': 150.835693359375, 'height': 117.17874145507812}",tb,active_tb,tb
+s2155.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2848.png,512,512,val,none,no_tb,none,healthy
+s1109.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4526.png,512,512,val,none,no_tb,none,healthy
+h3263.png,512,512,val,none,no_tb,none,healthy
+s4605.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3786.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0464.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1161.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4660.png,512,512,val,none,no_tb,none,healthy
+s3116.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3497.png,512,512,val,none,no_tb,none,healthy
+s1463.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4314.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1215.png,512,512,val,none,no_tb,none,healthy
+h1944.png,512,512,val,none,no_tb,none,healthy
+h0859.png,512,512,val,none,no_tb,none,healthy
+s0705.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0335.png,512,512,val,"{'xmin': 101.7413330078125, 'ymin': 92.83538818359375, 'width': 129.87733459472656, 'height': 125.05697631835938}",tb,active_tb,tb
+h3872.png,512,512,val,none,no_tb,none,healthy
+s4130.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2405.png,512,512,val,none,no_tb,none,healthy
+tb1163.png,512,512,val,"{'xmin': 295.74169921875, 'ymin': 57.891422271728516, 'width': 109.15219116210938, 'height': 125.90580749511719}",tb,active_tb,tb
+h4677.png,512,512,val,none,no_tb,none,healthy
+s0972.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4560.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2412.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4708.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0188.png,512,512,val,none,no_tb,none,healthy
+h3974.png,512,512,val,none,no_tb,none,healthy
+s3641.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4483.png,512,512,val,none,no_tb,none,healthy
+s0718.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0581.png,512,512,val,"{'xmin': 317.85797119140625, 'ymin': 74.44277954101562, 'width': 85.33331298828125, 'height': 114.00657653808594}",tb,active_tb,tb
+s1570.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0652.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4093.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1648.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4758.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4629.png,512,512,val,none,no_tb,none,healthy
+h2022.png,512,512,val,none,no_tb,none,healthy
+h4218.png,512,512,val,none,no_tb,none,healthy
+h0850.png,512,512,val,none,no_tb,none,healthy
+s1358.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4573.png,512,512,val,none,no_tb,none,healthy
+tb1190.png,512,512,val,"{'xmin': 321.32977294921875, 'ymin': 83.05411529541016, 'width': 70.7152099609375, 'height': 83.86690521240234}",tb,active_tb,tb
+s4229.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1782.png,512,512,val,none,no_tb,none,healthy
+h4943.png,512,512,val,none,no_tb,none,healthy
+s0334.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0825.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4945.png,512,512,val,none,no_tb,none,healthy
+h4268.png,512,512,val,none,no_tb,none,healthy
+s3913.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4840.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3921.png,512,512,val,none,no_tb,none,healthy
+tb1092.png,512,512,val,"{'xmin': 270.1617431640625, 'ymin': 36.98219680786133, 'width': 112.8382568359375, 'height': 125.08802795410156}",tb,active_tb,tb
+s1744.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4903.png,512,512,val,none,no_tb,none,healthy
+s0619.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2616.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1170.png,512,512,val,none,no_tb,none,healthy
+h1971.png,512,512,val,none,no_tb,none,healthy
+h0118.png,512,512,val,none,no_tb,none,healthy
+h2747.png,512,512,val,none,no_tb,none,healthy
+h0997.png,512,512,val,none,no_tb,none,healthy
+h4841.png,512,512,val,none,no_tb,none,healthy
+tb0581.png,512,512,val,"{'xmin': 167.65667724609375, 'ymin': 90.91663360595703, 'width': 81.67880249023438, 'height': 83.49250030517578}",tb,active_tb,tb
+h4933.png,512,512,val,none,no_tb,none,healthy
+h1457.png,512,512,val,none,no_tb,none,healthy
+h0787.png,512,512,val,none,no_tb,none,healthy
+s3960.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4116.png,512,512,val,none,no_tb,none,healthy
+s2768.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2404.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0235.png,512,512,val,"{'xmin': 136.66998291015625, 'ymin': 77.12326049804688, 'width': 132.58050537109375, 'height': 139.4512939453125}",tb,active_tb,tb
+h0647.png,512,512,val,none,no_tb,none,healthy
+h1826.png,512,512,val,none,no_tb,none,healthy
+h1252.png,512,512,val,none,no_tb,none,healthy
+h3062.png,512,512,val,none,no_tb,none,healthy
+h4021.png,512,512,val,none,no_tb,none,healthy
+h0349.png,512,512,val,none,no_tb,none,healthy
+s4744.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0045.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0258.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1413.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4685.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3325.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4812.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4250.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1223.png,512,512,val,none,no_tb,none,healthy
+s4279.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0496.png,512,512,val,"{'xmin': 287.0891418457031, 'ymin': 90.41048431396484, 'width': 122.65179443359375, 'height': 93.68941497802734}",tb,active_tb,tb
+h4305.png,512,512,val,none,no_tb,none,healthy
+tb1005.png,512,512,val,"{'xmin': 303.2612609863281, 'ymin': 47.641265869140625, 'width': 71.6951904296875, 'height': 79.04206085205078}",tb,active_tb,tb
+s1989.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4731.png,512,512,val,none,no_tb,none,healthy
+s4440.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3379.png,512,512,val,none,no_tb,none,healthy
+s3721.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2125.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0604.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1771.png,512,512,val,none,no_tb,none,healthy
+s1550.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1426.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3712.png,512,512,val,none,no_tb,none,healthy
+h2489.png,512,512,val,none,no_tb,none,healthy
+h3246.png,512,512,val,none,no_tb,none,healthy
+h4871.png,512,512,val,none,no_tb,none,healthy
+s0968.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0635.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0338.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4908.png,512,512,val,none,no_tb,none,healthy
+h4698.png,512,512,val,none,no_tb,none,healthy
+s2287.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0796.png,512,512,val,"{'xmin': 93.34722137451172, 'ymin': 80.32193756103516, 'width': 128.12796020507812, 'height': 159.90884399414062}",tb,active_tb,tb
+h4620.png,512,512,val,none,no_tb,none,healthy
+h4163.png,512,512,val,none,no_tb,none,healthy
+s3965.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2764.png,512,512,val,none,no_tb,none,healthy
+h2639.png,512,512,val,none,no_tb,none,healthy
+tb0301.png,512,512,val,"{'xmin': 304.8617248535156, 'ymin': 64.06666564941406, 'width': 140.30352783203125, 'height': 152.0}",tb,active_tb,tb
+tb0813.png,512,512,val,"{'xmin': 161.9746551513672, 'ymin': 90.4609146118164, 'width': 93.20562744140625, 'height': 82.2242660522461}",tb,latent_tb,tb
+h1174.png,512,512,val,none,no_tb,none,healthy
+s4047.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0221.png,512,512,val,"{'xmin': 341.2115478515625, 'ymin': 195.33843994140625, 'width': 66.74441528320312, 'height': 47.12123107910156}",tb,active_tb,tb
+h3080.png,512,512,val,none,no_tb,none,healthy
+tb0322.png,512,512,val,"{'xmin': 308.0080261230469, 'ymin': 65.84866333007812, 'width': 70.6773681640625, 'height': 114.19979858398438}",tb,active_tb,tb
+h0080.png,512,512,val,none,no_tb,none,healthy
+s1668.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4506.png,512,512,val,none,no_tb,none,healthy
+h0182.png,512,512,val,none,no_tb,none,healthy
+s2443.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1874.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2149.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1878.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0307.png,512,512,val,none,no_tb,none,healthy
+h0147.png,512,512,val,none,no_tb,none,healthy
+h1361.png,512,512,val,none,no_tb,none,healthy
+h0968.png,512,512,val,none,no_tb,none,healthy
+s1220.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3915.png,512,512,val,none,no_tb,none,healthy
+s3378.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3598.png,512,512,val,none,no_tb,none,healthy
+s3632.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2852.png,512,512,val,none,no_tb,none,healthy
+h1912.png,512,512,val,none,no_tb,none,healthy
+s3685.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0652.png,512,512,val,none,no_tb,none,healthy
+s2522.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4581.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4124.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3520.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0195.png,512,512,val,none,no_tb,none,healthy
+h4319.png,512,512,val,none,no_tb,none,healthy
+h3466.png,512,512,val,none,no_tb,none,healthy
+s2607.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1893.png,512,512,val,none,no_tb,none,healthy
+s1101.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0216.png,512,512,val,"{'xmin': 294.8587341308594, 'ymin': 50.655784606933594, 'width': 90.67523193359375, 'height': 73.93867492675781}",tb,active_tb,tb
+h3890.png,512,512,val,none,no_tb,none,healthy
+h4872.png,512,512,val,none,no_tb,none,healthy
+s2927.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1257.png,512,512,val,none,no_tb,none,healthy
+tb0246.png,512,512,val,"{'xmin': 314.61920166015625, 'ymin': 110.57563018798828, 'width': 117.2242431640625, 'height': 146.62652587890625}",tb,active_tb,tb
+s2497.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1303.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4345.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0919.png,512,512,val,"{'xmin': 131.74073791503906, 'ymin': 46.38482666015625, 'width': 116.73530578613281, 'height': 135.36032104492188}",tb,active_tb,tb
+s0782.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2762.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0138.png,512,512,val,"{'xmin': 297.7514953613281, 'ymin': 71.27037811279297, 'width': 115.27633666992188, 'height': 114.76740264892578}",tb,active_tb,tb
+s2037.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4053.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4342.png,512,512,val,none,no_tb,none,healthy
+tb1123.png,512,512,val,"{'xmin': 117.53469848632812, 'ymin': 67.87438201904297, 'width': 122.32081604003906, 'height': 101.28585052490234}",tb,active_tb,tb
+h2767.png,512,512,val,none,no_tb,none,healthy
+h1970.png,512,512,val,none,no_tb,none,healthy
+s1467.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4111.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3219.png,512,512,val,none,no_tb,none,healthy
+s0198.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4395.png,512,512,val,none,no_tb,none,healthy
+h3752.png,512,512,val,none,no_tb,none,healthy
+s3449.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1310.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0763.png,512,512,val,none,no_tb,none,healthy
+s4461.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4675.png,512,512,val,none,no_tb,none,healthy
+tb0586.png,512,512,val,"{'xmin': 388.09942626953125, 'ymin': 319.67095947265625, 'width': 45.937744140625, 'height': 51.94451904296875}",tb,active_tb,tb
+tb0293.png,512,512,val,"{'xmin': 114.684326171875, 'ymin': 63.82294845581055, 'width': 136.4410858154297, 'height': 139.26805114746094}",tb,active_tb,tb
+h2469.png,512,512,val,none,no_tb,none,healthy
+tb0708.png,512,512,val,"{'xmin': 36.363739013671875, 'ymin': 86.35904693603516, 'width': 191.197265625, 'height': 179.02276611328125}",tb,active_tb,tb
+h3310.png,512,512,val,none,no_tb,none,healthy
+s1138.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0009.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0775.png,512,512,val,none,no_tb,none,healthy
+s4337.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2422.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3743.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0126.png,512,512,val,"{'xmin': 82.57388305664062, 'ymin': 123.8348159790039, 'width': 54.54295349121094, 'height': 54.694358825683594}",tb,active_tb,tb
+h0779.png,512,512,val,none,no_tb,none,healthy
+s4914.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2871.png,512,512,val,none,no_tb,none,healthy
+s2818.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb1027.png,512,512,val,"{'xmin': 256.2723693847656, 'ymin': 71.27037811279297, 'width': 138.6878662109375, 'height': 166.17095947265625}",tb,active_tb,tb
+h2981.png,512,512,val,none,no_tb,none,healthy
+s1647.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1856.png,512,512,val,none,no_tb,none,healthy
+s4073.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2669.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0819.png,512,512,val,"{'xmin': 128.59181213378906, 'ymin': 78.03355407714844, 'width': 111.98829650878906, 'height': 99.24674987792969}",tb,active_tb,tb
+h4896.png,512,512,val,none,no_tb,none,healthy
+s2138.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1286.png,512,512,val,none,no_tb,none,healthy
+h1605.png,512,512,val,none,no_tb,none,healthy
+tb0452.png,512,512,val,"{'xmin': 81.85591125488281, 'ymin': 64.07616424560547, 'width': 133.50538635253906, 'height': 134.71017456054688}",tb,latent_tb,tb
+h4511.png,512,512,val,none,no_tb,none,healthy
+h1306.png,512,512,val,none,no_tb,none,healthy
+s4927.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4747.png,512,512,val,none,no_tb,none,healthy
+h1099.png,512,512,val,none,no_tb,none,healthy
+h4019.png,512,512,val,none,no_tb,none,healthy
+h4507.png,512,512,val,none,no_tb,none,healthy
+h4649.png,512,512,val,none,no_tb,none,healthy
+s2593.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3715.png,512,512,val,none,no_tb,none,healthy
+s0426.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4630.png,512,512,val,none,no_tb,none,healthy
+h2041.png,512,512,val,none,no_tb,none,healthy
+h4341.png,512,512,val,none,no_tb,none,healthy
+h1291.png,512,512,val,none,no_tb,none,healthy
+s2142.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2199.png,512,512,val,none,no_tb,none,healthy
+h0468.png,512,512,val,none,no_tb,none,healthy
+tb0305.png,512,512,val,"{'xmin': 259.5816650390625, 'ymin': 72.68546295166016, 'width': 101.36911010742188, 'height': 87.35904693603516}",tb,latent_tb,tb
+h0939.png,512,512,val,none,no_tb,none,healthy
+s1829.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0648.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1879.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3340.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0174.png,512,512,val,none,no_tb,none,healthy
+s1821.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1865.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4318.png,512,512,val,none,no_tb,none,healthy
+tb0676.png,512,512,val,"{'xmin': 89.93775177001953, 'ymin': 134.21661376953125, 'width': 103.2187271118164, 'height': 75.711181640625}",tb,latent_tb,tb
+s3442.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4382.png,512,512,val,none,no_tb,none,healthy
+s2731.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1707.png,512,512,val,none,no_tb,none,healthy
+h0897.png,512,512,val,none,no_tb,none,healthy
+h0619.png,512,512,val,none,no_tb,none,healthy
+s2661.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1565.png,512,512,val,none,no_tb,none,healthy
+h1928.png,512,512,val,none,no_tb,none,healthy
+tb1082.png,512,512,val,"{'xmin': 103.68802642822266, 'ymin': 68.33333587646484, 'width': 144.83642578125, 'height': 99.73332977294922}",tb,latent_tb,tb
+h3089.png,512,512,val,none,no_tb,none,healthy
+h0751.png,512,512,val,none,no_tb,none,healthy
+s1629.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0926.png,512,512,val,"{'xmin': 362.6754455566406, 'ymin': 227.96578979492188, 'width': 53.774017333984375, 'height': 47.72235107421875}",tb,active_tb,tb
+h2779.png,512,512,val,none,no_tb,none,healthy
+tb0607.png,512,512,val,"{'xmin': 75.80000305175781, 'ymin': 56.4797248840332, 'width': 137.359130859375, 'height': 272.45892333984375}",tb,active_tb,tb
+h3458.png,512,512,val,none,no_tb,none,healthy
+s0672.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1616.png,512,512,val,none,no_tb,none,healthy
+s2024.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1933.png,512,512,val,none,no_tb,none,healthy
+h2322.png,512,512,val,none,no_tb,none,healthy
+h4183.png,512,512,val,none,no_tb,none,healthy
+s4001.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4839.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1083.png,512,512,val,none,no_tb,none,healthy
+h1924.png,512,512,val,none,no_tb,none,healthy
+s0468.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4266.png,512,512,val,none,no_tb,none,healthy
+h2008.png,512,512,val,none,no_tb,none,healthy
+tb0715.png,512,512,val,"{'xmin': 80.35437774658203, 'ymin': 36.028724670410156, 'width': 150.58822631835938, 'height': 150.71038818359375}",tb,active_tb,tb
+s2863.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0053.png,512,512,val,none,no_tb,none,healthy
+tb0795.png,512,512,val,"{'xmin': 121.13545989990234, 'ymin': 55.94538116455078, 'width': 128.25497436523438, 'height': 113.63654327392578}",tb,active_tb,tb
+h4231.png,512,512,val,none,no_tb,none,healthy
+s1555.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1958.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0683.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb1074.png,512,512,val,"{'xmin': 145.72947692871094, 'ymin': 45.2391242980957, 'width': 90.44967651367188, 'height': 126.923583984375}",tb,active_tb,tb
+tb0420.png,512,512,val,"{'xmin': 78.3956298828125, 'ymin': 36.66202926635742, 'width': 126.21868896484375, 'height': 150.90257263183594}",tb,active_tb,tb
+h4682.png,512,512,val,none,no_tb,none,healthy
+h0313.png,512,512,val,none,no_tb,none,healthy
+s4859.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0550.png,512,512,val,"{'xmin': 73.6016616821289, 'ymin': 66.10188293457031, 'width': 141.8282470703125, 'height': 145.34519958496094}",tb,latent_tb,tb
+h1609.png,512,512,val,none,no_tb,none,healthy
+tb0030.png,512,512,val,"{'xmin': 279.825439453125, 'ymin': 74.4190902709961, 'width': 171.79208374023438, 'height': 245.73165893554688}",tb,active_tb,tb
+s0868.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4824.png,512,512,val,none,no_tb,none,healthy
+s3229.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2311.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0073.png,512,512,val,"{'xmin': 119.2591781616211, 'ymin': 43.059349060058594, 'width': 142.37579345703125, 'height': 163.32342529296875}",tb,active_tb,tb
+h1419.png,512,512,val,none,no_tb,none,healthy
+s0489.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3085.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0939.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2570.png,512,512,val,none,no_tb,none,healthy
+s1514.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0798.png,512,512,val,"{'xmin': 269.4357604980469, 'ymin': 104.91925048828125, 'width': 115.65701293945312, 'height': 156.99966430664062}",tb,active_tb,tb
+s1092.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3262.png,512,512,val,none,no_tb,none,healthy
+s0543.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3974.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4919.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0087.png,512,512,val,"{'xmin': 126.36045837402344, 'ymin': 60.58976364135742, 'width': 97.39329528808594, 'height': 119.06105041503906}",tb,active_tb,tb
+s1049.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3153.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0957.png,512,512,val,"{'xmin': 109.65806579589844, 'ymin': 34.70326232910156, 'width': 140.38710021972656, 'height': 129.13946533203125}",tb,active_tb,tb
+h3057.png,512,512,val,none,no_tb,none,healthy
+s4227.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3077.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0633.png,512,512,val,"{'xmin': 411.06182861328125, 'ymin': 97.50049591064453, 'width': 47.47796630859375, 'height': 41.27397918701172}",tb,active_tb,tb
+tb0079.png,512,512,val,"{'xmin': 89.09442138671875, 'ymin': 60.78437042236328, 'width': 144.75537109375, 'height': 140.787353515625}",tb,active_tb,tb
+s1569.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4865.png,512,512,val,none,no_tb,none,healthy
+h0026.png,512,512,val,none,no_tb,none,healthy
+tb0418.png,512,512,val,"{'xmin': 104.76728820800781, 'ymin': 71.88888549804688, 'width': 133.3962860107422, 'height': 124.44444274902344}",tb,latent_tb,tb
+s3844.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0914.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1804.png,512,512,val,none,no_tb,none,healthy
+h3716.png,512,512,val,none,no_tb,none,healthy
+s3270.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0492.png,512,512,val,none,no_tb,none,healthy
+s2362.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4876.png,512,512,val,none,no_tb,none,healthy
+h3603.png,512,512,val,none,no_tb,none,healthy
+s1748.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4123.png,512,512,val,none,no_tb,none,healthy
+h4868.png,512,512,val,none,no_tb,none,healthy
+tb0646.png,512,512,val,"{'xmin': 170.9308624267578, 'ymin': 104.17962646484375, 'width': 81.08924865722656, 'height': 83.90348815917969}",tb,latent_tb,tb
+s0232.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4983.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4527.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0818.png,512,512,val,none,no_tb,none,healthy
+s4038.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1792.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0692.png,512,512,val,"{'xmin': 79.29679870605469, 'ymin': 83.97777557373047, 'width': 174.40809631347656, 'height': 174.39999389648438}",tb,active_tb,tb
+tb0190.png,512,512,val,"{'xmin': 377.27081298828125, 'ymin': 104.33728790283203, 'width': 97.75863647460938, 'height': 116.4787368774414}",tb,latent_tb,tb
+h4709.png,512,512,val,none,no_tb,none,healthy
+h3206.png,512,512,val,none,no_tb,none,healthy
+h4806.png,512,512,val,none,no_tb,none,healthy
+h4286.png,512,512,val,none,no_tb,none,healthy
+s4068.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2105.png,512,512,val,none,no_tb,none,healthy
+tb0640.png,512,512,val,"{'xmin': 88.35250091552734, 'ymin': 95.85799407958984, 'width': 139.35943603515625, 'height': 133.21151733398438}",tb,active_tb,tb
+h4220.png,512,512,val,none,no_tb,none,healthy
+s3313.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2885.png,512,512,val,none,no_tb,none,healthy
+h3026.png,512,512,val,none,no_tb,none,healthy
+h2491.png,512,512,val,none,no_tb,none,healthy
+h0050.png,512,512,val,none,no_tb,none,healthy
+s3929.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0251.png,512,512,val,none,no_tb,none,healthy
+s3612.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4140.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2979.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4327.png,512,512,val,none,no_tb,none,healthy
+h3329.png,512,512,val,none,no_tb,none,healthy
+h1717.png,512,512,val,none,no_tb,none,healthy
+h4880.png,512,512,val,none,no_tb,none,healthy
+h4687.png,512,512,val,none,no_tb,none,healthy
+s3436.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4203.png,512,512,val,none,no_tb,none,healthy
+s0755.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4559.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3310.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2936.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4830.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2357.png,512,512,val,none,no_tb,none,healthy
+tb0325.png,512,512,val,"{'xmin': 91.81619262695312, 'ymin': 77.93333435058594, 'width': 128.8634033203125, 'height': 137.06666564941406}",tb,active_tb,tb
+h2815.png,512,512,val,none,no_tb,none,healthy
+s4650.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4863.png,512,512,val,none,no_tb,none,healthy
+h0535.png,512,512,val,none,no_tb,none,healthy
+s3848.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0043.png,512,512,val,"{'xmin': 111.9299545288086, 'ymin': 106.78947448730469, 'width': 90.80179595947266, 'height': 103.2135009765625}",tb,active_tb,tb
+s3050.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4317.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0950.png,512,512,val,none,no_tb,none,healthy
+h3114.png,512,512,val,none,no_tb,none,healthy
+h0958.png,512,512,val,none,no_tb,none,healthy
+s1359.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1704.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4187.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2150.png,512,512,val,none,no_tb,none,healthy
+s0131.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2671.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3983.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0178.png,512,512,val,none,no_tb,none,healthy
+h1913.png,512,512,val,none,no_tb,none,healthy
+tb0865.png,512,512,val,"{'xmin': 68.92182159423828, 'ymin': 78.04206085205078, 'width': 152.00396728515625, 'height': 213.5655517578125}",tb,active_tb,tb
+s0036.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb1175.png,512,512,val,"{'xmin': 81.02360534667969, 'ymin': 83.62222290039062, 'width': 134.04385375976562, 'height': 106.4888916015625}",tb,active_tb,tb
+h0690.png,512,512,val,none,no_tb,none,healthy
+s2393.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0748.png,512,512,val,none,no_tb,none,healthy
+s3530.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1701.png,512,512,val,none,no_tb,none,healthy
+h1198.png,512,512,val,none,no_tb,none,healthy
+s1872.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1893.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2146.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2444.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2269.png,512,512,val,none,no_tb,none,healthy
+tb0150.png,512,512,val,"{'xmin': 83.84452056884766, 'ymin': 26.589637756347656, 'width': 166.337158203125, 'height': 178.27151489257812}",tb,latent_tb,tb
+h3005.png,512,512,val,none,no_tb,none,healthy
+s2978.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2837.png,512,512,val,none,no_tb,none,healthy
+s1509.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1302.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4534.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3956.png,512,512,val,none,no_tb,none,healthy
+s1096.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4906.png,512,512,val,none,no_tb,none,healthy
+tb0662.png,512,512,val,"{'xmin': 296.47894287109375, 'ymin': 86.61096954345703, 'width': 118.4068603515625, 'height': 125.80036163330078}",tb,active_tb,tb
+h3513.png,512,512,val,none,no_tb,none,healthy
+s2381.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3802.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2118.png,512,512,val,none,no_tb,none,healthy
+h2780.png,512,512,val,none,no_tb,none,healthy
+h4558.png,512,512,val,none,no_tb,none,healthy
+tb0954.png,512,512,val,"{'xmin': 103.48577880859375, 'ymin': 51.6141357421875, 'width': 122.39201354980469, 'height': 132.8870849609375}",tb,active_tb,tb
+s0686.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1020.png,512,512,val,none,no_tb,none,healthy
+h0295.png,512,512,val,none,no_tb,none,healthy
+s1519.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3608.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb1066.png,512,512,val,"{'xmin': 364.2209167480469, 'ymin': 118.11111450195312, 'width': 49.6458740234375, 'height': 63.28887939453125}",tb,active_tb,tb
+s4991.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3822.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1191.png,512,512,val,none,no_tb,none,healthy
+s3350.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3386.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2517.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0540.png,512,512,val,"{'xmin': 159.8984832763672, 'ymin': 77.749755859375, 'width': 93.44276428222656, 'height': 76.4708251953125}",tb,active_tb,tb
+s1009.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0903.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3582.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0316.png,512,512,val,"{'xmin': 288.33599853515625, 'ymin': 95.95427703857422, 'width': 124.43734741210938, 'height': 136.39761352539062}",tb,latent_tb,tb
+s2561.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4401.png,512,512,val,none,no_tb,none,healthy
+s3015.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4994.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3037.png,512,512,val,none,no_tb,none,healthy
+h4763.png,512,512,val,none,no_tb,none,healthy
+h1036.png,512,512,val,none,no_tb,none,healthy
+h1925.png,512,512,val,none,no_tb,none,healthy
+s0987.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2873.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1894.png,512,512,val,none,no_tb,none,healthy
+s4886.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3082.png,512,512,val,none,no_tb,none,healthy
+h0837.png,512,512,val,none,no_tb,none,healthy
+h4310.png,512,512,val,none,no_tb,none,healthy
+s2277.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3076.png,512,512,val,none,no_tb,none,healthy
+s3390.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3088.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3776.png,512,512,val,none,no_tb,none,healthy
+s3691.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1546.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1942.png,512,512,val,none,no_tb,none,healthy
+s0961.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1803.png,512,512,val,none,no_tb,none,healthy
+h3520.png,512,512,val,none,no_tb,none,healthy
+h4545.png,512,512,val,none,no_tb,none,healthy
+h1422.png,512,512,val,none,no_tb,none,healthy
+s3019.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0020.png,512,512,val,none,no_tb,none,healthy
+s0114.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2055.png,512,512,val,none,no_tb,none,healthy
+tb0248.png,512,512,val,"{'xmin': 297.4385070800781, 'ymin': 87.11869812011719, 'width': 104.59036254882812, 'height': 86.34619140625}",tb,latent_tb,tb
+h1787.png,512,512,val,none,no_tb,none,healthy
+s1661.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0049.png,512,512,val,none,no_tb,none,healthy
+s3803.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0125.png,512,512,val,"{'xmin': 280.3693542480469, 'ymin': 61.862125396728516, 'width': 163.14984130859375, 'height': 349.5202941894531}",tb,active_tb,tb
+h3112.png,512,512,val,none,no_tb,none,healthy
+s1048.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2317.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4580.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2687.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1343.png,512,512,val,none,no_tb,none,healthy
+h2671.png,512,512,val,none,no_tb,none,healthy
+h1752.png,512,512,val,none,no_tb,none,healthy
+h1607.png,512,512,val,none,no_tb,none,healthy
+h1006.png,512,512,val,none,no_tb,none,healthy
+h4637.png,512,512,val,none,no_tb,none,healthy
+h2424.png,512,512,val,none,no_tb,none,healthy
+h2520.png,512,512,val,none,no_tb,none,healthy
+h2640.png,512,512,val,none,no_tb,none,healthy
+s2467.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0643.png,512,512,val,"{'xmin': 74.33220672607422, 'ymin': 59.266666412353516, 'width': 131.66949462890625, 'height': 113.77778625488281}",tb,active_tb,tb
+h2537.png,512,512,val,none,no_tb,none,healthy
+s1826.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0174.png,512,512,val,"{'xmin': 347.3652648925781, 'ymin': 157.2591552734375, 'width': 134.55679321289062, 'height': 168.134521484375}",tb,active_tb,tb
+h4172.png,512,512,val,none,no_tb,none,healthy
+s1950.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1290.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0359.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2566.png,512,512,val,none,no_tb,none,healthy
+h1502.png,512,512,val,none,no_tb,none,healthy
+h1038.png,512,512,val,none,no_tb,none,healthy
+s2102.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4567.png,512,512,val,none,no_tb,none,healthy
+h1918.png,512,512,val,none,no_tb,none,healthy
+s2276.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1470.png,512,512,val,none,no_tb,none,healthy
+tb0005.png,512,512,val,"{'xmin': 381.8337097167969, 'ymin': 126.8733901977539, 'width': 40.236907958984375, 'height': 44.565773010253906}",tb,active_tb,tb
+h2755.png,512,512,val,none,no_tb,none,healthy
+tb0047.png,512,512,val,"{'xmin': 84.90412139892578, 'ymin': 99.52621459960938, 'width': 105.88182830810547, 'height': 118.25123596191406}",tb,latent_tb,tb
+s2786.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2588.png,512,512,val,none,no_tb,none,healthy
+s1354.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2089.png,512,512,val,none,no_tb,none,healthy
+h0840.png,512,512,val,none,no_tb,none,healthy
+h4124.png,512,512,val,none,no_tb,none,healthy
+s2289.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4385.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3311.png,512,512,val,none,no_tb,none,healthy
+h3486.png,512,512,val,none,no_tb,none,healthy
+h1317.png,512,512,val,none,no_tb,none,healthy
+h4236.png,512,512,val,none,no_tb,none,healthy
+h3876.png,512,512,val,none,no_tb,none,healthy
+h4592.png,512,512,val,none,no_tb,none,healthy
+s4907.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2378.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4875.png,512,512,val,none,no_tb,none,healthy
+h3863.png,512,512,val,none,no_tb,none,healthy
+h2805.png,512,512,val,none,no_tb,none,healthy
+h4912.png,512,512,val,none,no_tb,none,healthy
+s3767.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0978.png,512,512,val,none,no_tb,none,healthy
+h3902.png,512,512,val,none,no_tb,none,healthy
+s1326.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1379.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3103.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb1029.png,512,512,val,"{'xmin': 270.1397705078125, 'ymin': 85.59940338134766, 'width': 107.3548583984375, 'height': 85.33333587646484}",tb,active_tb,tb
+s3275.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0297.png,512,512,val,none,no_tb,none,healthy
+tb0052.png,512,512,val,"{'xmin': 329.9051208496094, 'ymin': 204.76651000976562, 'width': 41.96722412109375, 'height': 62.314971923828125}",tb,latent_tb,tb
+s0580.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1009.png,512,512,val,none,no_tb,none,healthy
+tb0623.png,512,512,val,"{'xmin': 76.84034729003906, 'ymin': 85.07785034179688, 'width': 148.99273681640625, 'height': 128.51544189453125}",tb,active_tb,tb
+s0800.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2724.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2481.png,512,512,val,none,no_tb,none,healthy
+h2814.png,512,512,val,none,no_tb,none,healthy
+h0138.png,512,512,val,none,no_tb,none,healthy
+h3613.png,512,512,val,none,no_tb,none,healthy
+h1095.png,512,512,val,none,no_tb,none,healthy
+s0564.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0375.png,512,512,val,none,no_tb,none,healthy
+s4879.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4109.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4481.png,512,512,val,none,no_tb,none,healthy
+tb0192.png,512,512,val,"{'xmin': 118.11604309082031, 'ymin': 31.411474227905273, 'width': 108.59744262695312, 'height': 94.44905853271484}",tb,active_tb,tb
+h2547.png,512,512,val,none,no_tb,none,healthy
+tb1037.png,512,512,val,"{'xmin': 286.7301940917969, 'ymin': 132.6888885498047, 'width': 145.91567993164062, 'height': 169.59999084472656}",tb,active_tb,tb
+h2845.png,512,512,val,none,no_tb,none,healthy
+h1032.png,512,512,val,none,no_tb,none,healthy
+h2310.png,512,512,val,none,no_tb,none,healthy
+s3065.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4969.png,512,512,val,none,no_tb,none,healthy
+s2025.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1317.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2397.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb1100.png,512,512,val,"{'xmin': 128.46249389648438, 'ymin': 78.49675750732422, 'width': 98.17784118652344, 'height': 96.6230697631836}",tb,active_tb,tb
+tb0081.png,512,512,val,"{'xmin': 310.486328125, 'ymin': 116.7798080444336, 'width': 103.162841796875, 'height': 180.99191284179688}",tb,active_tb,tb
+s1851.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2492.png,512,512,val,none,no_tb,none,healthy
+s2767.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3607.png,512,512,val,none,no_tb,none,healthy
+h3556.png,512,512,val,none,no_tb,none,healthy
+s0923.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2574.png,512,512,val,none,no_tb,none,healthy
+h2756.png,512,512,val,none,no_tb,none,healthy
+s0236.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3824.png,512,512,val,none,no_tb,none,healthy
+h3376.png,512,512,val,none,no_tb,none,healthy
+s4255.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4110.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2879.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0293.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3039.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3569.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4638.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2263.png,512,512,val,none,no_tb,none,healthy
+h0075.png,512,512,val,none,no_tb,none,healthy
+tb1158.png,512,512,val,"{'xmin': 121.1471176147461, 'ymin': 64.9085464477539, 'width': 121.63817596435547, 'height': 154.21072387695312}",tb,latent_tb,tb
+h3040.png,512,512,val,none,no_tb,none,healthy
+h2505.png,512,512,val,none,no_tb,none,healthy
+tb0492.png,512,512,val,"{'xmin': 326.88458251953125, 'ymin': 75.21760559082031, 'width': 128.14205932617188, 'height': 122.04945373535156}",tb,active_tb,tb
+tb0451.png,512,512,val,"{'xmin': 85.21160888671875, 'ymin': 80.65296173095703, 'width': 150.07986450195312, 'height': 276.6272277832031}",tb,latent_tb,tb
+h1518.png,512,512,val,none,no_tb,none,healthy
+s0611.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2316.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2659.png,512,512,val,none,no_tb,none,healthy
+s4770.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3047.png,512,512,val,none,no_tb,none,healthy
+s0383.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4362.png,512,512,val,none,no_tb,none,healthy
+s4548.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1063.png,512,512,val,none,no_tb,none,healthy
+h3841.png,512,512,val,none,no_tb,none,healthy
+tb1152.png,512,512,val,"{'xmin': 296.5135192871094, 'ymin': 81.04154205322266, 'width': 153.87673950195312, 'height': 215.48565673828125}",tb,active_tb,tb
+s0957.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0194.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2646.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0583.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0175.png,512,512,val,"{'xmin': 300.076416015625, 'ymin': 64.33998107910156, 'width': 143.45071411132812, 'height': 195.5094757080078}",tb,latent_tb,tb
+h3429.png,512,512,val,none,no_tb,none,healthy
+s1951.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1812.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2485.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4165.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0575.png,512,512,val,none,no_tb,none,healthy
+h4230.png,512,512,val,none,no_tb,none,healthy
+h1296.png,512,512,val,none,no_tb,none,healthy
+s4416.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4362.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1759.png,512,512,val,none,no_tb,none,healthy
+h2228.png,512,512,val,none,no_tb,none,healthy
+h0533.png,512,512,val,none,no_tb,none,healthy
+h1380.png,512,512,val,none,no_tb,none,healthy
+s3854.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1502.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3744.png,512,512,val,none,no_tb,none,healthy
+h3821.png,512,512,val,none,no_tb,none,healthy
+s1217.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4276.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3348.png,512,512,val,none,no_tb,none,healthy
+s3777.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0628.png,512,512,val,"{'xmin': 111.29316711425781, 'ymin': 108.38872528076172, 'width': 98.07884216308594, 'height': 114.70623016357422}",tb,active_tb,tb
+s4904.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2166.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2281.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2904.png,512,512,val,none,no_tb,none,healthy
+s2463.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2993.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0450.png,512,512,val,"{'xmin': 272.1763000488281, 'ymin': 87.54698181152344, 'width': 98.12420654296875, 'height': 91.91664123535156}",tb,active_tb,tb
+h1053.png,512,512,val,none,no_tb,none,healthy
+h1490.png,512,512,val,none,no_tb,none,healthy
+h2230.png,512,512,val,none,no_tb,none,healthy
+h2242.png,512,512,val,none,no_tb,none,healthy
+h4782.png,512,512,val,none,no_tb,none,healthy
+s3018.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1572.png,512,512,val,none,no_tb,none,healthy
+s0925.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1143.png,512,512,val,none,no_tb,none,healthy
+h0618.png,512,512,val,none,no_tb,none,healthy
+s1281.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1309.png,512,512,val,none,no_tb,none,healthy
+s2188.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0280.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0154.png,512,512,val,"{'xmin': 283.6025695800781, 'ymin': 64.32937622070312, 'width': 66.3123779296875, 'height': 63.55687713623047}",tb,latent_tb,tb
+h2499.png,512,512,val,none,no_tb,none,healthy
+s3859.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0659.png,512,512,val,none,no_tb,none,healthy
+s0616.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3609.png,512,512,val,none,no_tb,none,healthy
+s3389.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3549.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1798.png,512,512,val,none,no_tb,none,healthy
+h2066.png,512,512,val,none,no_tb,none,healthy
+h2146.png,512,512,val,none,no_tb,none,healthy
+h1878.png,512,512,val,none,no_tb,none,healthy
+tb0571.png,512,512,val,"{'xmin': 365.73187255859375, 'ymin': 99.62222290039062, 'width': 47.055633544921875, 'height': 35.377777099609375}",tb,active_tb,tb
+s4533.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3978.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3349.png,512,512,val,none,no_tb,none,healthy
+h1661.png,512,512,val,none,no_tb,none,healthy
+h2567.png,512,512,val,none,no_tb,none,healthy
+s4449.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0301.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2063.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2158.png,512,512,val,none,no_tb,none,healthy
+h0242.png,512,512,val,none,no_tb,none,healthy
+h3194.png,512,512,val,none,no_tb,none,healthy
+s4448.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2820.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3292.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0276.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2918.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb1162.png,512,512,val,"{'xmin': 127.21585083007812, 'ymin': 43.622222900390625, 'width': 112.89039611816406, 'height': 106.13333129882812}",tb,latent_tb,tb
+s4486.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1516.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2342.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2459.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2396.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1881.png,512,512,val,none,no_tb,none,healthy
+tb0742.png,512,512,val,"{'xmin': 315.9385070800781, 'ymin': 64.83580780029297, 'width': 118.96127319335938, 'height': 116.22551727294922}",tb,active_tb,tb
+tb1122.png,512,512,val,"{'xmin': 320.9415283203125, 'ymin': 60.02472686767578, 'width': 131.60067749023438, 'height': 135.21661376953125}",tb,active_tb,tb
+s3602.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2228.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0009.png,512,512,val,none,no_tb,none,healthy
+s3521.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1169.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb1194.png,512,512,val,"{'xmin': 340.2613830566406, 'ymin': 133.75555419921875, 'width': 57.848236083984375, 'height': 45.5111083984375}",tb,active_tb,tb
+s0140.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1870.png,512,512,val,none,no_tb,none,healthy
+h1141.png,512,512,val,none,no_tb,none,healthy
+s0238.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1357.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2710.png,512,512,val,none,no_tb,none,healthy
+h2568.png,512,512,val,none,no_tb,none,healthy
+tb0427.png,512,512,val,"{'xmin': 309.7647399902344, 'ymin': 57.2393684387207, 'width': 57.49578857421875, 'height': 42.793270111083984}",tb,active_tb,tb
+h3021.png,512,512,val,none,no_tb,none,healthy
+h0227.png,512,512,val,none,no_tb,none,healthy
+s1006.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0695.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1720.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3579.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2411.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0876.png,512,512,val,"{'xmin': 99.58190155029297, 'ymin': 33.690406799316406, 'width': 151.60595703125, 'height': 123.06230926513672}",tb,active_tb,tb
+h4189.png,512,512,val,none,no_tb,none,healthy
+s2521.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3228.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1669.png,512,512,val,none,no_tb,none,healthy
+h4570.png,512,512,val,none,no_tb,none,healthy
+h3493.png,512,512,val,none,no_tb,none,healthy
+tb0874.png,512,512,val,"{'xmin': 60.04278564453125, 'ymin': 49.964778900146484, 'width': 164.1437530517578, 'height': 176.67788696289062}",tb,active_tb,tb
+s3805.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4767.png,512,512,val,none,no_tb,none,healthy
+h2024.png,512,512,val,none,no_tb,none,healthy
+h3625.png,512,512,val,none,no_tb,none,healthy
+s4906.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0158.png,512,512,val,none,no_tb,none,healthy
+s3331.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2801.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3882.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0721.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0407.png,512,512,val,"{'xmin': 293.5673828125, 'ymin': 47.36399459838867, 'width': 96.34564208984375, 'height': 67.10188293457031}",tb,active_tb,tb
+s2229.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4915.png,512,512,val,none,no_tb,none,healthy
+h4801.png,512,512,val,none,no_tb,none,healthy
+s1654.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s0037.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2019.png,512,512,val,none,no_tb,none,healthy
+h4117.png,512,512,val,none,no_tb,none,healthy
+h2765.png,512,512,val,none,no_tb,none,healthy
+tb0966.png,512,512,val,"{'xmin': 356.7267150878906, 'ymin': 152.19485473632812, 'width': 75.52658081054688, 'height': 37.22254943847656}",tb,active_tb,tb
+h1795.png,512,512,val,none,no_tb,none,healthy
+s3399.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h3202.png,512,512,val,none,no_tb,none,healthy
+h4087.png,512,512,val,none,no_tb,none,healthy
+h2415.png,512,512,val,none,no_tb,none,healthy
+s0714.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h4251.png,512,512,val,none,no_tb,none,healthy
+s3890.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s3238.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0855.png,512,512,val,"{'xmin': 69.34891510009766, 'ymin': 75.21760559082031, 'width': 146.82781982421875, 'height': 114.70623779296875}",tb,active_tb,tb
+s0328.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s1505.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2936.png,512,512,val,none,no_tb,none,healthy
+s1719.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s2964.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0821.png,512,512,val,"{'xmin': 336.3564758300781, 'ymin': 126.93653869628906, 'width': 91.12939453125, 'height': 111.43678283691406}",tb,active_tb,tb
+s2416.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2637.png,512,512,val,none,no_tb,none,healthy
+s2705.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4853.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h2915.png,512,512,val,none,no_tb,none,healthy
+s2585.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h1783.png,512,512,val,none,no_tb,none,healthy
+s1513.png,512,512,val,none,no_tb,none,sick_but_no_tb
+h0455.png,512,512,val,none,no_tb,none,healthy
+s0865.png,512,512,val,none,no_tb,none,sick_but_no_tb
+s4274.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0990.png,512,512,val,"{'xmin': 91.60033416748047, 'ymin': 112.42222595214844, 'width': 127.13660430908203, 'height': 154.3111114501953}",tb,active_tb,tb
+s0274.png,512,512,val,none,no_tb,none,sick_but_no_tb
+tb0453.png,512,512,val,"{'xmin': 74.38882446289062, 'ymin': 102.3928451538086, 'width': 130.5098114013672, 'height': 207.29922485351562}",tb,active_tb,tb
+h0291.png,512,512,val,none,no_tb,none,healthy
+s2169.png,512,512,val,none,no_tb,none,sick_but_no_tb
