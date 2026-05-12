@@ -98,7 +98,7 @@ def get_model_and_transform(
     else:
         # Setup transform
         normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        if model_type == "convnextv2":
+        if model_type in ["convnextv2", "convnextv2_sra"]:
             # Match test.py exactly for ConvNeXtV2 so Milvus embeddings are
             # directly comparable to non-Milvus evaluation.
             # transform = transforms.Compose(
