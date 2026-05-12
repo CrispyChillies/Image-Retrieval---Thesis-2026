@@ -1,8 +1,8 @@
 """
-Run late-fusion retrieval evaluation on stored ConvNeXtV2 and DINOv2 embeddings.
+Run late-fusion retrieval evaluation on stored ConvNeXtV2/ConvNeXtV2_SRA and DINOv2 embeddings.
 
 Required inputs:
-- two embedding sources, one for ConvNeXtV2 and one for DINOv2
+- two embedding sources, one for ConvNeXtV2 or ConvNeXtV2_SRA and one for DINOv2
 - each source must expose `image_path`, `label`, and `embedding`
 - source type can be `milvus` or local `file` (`.json` or `.npz`)
 - optional `query_set_path` to restrict evaluation to a specific ordered subset
@@ -38,7 +38,10 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from fusion_eval.align import align_embedding_sources, build_embedding_source
-from fusion_eval.evaluate import maybe_save_fused_embeddings, run_late_fusion_experiments
+from fusion_eval.evaluate import (
+    maybe_save_fused_embeddings,
+    run_late_fusion_experiments,
+)
 from fusion_eval.fuse import concat_fusion, weighted_sum_fusion
 from retrieval_analysis.export_utils import ensure_dir, write_csv, write_json
 
@@ -49,17 +52,33 @@ def load_config(path: str | Path) -> Dict[str, Any]:
 
 
 def format_results_table(rows: List[Dict[str, Any]]) -> str:
-    headers = ["experiment", "samples", "mP@1", "mP@5", "mP@10", "R@1", "R@5", "R@10", "mAP", "status"]
+    headers = [
+        "experiment",
+        "samples",
+        "mP@1",
+        "mP@5",
+        "mP@10",
+        "R@1",
+        "R@5",
+        "R@10",
+        "mAP",
+        "status",
+    ]
     widths = {header: len(header) for header in headers}
     for row in rows:
         for header in headers:
             widths[header] = max(widths[header], len(str(row.get(header, ""))))
 
     def render(row: Dict[str, Any]) -> str:
-        return " | ".join(str(row.get(header, "")).ljust(widths[header]) for header in headers)
+        return " | ".join(
+            str(row.get(header, "")).ljust(widths[header]) for header in headers
+        )
 
     separator = "-+-".join("-" * widths[header] for header in headers)
-    return "\n".join([render({header: header for header in headers}), separator] + [render(row) for row in rows])
+    return "\n".join(
+        [render({header: header for header in headers}), separator]
+        + [render(row) for row in rows]
+    )
 
 
 def experiment_rows(experiments) -> List[Dict[str, Any]]:
@@ -98,12 +117,16 @@ def experiment_rows(experiments) -> List[Dict[str, Any]]:
     return rows
 
 
-def maybe_export_fused_embeddings(config: Dict[str, Any], output_dir: Path, aligned) -> None:
+def maybe_export_fused_embeddings(
+    config: Dict[str, Any], output_dir: Path, aligned
+) -> None:
     save_config = config.get("save_fused_embeddings", {})
     if not save_config.get("enabled", False):
         return
 
-    concat_path = output_dir / save_config.get("concat_name", "concat_fusion_embeddings.npz")
+    concat_path = output_dir / save_config.get(
+        "concat_name", "concat_fusion_embeddings.npz"
+    )
     maybe_save_fused_embeddings(
         path=str(concat_path),
         image_paths=aligned.image_paths,
@@ -112,7 +135,9 @@ def maybe_export_fused_embeddings(config: Dict[str, Any], output_dir: Path, alig
     )
 
     for alpha in config.get("alpha_values", [0.2, 0.4, 0.5, 0.6, 0.8]):
-        weighted = weighted_sum_fusion(aligned.conv_embeddings, aligned.dino_embeddings, alpha)
+        weighted = weighted_sum_fusion(
+            aligned.conv_embeddings, aligned.dino_embeddings, alpha
+        )
         if weighted.embeddings is None:
             continue
         alpha_str = str(alpha).replace(".", "_")
@@ -152,7 +177,9 @@ def main() -> None:
 
     rows = experiment_rows(experiments)
     print("Coverage:")
-    print(f"  Present in ConvNeXt only: {len(aligned.coverage['present_in_conv_only'])}")
+    print(
+        f"  Present in ConvNeXt only: {len(aligned.coverage['present_in_conv_only'])}"
+    )
     print(f"  Present in DINO only: {len(aligned.coverage['present_in_dino_only'])}")
     print(f"  Present in both: {len(aligned.coverage['present_in_both'])}")
     print()

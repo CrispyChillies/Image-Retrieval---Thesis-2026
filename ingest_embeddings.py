@@ -10,7 +10,7 @@ from PIL import Image
 from torchvision import transforms
 import timm
 from timm.data import resolve_model_data_config
-from model import DenseNet121, ResNet50, ConvNeXtV2, DinoV2, MedSigLIP
+from model import DenseNet121, ResNet50, ConvNeXtV2, ConvNeXtV2_SRA, DinoV2, MedSigLIP
 from milvus.milvus_setup import MilvusManager, MODEL_CONFIGS
 from transformers import AutoProcessor
 from tqdm import tqdm
@@ -41,6 +41,9 @@ def get_model_and_transform(
         img_size = 224
     elif model_type == "convnextv2":
         model = ConvNeXtV2(embedding_dim=embedding_dim)
+        img_size = 384
+    elif model_type == "convnextv2_sra":
+        model = ConvNeXtV2_SRA()
         img_size = 384
     elif model_type == "dinov2":
         model = DinoV2(
@@ -417,7 +420,14 @@ def main():
         "--model_type",
         type=str,
         required=True,
-        choices=["densenet121", "resnet50", "convnextv2", "dinov2", "medsiglip"],
+        choices=[
+            "densenet121",
+            "resnet50",
+            "convnextv2",
+            "convnextv2_sra",
+            "dinov2",
+            "medsiglip",
+        ],
         help="Model type to use",
     )
     parser.add_argument(
