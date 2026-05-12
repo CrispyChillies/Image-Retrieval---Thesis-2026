@@ -3,11 +3,11 @@ import torch.nn as nn
 import torchvision.models as models
 import torch.nn.functional as F
 import timm
-from transformers import AutoModel, AutoProcessor
+from transformers import AutoConfig, AutoModel, AutoProcessor
 
 
 class ResNet50(nn.Module):
-    def __init__(self, pretrained=True, embedding_dim=None):
+    def __init__(self, pretrained=True, embedding_dim=None, num_labels=None):
         super(ResNet50, self).__init__()
         # load pretrained model
         self.resnet50 = models.resnet50(pretrained=pretrained)
@@ -18,6 +18,10 @@ class ResNet50(nn.Module):
         in_features = self.resnet50[7][2].bn3.num_features
         self.fc = nn.Linear(
             in_features, embedding_dim) if embedding_dim else None
+        output_features = embedding_dim if embedding_dim else in_features
+        self.classification_head = (
+            nn.Linear(output_features, num_labels) if num_labels else None
+        )
 
     def forward(self, x):
         # extract features
@@ -25,6 +29,11 @@ class ResNet50(nn.Module):
         x = torch.flatten(x, 1)
         if self.fc:
             x = self.fc(x)
+        if self.classification_head is not None:
+            return {
+                "embedding": F.normalize(x, dim=1),
+                "logits": self.classification_head(x),
+            }
         # normalize features
         x = F.normalize(x, dim=1)
         return x
@@ -38,7 +47,7 @@ class DenseNet121(nn.Module):
 
     """
 
-    def __init__(self, pretrained=True, embedding_dim=None):
+    def __init__(self, pretrained=True, embedding_dim=None, num_labels=None):
         super(DenseNet121, self).__init__()
         # load pretrained model
         self.densenet121 = models.densenet121(pretrained=pretrained)
@@ -54,6 +63,10 @@ class DenseNet121(nn.Module):
         in_features = self.densenet121[0].norm5.num_features
         self.fc = nn.Linear(
             in_features, embedding_dim) if embedding_dim else None
+        output_features = embedding_dim if embedding_dim else in_features
+        self.classification_head = (
+            nn.Linear(output_features, num_labels) if num_labels else None
+        )
 
     def forward(self, x):
         # extract features
@@ -61,6 +74,11 @@ class DenseNet121(nn.Module):
         x = torch.flatten(x, 1)
         if self.fc:
             x = self.fc(x)
+        if self.classification_head is not None:
+            return {
+                "embedding": F.normalize(x, dim=1),
+                "logits": self.classification_head(x),
+            }
         # normalize features
         x = F.normalize(x, dim=1)
         return x
@@ -107,20 +125,25 @@ class SRA(nn.Module):
     backbone feature dimension (e.g., 1024 for ConvNeXtV2-Base).
     """
 
-    def __init__(self, input_dim, num_heads=8, lam=0.1):
+    def __init__(self, input_dim, num_heads=8, lam=0.1, norm_layer=None):
         super().__init__()
         self.num_heads = num_heads
         self.lam = lam
+        self.norm_layer = norm_layer
 
         # attention: K heads, each producing a spatial attention map
         self.conv_att = nn.Conv2d(input_dim, num_heads, kernel_size=1, bias=False)
         self.softmax = nn.Softmax(dim=2)
+        nn.init.normal_(self.conv_att.weight, mean=0.0, std=1e-4)
 
     def forward(self, x):
         b, c, h, w = x.size()
 
-        # global average pooling branch
-        gap_feat = torch.mean(x, dim=(2, 3))  # (B, C)
+        # Baseline branch mirrors ConvNeXtV2's pretrained retrieval head.
+        gap_feat = torch.mean(x, dim=(2, 3), keepdim=True)  # (B, C, 1, 1)
+        if self.norm_layer is not None:
+            gap_feat = self.norm_layer(gap_feat)
+        gap_feat = torch.flatten(gap_feat, 1)  # (B, C)
 
         # attention-weighted branch: K heads
         att_map = self.conv_att(x).view(b, self.num_heads, h * w)  # (B, K, H*W)
@@ -130,7 +153,10 @@ class SRA(nn.Module):
         # (B, K, H*W) x (B, H*W, C) → (B, K, C)
         csra_feat = torch.bmm(att_score, x_flat.permute(0, 2, 1))
         # average across heads → (B, C)
-        csra_feat = csra_feat.mean(dim=1)
+        csra_feat = csra_feat.mean(dim=1).view(b, c, 1, 1)
+        if self.norm_layer is not None:
+            csra_feat = self.norm_layer(csra_feat)
+        csra_feat = torch.flatten(csra_feat, 1)
 
         # residual fusion: GAP + λ * attention-weighted features → (B, C)
         return gap_feat + self.lam * csra_feat
@@ -153,7 +179,12 @@ class ConvNeXtV2_SRA(nn.Module):
         )
 
         in_features = self.convnext.num_features
-        self.sra = SRA(in_features, num_heads=num_heads, lam=lam)
+        self.sra = SRA(
+            in_features,
+            num_heads=num_heads,
+            lam=lam,
+            norm_layer=self.convnext.head.norm,
+        )
 
     def forward(self, x):
         # extract spatial feature maps (B, C, H, W) before pooling
@@ -163,6 +194,225 @@ class ConvNeXtV2_SRA(nn.Module):
         # normalize for retrieval
         x = F.normalize(x, dim=1)
         return x
+
+
+class PCAMPool(nn.Module):
+    """Probabilistic-CAM pooling adapted for retrieval embeddings."""
+
+    def __init__(
+        self,
+        input_dim,
+        num_classes,
+        lam=0.1,
+        norm_layer=None,
+        embedding_dim=None,
+    ):
+        super().__init__()
+        self.num_classes = num_classes
+        self.lam = lam
+        self.norm_layer = norm_layer
+        self.classifier = nn.Conv2d(input_dim, num_classes, kernel_size=1)
+        self.fc = nn.Linear(input_dim, embedding_dim) if embedding_dim else None
+
+    def forward(self, x):
+        b, c, h, w = x.size()
+
+        gap_feat = torch.mean(x, dim=(2, 3), keepdim=True)
+        if self.norm_layer is not None:
+            gap_feat = self.norm_layer(gap_feat)
+        gap_feat = torch.flatten(gap_feat, 1)
+
+        x_for_pcam = self.norm_layer(x) if self.norm_layer is not None else x
+        cam_logits = self.classifier(x_for_pcam)  # (B, num_classes, H, W)
+        pcam_probs = torch.sigmoid(cam_logits)
+        pcam_weights = pcam_probs.view(b, self.num_classes, h * w)
+        pcam_weights = pcam_weights / (pcam_weights.sum(dim=2, keepdim=True) + 1e-8)
+
+        x_flat = x_for_pcam.view(b, c, h * w)
+        class_pooled = torch.bmm(pcam_weights, x_flat.permute(0, 2, 1))
+
+        classifier_weight = self.classifier.weight.view(self.num_classes, c)
+        class_logits = torch.einsum("bkc,kc->bk", class_pooled, classifier_weight)
+        if self.classifier.bias is not None:
+            class_logits = class_logits + self.classifier.bias
+
+        class_weights = F.softmax(class_logits, dim=1).unsqueeze(2)
+        pcam_feat = torch.sum(class_weights * class_pooled, dim=1)
+        feat = gap_feat + self.lam * pcam_feat
+
+        if self.fc is not None:
+            feat = self.fc(feat)
+
+        embedding = F.normalize(feat, dim=1)
+        return embedding, class_logits, pcam_probs
+
+
+class ConvNeXtV2_PCAM(nn.Module):
+    """ConvNeXtV2 with PCAM pooling for retrieval."""
+
+    def __init__(self, pretrained=True, num_classes=3, lam=0.1, embedding_dim=None):
+        super(ConvNeXtV2_PCAM, self).__init__()
+        self.convnext = timm.create_model(
+            'convnextv2_base.fcmae_ft_in22k_in1k_384',
+            pretrained=pretrained,
+            num_classes=0
+        )
+
+        self.pcam = PCAMPool(
+            self.convnext.num_features,
+            num_classes=num_classes,
+            lam=lam,
+            norm_layer=self.convnext.head.norm,
+            embedding_dim=embedding_dim,
+        )
+
+    def forward(self, x):
+        x = self.convnext.forward_features(x)
+        embedding, class_logits, pcam_probs = self.pcam(x)
+        if self.training:
+            return {
+                "embedding": embedding,
+                "class_logits": class_logits,
+                "pcam_maps": pcam_probs,
+            }
+        return embedding
+
+
+class ConvNeXtV2_DinoDistill(nn.Module):
+    """ConvNeXtV2 student with an online DINOv2 teacher for retrieval distillation."""
+
+    def __init__(
+        self,
+        pretrained=True,
+        embedding_dim=None,
+        dinov2_model_name="vit_base_patch14_dinov2.lvd142m",
+        teacher_trainable=False,
+        unfreeze_blocks=0,
+    ):
+        super(ConvNeXtV2_DinoDistill, self).__init__()
+        self.student = ConvNeXtV2(pretrained=pretrained, embedding_dim=embedding_dim)
+        self.teacher = DinoV2(
+            model_name=dinov2_model_name,
+            pretrained=pretrained,
+            embedding_dim=None,
+            unfreeze_blocks=unfreeze_blocks if teacher_trainable else 0,
+        )
+        self.teacher_trainable = teacher_trainable
+        self.teacher_input_size = None
+        patch_embed = getattr(self.teacher.backbone, "patch_embed", None)
+        if patch_embed is not None and hasattr(patch_embed, "img_size"):
+            self.teacher_input_size = patch_embed.img_size
+        if not teacher_trainable:
+            for param in self.teacher.parameters():
+                param.requires_grad = False
+
+    def train(self, mode=True):
+        super().train(mode)
+        if not self.teacher_trainable:
+            self.teacher.eval()
+        return self
+
+    def forward(self, x):
+        student_embedding = self.student(x)
+        if self.training:
+            teacher_x = x
+            if self.teacher_input_size is not None:
+                teacher_x = F.interpolate(
+                    x,
+                    size=self.teacher_input_size,
+                    mode="bilinear",
+                    align_corners=False,
+                )
+            if self.teacher_trainable:
+                teacher_embedding = self.teacher(teacher_x)
+            else:
+                with torch.no_grad():
+                    teacher_embedding = self.teacher(teacher_x)
+            return {
+                "embedding": student_embedding,
+                "teacher_embedding": teacher_embedding,
+            }
+        return student_embedding
+
+
+class RadDinoTeacher(nn.Module):
+    """Frozen RAD-DINO teacher that consumes the student's normalized tensor batch."""
+
+    def __init__(self, model_name="microsoft/rad-dino", pretrained=True):
+        super().__init__()
+        if pretrained:
+            self.model = AutoModel.from_pretrained(model_name)
+        else:
+            config = AutoConfig.from_pretrained(model_name)
+            self.model = AutoModel.from_config(config)
+
+        self.input_size = (518, 518)
+        self.register_buffer(
+            "student_mean",
+            torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1),
+            persistent=False,
+        )
+        self.register_buffer(
+            "student_std",
+            torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1),
+            persistent=False,
+        )
+        self.register_buffer(
+            "rad_mean",
+            torch.tensor([0.5307, 0.5307, 0.5307]).view(1, 3, 1, 1),
+            persistent=False,
+        )
+        self.register_buffer(
+            "rad_std",
+            torch.tensor([0.2583, 0.2583, 0.2583]).view(1, 3, 1, 1),
+            persistent=False,
+        )
+
+    def forward(self, x):
+        x = x * self.student_std + self.student_mean
+        x = x.clamp(0.0, 1.0)
+        x = F.interpolate(
+            x,
+            size=self.input_size,
+            mode="bilinear",
+            align_corners=False,
+        )
+        x = (x - self.rad_mean) / self.rad_std
+        outputs = self.model(pixel_values=x)
+        cls_embedding = outputs.last_hidden_state[:, 0]
+        return F.normalize(cls_embedding, dim=1)
+
+
+class ConvNeXtV2_RadDinoDistill(nn.Module):
+    """ConvNeXtV2 student with a frozen RAD-DINO teacher for retrieval distillation."""
+
+    def __init__(
+        self,
+        pretrained=True,
+        embedding_dim=None,
+        teacher_model_name="microsoft/rad-dino",
+    ):
+        super(ConvNeXtV2_RadDinoDistill, self).__init__()
+        self.student = ConvNeXtV2(pretrained=pretrained, embedding_dim=embedding_dim)
+        self.teacher = RadDinoTeacher(model_name=teacher_model_name, pretrained=pretrained)
+        for param in self.teacher.parameters():
+            param.requires_grad = False
+
+    def train(self, mode=True):
+        super().train(mode)
+        self.teacher.eval()
+        return self
+
+    def forward(self, x):
+        student_embedding = self.student(x)
+        if self.training:
+            with torch.no_grad():
+                teacher_embedding = self.teacher(x)
+            return {
+                "embedding": student_embedding,
+                "teacher_embedding": teacher_embedding,
+            }
+        return student_embedding
 
 
 class SwinV2(nn.Module):
