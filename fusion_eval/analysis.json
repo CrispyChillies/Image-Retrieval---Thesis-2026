@@ -25,10 +25,10 @@
     "type": "milvus",
     "batch_size": 1000,
     "milvus": {
-      "name": "convnextv2",
+      "name": "convnextv2_sra",
       "uri": "https://in03-3aeb0fe497a5ec2.serverless.aws-eu-central-1.cloud.zilliz.com",
       "token": "fd04e95024f15549f34465178ad131d6b646228f429eca8c469a4c218decc776ba584d111e86e1b40a006fad72f4b63822785d27",
-      "collection_name": "image_retrieval_convnextv2",
+      "collection_name": "image_retrieval_convnextv2_sra",
       "vector_field": "embedding"
     }
   },
