@@ -19,6 +19,8 @@ from read_data import (
 from loss import (
     TripletMarginLoss,
     WeightedMultiLabelTripletLoss,
+    SupervisedContrastiveLoss,
+    DualBranchMultiLabelLoss,
     ConceptCLIPLoss,
     JaccardSupConLoss,
 )
@@ -63,7 +65,10 @@ def train_epoch(
         samples, targets = data[0].to(device), data[1].to(device)
 
         output = model(samples)
-        if isinstance(output, tuple) and len(output) == 2:
+        if isinstance(output, dict):
+            embeddings = output
+            has_attention = False
+        elif isinstance(output, tuple) and len(output) == 2:
             embeddings, attn = output
             has_attention = True
         else:
@@ -97,7 +102,17 @@ def train_epoch(
 
         running_loss += loss.item()
         if aux_metric is not None:
-            running_aux_metric += float(aux_metric)
+            if isinstance(aux_metric, dict):
+                if not isinstance(running_aux_metric, dict):
+                    running_aux_metric = {key: 0.0 for key in aux_metric}
+                for key, value in aux_metric.items():
+                    if torch.is_tensor(value):
+                        value = value.detach().item()
+                    running_aux_metric[key] = running_aux_metric.get(
+                        key, 0.0
+                    ) + float(value)
+            else:
+                running_aux_metric += float(aux_metric)
 
         if i % print_freq == print_freq - 1:
             i += 1
@@ -108,6 +123,16 @@ def train_epoch(
                     print(
                         "[{:d}, {:d}] | loss: {:.4f} | {}: {:.2f}%".format(
                             epoch, i, avg_loss, aux_metric_name, 100.0 * avg_aux
+                        )
+                    )
+                elif isinstance(running_aux_metric, dict):
+                    aux_parts = [
+                        "{}: {:.4f}".format(key, value / print_freq)
+                        for key, value in running_aux_metric.items()
+                    ]
+                    print(
+                        "[{:d}, {:d}] | loss: {:.4f} | {}".format(
+                            epoch, i, avg_loss, " | ".join(aux_parts)
                         )
                     )
                 elif aux_metric_name is not None:
@@ -372,6 +397,108 @@ def train_epoch_conceptclip(
 
 
 @torch.no_grad()
+def _compute_single_label_retrieval_metrics(embeds, labels, topk=(1, 5, 10)):
+    if len(labels) <= 1:
+        return {"mAP": 0.0, **{f"R@{k}": 0.0 for k in topk}}
+
+    embeds_norm = F.normalize(embeds, p=2, dim=1)
+    sim_matrix = torch.mm(embeds_norm, embeds_norm.t())
+    sim_matrix.fill_diagonal_(-float("inf"))
+
+    max_rank = max(1, len(labels) - 1)
+    _, ranked_indices = sim_matrix.topk(max_rank, dim=1, largest=True, sorted=True)
+
+    labels = labels.view(-1)
+    ranked_labels = labels[ranked_indices]
+    relevant = ranked_labels.eq(labels[:, None])
+    relevant_counts = labels[:, None].eq(labels[None, :]).sum(dim=1) - 1
+
+    metrics = {}
+    aps = []
+    for i in range(len(labels)):
+        if relevant_counts[i] <= 0:
+            aps.append(0.0)
+            continue
+
+        query_relevance = relevant[i].float()
+        hit_positions = torch.nonzero(query_relevance, as_tuple=False).view(-1)
+        if hit_positions.numel() == 0:
+            aps.append(0.0)
+            continue
+
+        cumulative_hits = torch.cumsum(query_relevance, dim=0)
+        precisions = cumulative_hits[hit_positions] / (hit_positions.float() + 1.0)
+        aps.append((precisions.sum() / relevant_counts[i].float()).item())
+
+    metrics["mAP"] = float(np.mean(aps) * 100.0) if len(aps) > 0 else 0.0
+    for k in topk:
+        actual_k = min(k, relevant.size(1))
+        metrics[f"R@{k}"] = (
+            relevant[:, :actual_k].any(dim=1).float().mean().item() * 100.0
+            if actual_k > 0
+            else 0.0
+        )
+    return metrics
+
+
+def _compute_multilabel_retrieval_metrics(
+    embeds, labels, topk=(1, 5, 10), relevance_threshold=0.4
+):
+    if len(labels) <= 1:
+        return {"mAP": 0.0, **{f"R@{k}": 0.0 for k in topk}}
+
+    embeds_norm = F.normalize(embeds, p=2, dim=1)
+    sim_matrix = torch.mm(embeds_norm, embeds_norm.t())
+    sim_matrix.fill_diagonal_(-float("inf"))
+
+    max_rank = max(1, len(labels) - 1)
+    _, ranked_indices = sim_matrix.topk(max_rank, dim=1, largest=True, sorted=True)
+
+    metrics = {}
+    aps = []
+    recalls = {k: [] for k in topk}
+
+    for i in range(len(embeds)):
+        intersect = (labels[i] * labels).sum(dim=1)
+        union = (labels[i] + labels).clamp(max=1).sum(dim=1)
+        jaccard = intersect / (union + 1e-8)
+
+        binary_relevance = (jaccard > relevance_threshold).float()
+        binary_relevance[i] = 0.0
+
+        if binary_relevance.sum().item() > 0:
+            eval_mask = torch.ones(len(embeds), dtype=torch.bool)
+            eval_mask[i] = False
+            ap = average_precision_score(
+                binary_relevance[eval_mask].numpy(), sim_matrix[i][eval_mask].numpy()
+            )
+            aps.append(ap)
+
+        ranked_relevance = binary_relevance[ranked_indices[i]]
+        for k in topk:
+            actual_k = min(k, ranked_relevance.numel())
+            recalls[k].append(
+                float(ranked_relevance[:actual_k].any().item()) if actual_k > 0 else 0.0
+            )
+
+    metrics["mAP"] = float(np.mean(aps) * 100.0) if len(aps) > 0 else 0.0
+    for k in topk:
+        metrics[f"R@{k}"] = float(np.mean(recalls[k]) * 100.0) if recalls[k] else 0.0
+    return metrics
+
+
+def _print_retrieval_metrics(prefix, metrics, rank):
+    if rank == 0:
+        print(
+            f">> {prefix}: "
+            f"mAP={metrics['mAP']:.3f}%, "
+            f"R@1={metrics['R@1']:.3f}%, "
+            f"R@5={metrics['R@5']:.3f}%, "
+            f"R@10={metrics['R@10']:.3f}%"
+        )
+
+
+@torch.no_grad()
 def evaluate_conceptclip(model, loader, device, rank=0, world_size=1):
     """Evaluate ConceptCLIP: image-image retrieval using CLS embeddings + multi-label mAP.
 
@@ -425,27 +552,9 @@ def evaluate_conceptclip(model, loader, device, rank=0, world_size=1):
         embeds = torch.cat(embeds_list, dim=0).cpu()
         labels = torch.cat(labels_list, dim=0).cpu()
 
-    # Multi-label mAP evaluation (same Jaccard-based approach)
-    embeds_norm = F.normalize(embeds, p=2, dim=1)
-    sim_matrix = torch.mm(embeds_norm, embeds_norm.t())
-    sim_matrix.fill_diagonal_(-1)
-
-    aps = []
-    for i in range(len(embeds)):
-        intersect = (labels[i] * labels).sum(dim=1)
-        union = (labels[i] + labels).clamp(max=1).sum(dim=1)
-        jaccard = intersect / (union + 1e-8)
-
-        binary_relevance = (jaccard > 0.4).float().numpy()
-
-        if np.sum(binary_relevance) > 0:
-            ap = average_precision_score(binary_relevance, sim_matrix[i].numpy())
-            aps.append(ap)
-
-    mean_ap = np.mean(aps) * 100 if len(aps) > 0 else 0.0
-    if rank == 0:
-        print(f">> ConceptCLIP mAP (28 labels, Jaccard>0.4): {mean_ap:.3f}%")
-    return mean_ap
+    metrics = _compute_multilabel_retrieval_metrics(embeds, labels)
+    _print_retrieval_metrics("ConceptCLIP retrieval (Jaccard>0.4)", metrics, rank)
+    return metrics
 
 
 def retrieval_accuracy(output, target, topk=(1,)):
@@ -478,7 +587,10 @@ def evaluate(model, loader, device, rank=0, world_size=1):
         out = model(samples)
 
         # If model returns a tuple (embeddings, attention), use only embeddings
-        embedding = out[0] if isinstance(out, tuple) else out
+        if isinstance(out, dict):
+            embedding = out["embedding"]
+        else:
+            embedding = out[0] if isinstance(out, tuple) else out
         embeds.append(embedding.cpu())
         labels.append(_labels.cpu())
 
@@ -498,36 +610,13 @@ def evaluate(model, loader, device, rank=0, world_size=1):
 
     # Check if multi-label dataset (labels have multiple dimensions)
     if labels.dim() > 1 and labels.size(1) > 1:
-        # Multi-label mAP evaluation
-        embeds_norm = torch.nn.functional.normalize(embeds, p=2, dim=1)
-        sim_matrix = torch.mm(embeds_norm, embeds_norm.t())
-        sim_matrix.fill_diagonal_(-1)
-
-        aps = []
-        for i in range(len(embeds)):
-            intersect = (labels[i] * labels).sum(dim=1)
-            union = (labels[i] + labels).clamp(max=1).sum(dim=1)
-            jaccard = intersect / (union + 1e-8)
-
-            binary_relevance = (jaccard > 0.4).float().numpy()
-
-            if np.sum(binary_relevance) > 0:
-                ap = average_precision_score(binary_relevance, sim_matrix[i].numpy())
-                aps.append(ap)
-
-        mean_ap = np.mean(aps) * 100
-        if rank == 0:
-            print(f">> Mean Average Precision (mAP): {mean_ap:.3f}%")
-        return mean_ap
+        metrics = _compute_multilabel_retrieval_metrics(embeds, labels)
+        _print_retrieval_metrics("Multi-label retrieval (Jaccard>0.4)", metrics, rank)
+        return metrics
     else:
-        # Single-label R@1 evaluation
-        dists = -torch.cdist(embeds, embeds)
-        dists.fill_diagonal_(torch.tensor(float("-inf")))
-
-        accuracy = retrieval_accuracy(dists, labels)[0].item()
-        if rank == 0:
-            print(">> R@1 accuracy: {:.3f}%".format(accuracy))
-        return accuracy
+        metrics = _compute_single_label_retrieval_metrics(embeds, labels)
+        _print_retrieval_metrics("Single-label retrieval", metrics, rank)
+        return metrics
 
 
 def save(model, epoch, save_dir, args, is_best=False):
@@ -571,6 +660,24 @@ def main(args):
     if args.val_dataset_dir is None:
         args.val_dataset_dir = args.dataset_dir
 
+    def resolve_vindr_image_dir(base_dir, split):
+        if split == "train":
+            candidates = [
+                os.path.join(base_dir, "train_png"),
+                os.path.join(base_dir, "train", "train"),
+                os.path.join(base_dir, "train"),
+            ]
+        else:
+            candidates = [
+                os.path.join(base_dir, "test_png_224"),
+                os.path.join(base_dir, "test"),
+                os.path.join(base_dir, "train", "train"),
+            ]
+        for candidate in candidates:
+            if os.path.isdir(candidate):
+                return candidate
+        return candidates[0]
+
     if args.loss_name is None:
         if args.model == "conceptclip" and args.dataset == "vindr":
             args.loss_name = "conceptclip"
@@ -597,15 +704,44 @@ def main(args):
             f"Per-GPU batch size: {per_gpu_batch_size}, Effective batch size: {per_gpu_batch_size * world_size}"
         )
 
+    dual_branch_num_labels = None
+    if args.loss_name == "dual_branch":
+        if args.dataset == "vindr":
+            dual_branch_num_labels = 6
+        elif args.dataset == "nih":
+            dual_branch_num_labels = 14
+        else:
+            raise ValueError(
+                "dual_branch loss requires a multi-label dataset such as vindr or nih."
+            )
+        if args.model not in ["resnet50", "convnextv2", "convnextv2_sra", "dinov2"]:
+            raise ValueError(
+                "dual_branch loss is currently wired for resnet50, convnextv2, "
+                "convnextv2_sra, and dinov2."
+            )
+
     # Choose model
     if args.model == "densenet121":
-        model = DenseNet121(embedding_dim=args.embedding_dim)
+        model = DenseNet121(
+            embedding_dim=args.embedding_dim,
+            num_labels=dual_branch_num_labels,
+        )
     elif args.model == "resnet50":
-        model = ResNet50(embedding_dim=args.embedding_dim)
+        model = ResNet50(
+            embedding_dim=args.embedding_dim,
+            num_labels=dual_branch_num_labels,
+        )
     elif args.model == "convnextv2":
-        model = ConvNeXtV2(embedding_dim=args.embedding_dim)
+        model = ConvNeXtV2(
+            embedding_dim=args.embedding_dim,
+            num_labels=dual_branch_num_labels,
+        )
     elif args.model == "convnextv2_sra":
-        model = ConvNeXtV2_SRA(num_heads=args.sra_num_heads, lam=args.sra_lam)
+        model = ConvNeXtV2_SRA(
+            num_heads=args.sra_num_heads,
+            lam=args.sra_lam,
+            num_labels=dual_branch_num_labels,
+        )
     elif args.model == "swinv2":
         model = SwinV2(embedding_dim=args.embedding_dim)
     elif args.model == "dinov2":
@@ -613,6 +749,7 @@ def main(args):
             model_name=args.dinov2_model_name,
             embedding_dim=args.embedding_dim,
             unfreeze_blocks=args.unfreeze_blocks,
+            num_labels=dual_branch_num_labels,
         )
     elif args.model == "hybrid_convnext_vit":
         model = HybridConvNeXtViT(embedding_dim=args.embedding_dim)
@@ -655,6 +792,16 @@ def main(args):
     # Choose loss based on dataset/task.
     if args.model == "conceptclip" and args.dataset == "vindr":
         criterion = ConceptCLIPLoss(alpha=args.rc_alpha)
+    elif args.loss_name == "dual_branch":
+        criterion = DualBranchMultiLabelLoss(
+            alpha=args.dual_asl_alpha,
+            temperature=args.supcon_temperature,
+            gamma_pos=args.asl_gamma_pos,
+            gamma_neg=args.asl_gamma_neg,
+            clip=args.asl_clip,
+        )
+    elif args.loss_name == "supcon":
+        criterion = SupervisedContrastiveLoss(temperature=args.supcon_temperature)
     elif args.loss_name == "jaccard_supcon":
         criterion = JaccardSupConLoss(temperature=args.supcon_temperature)
     elif args.loss_name == "weighted_multilabel_triplet":
@@ -725,7 +872,12 @@ def main(args):
         head_params = []
 
         for name, param in model_without_ddp.named_parameters():
-            if "fc" in name or "fusion" in name or "sra" in name:
+            if (
+                "fc" in name
+                or "fusion" in name
+                or "sra" in name
+                or "classification_head" in name
+            ):
                 head_params.append(param)
             else:
                 backbone_params.append(param)
@@ -747,7 +899,7 @@ def main(args):
         for name, param in model_without_ddp.named_parameters():
             if not param.requires_grad:
                 continue
-            if name.startswith("fc"):
+            if name.startswith("fc") or name.startswith("classification_head"):
                 head_params.append(param)
             else:
                 backbone_params.append(param)
@@ -780,19 +932,20 @@ def main(args):
             num_classes=0,
         )
         data_config = resolve_model_data_config(temp_model)
-        img_size = data_config["input_size"][-1]
+        img_size = args.image_size or data_config["input_size"][-1]
         resize_size = img_size
         normalize = transforms.Normalize(data_config["mean"], data_config["std"])
     else:
         normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
         # Use 384x384 for ConvNeXtV2, SwinV2 and Hybrid models, 224x224 for other models
-        img_size = (
+        default_img_size = (
             384
             if args.model
             in ["convnextv2", "convnextv2_sra", "swinv2", "hybrid_convnext_vit"]
             else 224
         )
+        img_size = args.image_size or default_img_size
         resize_size = 432 if img_size == 384 else 256
 
     if args.dataset == "nih":
@@ -849,9 +1002,10 @@ def main(args):
             transform=train_transform,
         )
         val_dataset = ChestXrayDataSet(
-            data_dir=os.path.join(args.val_dataset_dir, "train"),
+            # COVID validation split points to images under data/test.
+            data_dir=os.path.join(args.val_dataset_dir, "test"),
             image_list_file=args.val_image_list,
-            mask_dir=os.path.join(args.mask_dir, "train") if args.mask_dir else None,
+            mask_dir=os.path.join(args.mask_dir, "test") if args.mask_dir else None,
             transform=val_transform,
         )
     elif args.dataset == "isic":
@@ -898,12 +1052,12 @@ def main(args):
             )
         else:
             train_dataset = VINDRDataSet(
-                data_dir=os.path.join(args.dataset_dir, "train/train"),
+                data_dir=resolve_vindr_image_dir(args.dataset_dir, "train"),
                 csv_file=args.train_image_list,
                 transform=train_transform,
             )
             val_dataset = VINDRDataSet(
-                data_dir=os.path.join(args.val_dataset_dir, "train/train"),
+                data_dir=resolve_vindr_image_dir(args.val_dataset_dir, "test"),
                 csv_file=args.val_image_list,
                 transform=val_transform,
             )
@@ -971,7 +1125,16 @@ def main(args):
         )
     else:
         # Use RandomSampler or PKSampler based on use_random_sampler flag
-        if args.use_random_sampler or use_conceptclip_collate or args.dataset == "nih":
+        if (
+            args.use_random_sampler
+            or use_conceptclip_collate
+            or args.dataset == "nih"
+            or args.loss_name in [
+                "dual_branch",
+                "weighted_multilabel_triplet",
+                "jaccard_supcon",
+            ]
+        ):
             # ConceptCLIP always uses RandomSampler (no PKSampler for CLIP training)
             train_sampler = RandomSampler(train_dataset)
         else:
@@ -1051,13 +1214,14 @@ def main(args):
                 print(f'{"="*60}')
 
             if use_conceptclip_collate:
-                current_metric = evaluate_conceptclip(
+                current_metrics = evaluate_conceptclip(
                     model, val_loader, device, rank=rank, world_size=world_size
                 )
             else:
-                current_metric = evaluate(
+                current_metrics = evaluate(
                     model, val_loader, device, rank=rank, world_size=world_size
                 )
+            current_metric = current_metrics["mAP"]
 
             # Save best model (only from rank 0)
             if rank == 0:
@@ -1067,12 +1231,12 @@ def main(args):
                     best_metric = current_metric
                     best_epoch = epoch
                     print(
-                        f"\n🎯 New best model! Metric: {current_metric:.3f}% (epoch {epoch})"
+                        f"\n🎯 New best model! mAP: {current_metric:.3f}% (epoch {epoch})"
                     )
                     save(model_to_save, epoch, args.save_dir, args, is_best=True)
                 else:
                     print(
-                        f"\nCurrent: {current_metric:.3f}%, Best: {best_metric:.3f}% (epoch {best_epoch})"
+                        f"\nCurrent mAP: {current_metric:.3f}%, Best mAP: {best_metric:.3f}% (epoch {best_epoch})"
                     )
 
                 # Also save periodic checkpoint every 10 epochs
@@ -1146,6 +1310,12 @@ def parse_args():
         "--embedding-dim", default=None, type=int, help="Embedding dimension of model"
     )
     parser.add_argument(
+        "--image-size",
+        default=None,
+        type=int,
+        help="Override train/eval image crop size.",
+    )
+    parser.add_argument(
         "--sra-num-heads",
         default=8,
         type=int,
@@ -1211,7 +1381,13 @@ def parse_args():
     parser.add_argument(
         "--loss-name",
         default=None,
-        choices=["triplet", "weighted_multilabel_triplet", "jaccard_supcon"],
+        choices=[
+            "triplet",
+            "weighted_multilabel_triplet",
+            "jaccard_supcon",
+            "supcon",
+            "dual_branch",
+        ],
         help="Metric loss to use. Defaults to a dataset-appropriate choice when omitted.",
     )
     parser.add_argument(
@@ -1219,6 +1395,30 @@ def parse_args():
         default=0.07,
         type=float,
         help="Temperature for JaccardSupConLoss.",
+    )
+    parser.add_argument(
+        "--dual-asl-alpha",
+        default=1.0,
+        type=float,
+        help="Weight for ASL classification loss in dual_branch loss.",
+    )
+    parser.add_argument(
+        "--asl-gamma-pos",
+        default=1.0,
+        type=float,
+        help="Positive focal gamma for ASL in dual_branch loss.",
+    )
+    parser.add_argument(
+        "--asl-gamma-neg",
+        default=4.0,
+        type=float,
+        help="Negative focal gamma for ASL in dual_branch loss.",
+    )
+    parser.add_argument(
+        "--asl-clip",
+        default=0.05,
+        type=float,
+        help="Negative probability clipping for ASL in dual_branch loss.",
     )
     parser.add_argument("--print-freq", default=5, type=int, help="Print frequency")
     parser.add_argument("--seed", type=int, default=0, help="Random seed to use")
