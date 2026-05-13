@@ -24,6 +24,39 @@ class TripletMarginLoss(nn.Module):
         return self.loss_fn(labels, embeddings, self.margin, self.p)
 
 
+class SupervisedContrastiveLoss(nn.Module):
+    def __init__(self, temperature=0.07, eps=1e-8):
+        super().__init__()
+        self.temperature = temperature
+        self.eps = eps
+
+    def forward(self, embeddings, labels):
+        embeddings = F.normalize(embeddings, dim=1)
+        logits = torch.matmul(embeddings, embeddings.t()) / self.temperature
+
+        batch_size = embeddings.size(0)
+        self_mask = torch.eye(batch_size, dtype=torch.bool, device=embeddings.device)
+
+        if labels.dim() == 1:
+            positive_mask = labels.unsqueeze(0).eq(labels.unsqueeze(1))
+        else:
+            intersection = torch.matmul(labels.float(), labels.float().t())
+            positive_mask = intersection > 0
+
+        positive_mask = positive_mask & ~self_mask
+        logits = logits.masked_fill(self_mask, -1e9)
+        log_prob = logits - torch.logsumexp(logits, dim=1, keepdim=True)
+
+        positives_per_anchor = positive_mask.sum(dim=1)
+        valid_anchor = positives_per_anchor > 0
+        if not valid_anchor.any():
+            return embeddings.sum() * 0.0
+
+        loss = -(positive_mask.float() * log_prob).sum(dim=1)
+        loss = loss[valid_anchor] / (positives_per_anchor[valid_anchor].float() + self.eps)
+        return loss.mean()
+
+
 def batch_hard_triplet_loss(labels, embeddings, margin, p):
     pairwise_dist = torch.cdist(embeddings, embeddings, p=p)
 
@@ -188,7 +221,10 @@ class WeightedMultiLabelTripletLoss(nn.Module):
             loss += (current_loss * weight_p).mean()
             count += 1
 
-        return loss / (count + 1e-8), torch.tensor(0.0)
+        if count == 0:
+            return embeddings.sum() * 0.0, embeddings.new_tensor(0.0)
+
+        return loss / count, embeddings.new_tensor(0.0)
 
 
 class JaccardSupConLoss(nn.Module):
@@ -246,6 +282,149 @@ class JaccardSupConLoss(nn.Module):
             return embeddings.new_tensor(0.0)
 
         return loss.mean()
+
+
+def compute_multilabel_masks_and_weights(
+    labels: torch.Tensor,
+    use_jaccard_weight: bool = True,
+    eps: float = 1e-8,
+):
+    labels = labels.float()
+    intersection = labels @ labels.t()
+    label_cardinality = labels.sum(dim=1, keepdim=True)
+    union = label_cardinality + label_cardinality.t() - intersection
+    jaccard = intersection / union.clamp_min(eps)
+
+    batch_size = labels.size(0)
+    eye_mask = torch.eye(batch_size, device=labels.device, dtype=torch.bool)
+    positive_mask = (intersection > 0) & ~eye_mask
+    negative_mask = (intersection == 0) & ~eye_mask
+
+    if use_jaccard_weight:
+        positive_weights = jaccard * positive_mask.float()
+    else:
+        positive_weights = positive_mask.float()
+
+    return positive_mask, negative_mask, positive_weights
+
+
+class AsymmetricLoss(nn.Module):
+    def __init__(
+        self,
+        gamma_pos: float = 1.0,
+        gamma_neg: float = 4.0,
+        clip: float = 0.05,
+        eps: float = 1e-8,
+    ) -> None:
+        super().__init__()
+        self.gamma_pos = gamma_pos
+        self.gamma_neg = gamma_neg
+        self.clip = clip
+        self.eps = eps
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        targets = targets.float()
+        prob_pos = torch.sigmoid(logits)
+        prob_neg = 1.0 - prob_pos
+
+        if self.clip is not None and self.clip > 0:
+            prob_neg = (prob_neg + self.clip).clamp(max=1.0)
+
+        log_pos = torch.log(prob_pos.clamp_min(self.eps))
+        log_neg = torch.log(prob_neg.clamp_min(self.eps))
+
+        loss = targets * log_pos + (1.0 - targets) * log_neg
+
+        if self.gamma_pos > 0 or self.gamma_neg > 0:
+            pt = prob_pos * targets + prob_neg * (1.0 - targets)
+            gamma = self.gamma_pos * targets + self.gamma_neg * (1.0 - targets)
+            focal_weight = torch.pow(1.0 - pt, gamma)
+            loss = loss * focal_weight
+
+        return -loss.sum(dim=1).mean()
+
+
+class MultiLabelContrastiveLoss(nn.Module):
+    def __init__(
+        self,
+        temperature: float = 0.07,
+        use_jaccard_weight: bool = True,
+        eps: float = 1e-8,
+    ) -> None:
+        super().__init__()
+        self.temperature = temperature
+        self.use_jaccard_weight = use_jaccard_weight
+        self.eps = eps
+
+    def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        embeddings = F.normalize(embeddings, dim=1)
+        _, _, positive_weights = compute_multilabel_masks_and_weights(
+            labels=labels,
+            use_jaccard_weight=self.use_jaccard_weight,
+            eps=self.eps,
+        )
+
+        logits = embeddings @ embeddings.t()
+        logits = logits / self.temperature
+
+        batch_size = embeddings.size(0)
+        self_mask = torch.eye(batch_size, device=embeddings.device, dtype=torch.bool)
+        logits = logits.masked_fill(self_mask, -1e9)
+        log_prob = logits - torch.logsumexp(logits, dim=1, keepdim=True)
+
+        positive_weight_sums = positive_weights.sum(dim=1)
+        valid_anchors = positive_weight_sums > 0
+        if not valid_anchors.any():
+            return embeddings.sum() * 0.0
+
+        weighted_log_prob = (positive_weights * log_prob).sum(dim=1)
+        loss = -weighted_log_prob[valid_anchors] / positive_weight_sums[
+            valid_anchors
+        ].clamp_min(self.eps)
+        return loss.mean()
+
+
+class DualBranchMultiLabelLoss(nn.Module):
+    def __init__(
+        self,
+        alpha: float = 1.0,
+        temperature: float = 0.07,
+        use_jaccard_weight: bool = True,
+        gamma_pos: float = 1.0,
+        gamma_neg: float = 4.0,
+        clip: float = 0.05,
+    ) -> None:
+        super().__init__()
+        self.alpha = alpha
+        self.contrastive = MultiLabelContrastiveLoss(
+            temperature=temperature,
+            use_jaccard_weight=use_jaccard_weight,
+        )
+        self.asl = AsymmetricLoss(
+            gamma_pos=gamma_pos,
+            gamma_neg=gamma_neg,
+            clip=clip,
+        )
+
+    def forward(self, outputs, labels):
+        if not isinstance(outputs, dict):
+            raise TypeError(
+                "DualBranchMultiLabelLoss expects model output with "
+                "'embedding' and 'logits' keys."
+            )
+        if "embedding" not in outputs or "logits" not in outputs:
+            raise KeyError(
+                "DualBranchMultiLabelLoss expects model output with "
+                "'embedding' and 'logits' keys."
+            )
+
+        contrastive_loss = self.contrastive(outputs["embedding"], labels)
+        asl_loss = self.asl(outputs["logits"], labels)
+        total_loss = contrastive_loss + self.alpha * asl_loss
+        return total_loss, {
+            "contrastive": contrastive_loss.detach(),
+            "asl": asl_loss.detach(),
+        }
 
 
 # ============================================================================

@@ -185,7 +185,7 @@ class NIHChestXrayRetrievalDataSet(Dataset):
         image_path = self.image_names[index]
         image_array = np.load(image_path)
         image_array = _to_uint8_image(image_array)
-        image = Image.fromarray(image_array).convert("L")
+        image = Image.fromarray(image_array).jert("L")
 
         if self.transform is not None:
             image = self.transform(image)
@@ -404,15 +404,6 @@ class VINDRDataSet(Dataset):
         """
         self.data_dir = data_dir
         self.transform = transform
-
-        self.label_columns = [
-            "Aortic enlargement",
-            "Cardiomegaly",
-            "Pleural effusion",
-            "Pleural thickening",
-            "Lung Opacity",
-            "No finding",
-        ]
 
         df = pd.read_csv(csv_file)
         # Normalize column name: "Other disease" -> "Other diseases"
