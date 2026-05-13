@@ -183,7 +183,7 @@ class NIHChestXrayRetrievalDataSet(Dataset):
         image_path = self.image_names[index]
         image_array = np.load(image_path)
         image_array = _to_uint8_image(image_array)
-        image = Image.fromarray(image_array).convert("L")
+        image = Image.fromarray(image_array).jert("L")
 
         if self.transform is not None:
             image = self.transform(image)
@@ -371,23 +371,20 @@ class VINDRDataSet(Dataset):
         """
         self.data_dir = data_dir
         self.transform = transform
-        
-        self.label_columns = [
-            "Aortic enlargement", "Cardiomegaly", 
-            "Pleural effusion", "Pleural thickening", 
-            "Lung Opacity", "No finding"
-        ]
-        
+
         df = pd.read_csv(csv_file)
         # Normalize column name: "Other disease" -> "Other diseases"
         if "Other disease" in df.columns and "Other diseases" not in df.columns:
             df = df.rename(columns={"Other disease": "Other diseases"})
-        
+
+        # VinDR-224 disease labels are the final 6 columns in both train/test CSVs.
+        self.label_columns = df.columns[-6:].tolist()
+
         if "rad_id" in df.columns:
             self.data = df.groupby("image_id")[self.label_columns].max().reset_index()
         else:
             self.data = df[["image_id"] + self.label_columns].copy()
-        
+
         self.image_ids = self.data["image_id"].tolist()
         self.labels = self.data[self.label_columns].values
 
