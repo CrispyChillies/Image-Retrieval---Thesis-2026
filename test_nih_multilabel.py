@@ -11,6 +11,7 @@ from nih_multilabel_retrieval import (
     get_backbone_image_config,
 )
 from nih_multilabel_training import BACKBONE_SPECS, evaluate_map, set_seed
+from read_data import NIH_U_LABELS
 
 
 def load_checkpoint(model: torch.nn.Module, checkpoint_path: str, device: torch.device) -> None:
@@ -38,7 +39,7 @@ def main(args: argparse.Namespace) -> None:
     )
 
     model = spec.model_builder(
-        args.num_labels,
+        len(NIH_U_LABELS) if args.num_labels is None else args.num_labels,
         args.backbone_name or spec.default_backbone_name,
         False,
     ).to(device)
@@ -47,6 +48,7 @@ def main(args: argparse.Namespace) -> None:
     data_loader = build_nih_dataloader(
         data_dir=args.test_dataset_dir,
         image_list_file=args.test_image_list,
+        labels_csv_file=args.nih_labels_csv,
         batch_size=args.eval_batch_size,
         transform=transform,
         num_workers=args.workers,
@@ -76,9 +78,10 @@ if __name__ == "__main__":
     parser.add_argument("--resume", required=True, help="Checkpoint path")
     parser.add_argument("--test-dataset-dir", required=True, help="NIH test/gallery directory")
     parser.add_argument("--test-image-list", default=None, help="Optional manifest file")
+    parser.add_argument("--nih-labels-csv", default=None, help="NIH metadata CSV with image labels")
     parser.add_argument("--eval-batch-size", type=int, default=64)
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--num-labels", type=int, default=14)
+    parser.add_argument("--num-labels", type=int, default=None)
     parser.add_argument("--jaccard-threshold", type=float, default=0.4)
     parser.add_argument("--seed", type=int, default=0)
     main(parser.parse_args())

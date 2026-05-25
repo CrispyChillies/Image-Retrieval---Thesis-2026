@@ -15,6 +15,7 @@ from read_data import (
     VINDRDataSet,
     VINDRConceptCLIPDataSet,
     NIHChestXrayRetrievalDataSet,
+    NIH_U_LABELS,
 )
 from loss import (
     TripletMarginLoss,
@@ -709,15 +710,21 @@ def main(args):
         if args.dataset == "vindr":
             dual_branch_num_labels = 6
         elif args.dataset == "nih":
-            dual_branch_num_labels = 14
+            dual_branch_num_labels = len(NIH_U_LABELS)
         else:
             raise ValueError(
                 "dual_branch loss requires a multi-label dataset such as vindr or nih."
             )
-        if args.model not in ["resnet50", "convnextv2", "convnextv2_sra", "dinov2"]:
+        if args.model not in [
+            "densenet121",
+            "resnet50",
+            "convnextv2",
+            "convnextv2_sra",
+            "dinov2",
+        ]:
             raise ValueError(
-                "dual_branch loss is currently wired for resnet50, convnextv2, "
-                "convnextv2_sra, and dinov2."
+                "dual_branch loss is currently wired for densenet121, resnet50, "
+                "convnextv2, convnextv2_sra, and dinov2."
             )
 
     # Choose model
@@ -1065,11 +1072,13 @@ def main(args):
         train_dataset = NIHChestXrayRetrievalDataSet(
             data_dir=args.dataset_dir,
             image_list_file=args.train_image_list,
+            labels_csv_file=args.nih_labels_csv,
             transform=train_transform,
         )
         val_dataset = NIHChestXrayRetrievalDataSet(
             data_dir=args.val_dataset_dir,
             image_list_file=args.val_image_list,
+            labels_csv_file=args.nih_labels_csv,
             transform=val_transform,
         )
     else:
@@ -1284,6 +1293,11 @@ def parse_args():
         "--val-image-list",
         default="./val.txt",
         help="Validation image list/manifest. If omitted or missing, the validation directory is scanned recursively.",
+    )
+    parser.add_argument(
+        "--nih-labels-csv",
+        default=None,
+        help="NIH metadata CSV with image labels, e.g. Data_Entry_2017.csv.",
     )
     parser.add_argument(
         "--val-dataset-dir",

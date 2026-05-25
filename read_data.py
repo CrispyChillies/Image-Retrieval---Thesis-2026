@@ -15,177 +15,287 @@ import numpy as np
 import cv2
 import pandas as pd
 from pathlib import Path
-from urllib.parse import unquote
-
-NIH_RETRIEVAL_PATHOLOGIES = [
+NIH_ORIGINAL_LABELS = [
     "Atelectasis",
     "Cardiomegaly",
     "Effusion",
-    "Infiltration",
-    "Mass",
-    "Nodule",
-    "Pneumonia",
     "Pneumothorax",
+    "Emphysema",
+    "Pleural Thickening",
+    "Fibrosis",
     "Consolidation",
     "Edema",
-    "Emphysema",
-    "Fibrosis",
-    "Pleural Thickening",
-    "Hernia",
+    "Pneumonia",
+    "Infiltration",
+    "Nodule",
+    "Mass",
 ]
 
-NIH_PATHOLOGY_ALIASES = {
-    "pleural_thickening": "Pleural Thickening",
-    "pleural thickening": "Pleural Thickening",
-    "pleuralthickening": "Pleural Thickening",
+NIH_U_LABELS = [
+    "Atelectasis",
+    "Cardiomegaly",
+    "Effusion",
+    "Pneumothorax",
+    "Emphysema",
+    "Pleural Thickening",
+    "Fibrosis",
+    "Opacities",
+    "Lesion",
+]
+
+NIH_U_MAPPING = {
+    "Atelectasis": ["Atelectasis"],
+    "Cardiomegaly": ["Cardiomegaly"],
+    "Effusion": ["Effusion"],
+    "Pneumothorax": ["Pneumothorax"],
+    "Emphysema": ["Emphysema"],
+    "Pleural Thickening": ["Pleural Thickening"],
+    "Fibrosis": ["Fibrosis"],
+    "Opacities": ["Consolidation", "Edema", "Pneumonia", "Infiltration"],
+    "Lesion": ["Nodule", "Mass"],
 }
 
+NIH_RETRIEVAL_PATHOLOGIES = NIH_U_LABELS
+NIH_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+NIH_IMAGE_SHARD_PREFIX = "images_"
 
-def _resolve_file_list(data_dir=None, image_list_file=None, suffix=".npy"):
-    paths = []
 
+def _normalize_nih_label(label_name):
+    return label_name.strip().replace("_", " ").replace("-", " ").lower()
+
+
+def _read_nih_image_list(image_list_file=None):
+    image_names = []
     if image_list_file:
         manifest_path = Path(image_list_file)
         if manifest_path.is_file():
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                for raw_line in f:
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    candidate = Path(line.split(",")[0].strip())
-                    if not candidate.is_absolute() and data_dir is not None:
-                        candidate = Path(data_dir) / candidate
-                    paths.append(str(candidate))
+            if manifest_path.suffix.lower() == ".csv":
+                df = pd.read_csv(manifest_path)
+                image_col = _find_nih_image_column(df)
+                image_names = df[image_col].dropna().astype(str).str.strip().tolist()
+            else:
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    for raw_line in f:
+                        line = raw_line.strip()
+                        if line:
+                            image_names.append(line.split(",")[0].strip())
+    return image_names
 
-    if not paths and data_dir:
-        paths = sorted(str(path) for path in Path(data_dir).rglob(f"*{suffix}"))
 
-    if not paths:
-        raise ValueError(
-            "No input files found. Provide a valid data_dir or image_list_file."
+def _find_nih_image_column(df):
+    for column in ("Image Index", "image_id", "image", "filename", "fname", "path"):
+        if column in df.columns:
+            return column
+    raise ValueError(
+        "NIH metadata CSV must contain an image column such as 'Image Index'. "
+        f"Found columns: {list(df.columns)}"
+    )
+
+
+def _find_nih_label_column(df):
+    for column in ("Finding Labels", "Finding Label", "labels", "label"):
+        if column in df.columns:
+            return column
+    raise ValueError(
+        "NIH metadata CSV must contain a label column such as 'Finding Labels'. "
+        f"Found columns: {list(df.columns)}"
+    )
+
+
+def _find_nih_metadata_csv(data_dir=None, image_list_file=None, labels_csv_file=None):
+    candidates = []
+    if labels_csv_file:
+        candidates.append(Path(labels_csv_file))
+    if image_list_file and Path(image_list_file).suffix.lower() == ".csv":
+        candidates.append(Path(image_list_file))
+    if data_dir:
+        data_path = Path(data_dir)
+        candidates.extend(
+            [
+                data_path / "Data_Entry_2017.csv",
+                data_path.parent / "Data_Entry_2017.csv",
+            ]
         )
+    candidates.extend([Path("nih") / "Data_Entry_2017.csv", Path("Data_Entry_2017.csv")])
 
-    return paths
+    for candidate in candidates:
+        if candidate and candidate.is_file():
+            return candidate
+
+    searched = ", ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(
+        "Could not find NIH label metadata CSV. Pass --nih-labels-csv pointing to "
+        f"Data_Entry_2017.csv or another CSV with image and label columns. Searched: {searched}"
+    )
 
 
-def _to_uint8_image(array):
-    array = np.asarray(array)
+def _build_nih_path_index(data_dir):
+    path_index = {}
+    if not data_dir:
+        return path_index
 
-    if array.ndim == 3 and array.shape[0] in (1, 3):
-        array = np.transpose(array, (1, 2, 0))
-    if array.ndim == 3 and array.shape[-1] == 1:
-        array = array[..., 0]
+    data_path = Path(data_dir)
+    if not data_path.exists():
+        return path_index
 
-    if array.dtype == np.uint8:
-        return array
+    image_roots = [
+        shard_dir / "images"
+        for shard_dir in sorted(data_path.glob(f"{NIH_IMAGE_SHARD_PREFIX}*"))
+        if shard_dir.is_dir() and (shard_dir / "images").is_dir()
+    ]
+    if data_path.name == "images":
+        image_roots.append(data_path)
+    if not image_roots:
+        direct_images_dir = data_path / "images"
+        if direct_images_dir.is_dir():
+            image_roots.append(direct_images_dir)
 
-    array = array.astype(np.float32)
-    min_value = float(array.min())
-    max_value = float(array.max())
-    if max_value <= min_value:
-        return np.zeros_like(array, dtype=np.uint8)
+    search_roots = image_roots or [data_path]
+    for search_root in search_roots:
+        for path in search_root.rglob("*"):
+            if path.is_file() and path.suffix.lower() in NIH_IMAGE_EXTENSIONS:
+                path_index.setdefault(path.name, path)
+    return path_index
 
-    array = (array - min_value) / (max_value - min_value)
-    array = np.clip(array * 255.0, 0.0, 255.0)
-    return array.astype(np.uint8)
+
+def _describe_nih_image_layout(data_dir):
+    if not data_dir:
+        return "No data_dir was provided."
+    data_path = Path(data_dir)
+    shard_example = data_path / "images_001" / "images"
+    return (
+        "Expected NIH images under the dataset root using the original layout, "
+        f"for example '{shard_example}', or under a direct 'images' folder."
+    )
 
 
 class NIHChestXrayRetrievalDataSet(Dataset):
-    """NIH chest X-ray retrieval dataset stored as .npy files.
+    """NIH chest X-ray retrieval dataset backed by PNG/JPEG images.
 
-    Expected file name format:
-    Chest_X-ray_Atelectasis%7CCardiomegaly%7CConsolidation%7CEffusion_44100.npy
+    Labels are read from the official NIH metadata CSV and collapsed from the
+    original NIH findings into the unified labels in ``NIH_U_LABELS``.
     """
 
     def __init__(
         self,
         data_dir=None,
         image_list_file=None,
+        labels_csv_file=None,
         transform=None,
         pathology_names=None,
+        label_mapping=None,
     ):
-        self.image_names = _resolve_file_list(
+        self.data_dir = data_dir
+        self.transform = transform
+        self.pathology_names = list(pathology_names or NIH_U_LABELS)
+        self.label_mapping = label_mapping or NIH_U_MAPPING
+        self.pathology_to_index = {name: idx for idx, name in enumerate(self.pathology_names)}
+        self.original_to_unified = self._build_original_to_unified(self.label_mapping)
+
+        metadata_path = _find_nih_metadata_csv(
             data_dir=data_dir,
             image_list_file=image_list_file,
-            suffix=".npy",
+            labels_csv_file=labels_csv_file,
         )
-        self.transform = transform
-        self.pathology_names = pathology_names or NIH_RETRIEVAL_PATHOLOGIES
-        self.pathology_to_index = {
-            name: idx for idx, name in enumerate(self.pathology_names)
-        }
-        self.pathology_aliases = NIH_PATHOLOGY_ALIASES.copy()
-        for name in self.pathology_names:
-            normalized = self._normalize_pathology_name(name)
-            self.pathology_aliases[normalized] = name
+        metadata_df = pd.read_csv(metadata_path)
+        image_col = _find_nih_image_column(metadata_df)
+        label_col = _find_nih_label_column(metadata_df)
 
+        metadata_by_image = {}
+        for _, row in metadata_df.iterrows():
+            image_name = str(row[image_col]).strip()
+            raw_labels = str(row[label_col]).strip()
+            if image_name:
+                image_key = Path(image_name).name
+                if image_key in metadata_by_image:
+                    metadata_by_image[image_key] = (
+                        f"{metadata_by_image[image_key]}|{raw_labels}"
+                    )
+                else:
+                    metadata_by_image[image_key] = raw_labels
+
+        requested_images = _read_nih_image_list(image_list_file)
+        if not requested_images:
+            requested_images = sorted(metadata_by_image)
+        requested_images = list(dict.fromkeys(requested_images))
+
+        path_index = _build_nih_path_index(data_dir)
+        self.image_names = []
         self.labels = []
         self.label_sets = []
-        for image_path in self.image_names:
-            label_names, multi_hot = self._parse_labels_from_path(image_path)
+        missing_metadata = []
+        missing_images = []
+
+        for image_name in requested_images:
+            image_path = self._resolve_image_path(image_name, path_index)
+            image_key = Path(image_path).name
+            raw_labels = metadata_by_image.get(image_key)
+            if raw_labels is None:
+                missing_metadata.append(image_key)
+                continue
+
+            if not Path(image_path).is_file():
+                missing_images.append(image_path)
+                continue
+
+            label_names, multi_hot = self._encode_labels(raw_labels)
+            self.image_names.append(str(image_path))
             self.label_sets.append(label_names)
             self.labels.append(multi_hot)
 
-    def _normalize_pathology_name(self, label_name):
-        return (
-            label_name.strip()
-            .replace("%20", " ")
-            .replace("_", " ")
-            .replace("-", " ")
-            .lower()
-        )
-
-    def _parse_labels_from_path(self, image_path):
-        stem = Path(image_path).stem
-        prefix = "Chest_X-ray_"
-        prefix_index = stem.find(prefix)
-        if prefix_index < 0:
+        if missing_metadata:
             raise ValueError(
-                f"Unsupported NIH file name '{Path(image_path).name}'. "
-                f"Expected token '{prefix}'."
+                f"Missing NIH metadata for {len(missing_metadata)} images. "
+                f"Examples: {missing_metadata[:5]}"
+            )
+        if missing_images:
+            raise FileNotFoundError(
+                f"Missing NIH image files for {len(missing_images)} entries. "
+                f"Examples: {missing_images[:5]}. {_describe_nih_image_layout(data_dir)}"
+            )
+        if not self.image_names:
+            raise ValueError(
+                "No NIH images were loaded. "
+                f"Check data_dir, image_list_file, and labels_csv_file. {_describe_nih_image_layout(data_dir)}"
             )
 
-        stem_without_prefix = stem[prefix_index + len(prefix) :]
-        try:
-            encoded_labels, _ = stem_without_prefix.rsplit("_", 1)
-        except ValueError as exc:
-            raise ValueError(
-                f"Unsupported NIH file name '{Path(image_path).name}'. "
-                "Expected labels and numeric identifier separated by the final underscore."
-            ) from exc
+    def _build_original_to_unified(self, label_mapping):
+        original_to_unified = {}
+        for unified_label, original_labels in label_mapping.items():
+            if unified_label not in self.pathology_to_index:
+                continue
+            for original_label in original_labels:
+                original_to_unified[_normalize_nih_label(original_label)] = unified_label
+        return original_to_unified
 
-        raw_label_names = [
-            label.strip() for label in unquote(encoded_labels).split("|")
-        ]
+    def _resolve_image_path(self, image_name, path_index):
+        image_path = Path(image_name)
+        if image_path.is_absolute():
+            return image_path
+        if self.data_dir:
+            direct_path = Path(self.data_dir) / image_path
+            if direct_path.is_file():
+                return direct_path
+        return path_index.get(image_path.name, Path(self.data_dir or ".") / image_path)
+
+    def _encode_labels(self, raw_labels):
         label_names = []
         multi_hot = np.zeros(len(self.pathology_names), dtype=np.float32)
-        unknown_labels = []
-        for raw_label in raw_label_names:
-            normalized_label = self._normalize_pathology_name(raw_label)
-            canonical_label = self.pathology_aliases.get(normalized_label)
-            if canonical_label is None:
-                unknown_labels.append(raw_label)
+        for raw_label in raw_labels.split("|"):
+            normalized_label = _normalize_nih_label(raw_label)
+            if normalized_label in ("", "no finding", "hernia"):
                 continue
-            label_idx = self.pathology_to_index.get(canonical_label)
-            if label_idx is None:
-                unknown_labels.append(raw_label)
+            unified_label = self.original_to_unified.get(normalized_label)
+            if unified_label is None:
                 continue
-            multi_hot[label_idx] = 1.0
-            label_names.append(canonical_label)
+            multi_hot[self.pathology_to_index[unified_label]] = 1.0
+            label_names.append(unified_label)
 
-        if unknown_labels:
-            raise ValueError(
-                f"Unknown pathologies in '{Path(image_path).name}': {unknown_labels}. "
-                f"Known labels: {self.pathology_names}"
-            )
-
-        return label_names, multi_hot
+        return sorted(set(label_names)), multi_hot
 
     def __getitem__(self, index):
         image_path = self.image_names[index]
-        image_array = np.load(image_path)
-        image_array = _to_uint8_image(image_array)
-        image = Image.fromarray(image_array).jert("L")
+        image = Image.open(image_path).convert("RGB")
 
         if self.transform is not None:
             image = self.transform(image)

@@ -24,6 +24,7 @@ from nih_multilabel_retrieval import (
     get_backbone_image_config,
     train_step,
 )
+from read_data import NIH_U_LABELS
 
 
 @dataclass
@@ -138,7 +139,7 @@ def run_training(args: argparse.Namespace) -> None:
     )
 
     model = spec.model_builder(
-        args.num_labels,
+        len(NIH_U_LABELS) if args.num_labels is None else args.num_labels,
         args.backbone_name or spec.default_backbone_name,
         not args.no_pretrained,
     ).to(device)
@@ -163,6 +164,7 @@ def run_training(args: argparse.Namespace) -> None:
     train_loader = build_nih_dataloader(
         data_dir=args.dataset_dir,
         image_list_file=args.train_image_list,
+        labels_csv_file=args.nih_labels_csv,
         batch_size=args.batch_size,
         transform=train_transform,
         num_workers=args.workers,
@@ -175,6 +177,7 @@ def run_training(args: argparse.Namespace) -> None:
     val_loader = build_nih_dataloader(
         data_dir=args.val_dataset_dir or args.dataset_dir,
         image_list_file=args.val_image_list,
+        labels_csv_file=args.nih_labels_csv,
         batch_size=args.eval_batch_size,
         transform=val_transform,
         num_workers=args.workers,
@@ -259,8 +262,9 @@ def build_parser(default_backbone_type: str) -> argparse.ArgumentParser:
     parser.add_argument("--backbone-name", default=spec.default_backbone_name)
     parser.add_argument("--dataset-dir", required=True)
     parser.add_argument("--val-dataset-dir", default=None)
-    parser.add_argument("--train-image-list", default=None)
-    parser.add_argument("--val-image-list", default=None)
+    parser.add_argument("--train-image-list", default="./nih/train_val_list.txt")
+    parser.add_argument("--val-image-list", default="./nih/test_list.txt")
+    parser.add_argument("--nih-labels-csv", default=None)
     parser.add_argument("--save-dir", default="./checkpoints")
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=32)
@@ -270,7 +274,7 @@ def build_parser(default_backbone_type: str) -> argparse.ArgumentParser:
     parser.add_argument("--save-freq", type=int, default=10)
     parser.add_argument("--print-freq", type=int, default=5)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--num-labels", type=int, default=14)
+    parser.add_argument("--num-labels", type=int, default=None)
     parser.add_argument("--alpha", type=float, default=1.0)
     parser.add_argument("--temperature", type=float, default=0.07)
     parser.add_argument("--gamma-pos", type=float, default=1.0)

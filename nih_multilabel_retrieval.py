@@ -13,7 +13,7 @@ from torch.utils.data import BatchSampler, DataLoader, Sampler
 import timm
 import torchvision.transforms as transforms
 
-from read_data import NIHChestXrayRetrievalDataSet, NIH_RETRIEVAL_PATHOLOGIES
+from read_data import NIHChestXrayRetrievalDataSet, NIH_U_LABELS
 
 
 def build_nih_train_transform(
@@ -414,6 +414,7 @@ class MultiLabelBalancedBatchSampler(BatchSampler):
 def build_nih_dataloader(
     data_dir: str,
     image_list_file: Optional[str] = None,
+    labels_csv_file: Optional[str] = None,
     batch_size: int = 32,
     transform: Optional[transforms.Compose] = None,
     num_workers: int = 4,
@@ -426,8 +427,9 @@ def build_nih_dataloader(
     dataset = NIHChestXrayRetrievalDataSet(
         data_dir=data_dir,
         image_list_file=image_list_file,
+        labels_csv_file=labels_csv_file,
         transform=transform,
-        pathology_names=NIH_RETRIEVAL_PATHOLOGIES,
+        pathology_names=NIH_U_LABELS,
     )
 
     if label_aware_sampling:
@@ -459,7 +461,7 @@ def example_batch_processing(
     device: Optional[torch.device] = None,
 ) -> Dict[str, float]:
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DINOv2MultiLabelRetrievalModel(num_labels=len(NIH_RETRIEVAL_PATHOLOGIES)).to(device)
+    model = DINOv2MultiLabelRetrievalModel(num_labels=len(NIH_U_LABELS)).to(device)
     optimizer = build_optimizer(model)
     contrastive_loss_fn = MultiLabelContrastiveLoss(temperature=0.07, use_jaccard_weight=True)
     asl_loss_fn = AsymmetricLoss(gamma_pos=1.0, gamma_neg=4.0, clip=0.05)
