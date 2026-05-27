@@ -263,7 +263,7 @@ def build_parser(default_backbone_type: str) -> argparse.ArgumentParser:
     parser.add_argument("--dataset-dir", required=True)
     parser.add_argument("--val-dataset-dir", default=None)
     parser.add_argument("--train-image-list", default="./nih/train_val_list.txt")
-    parser.add_argument("--val-image-list", default="./nih/test_list.txt")
+    parser.add_argument("--val-image-list", default="./nih/val_list.txt")
     parser.add_argument("--nih-labels-csv", default=None)
     parser.add_argument("--save-dir", default="./checkpoints")
     parser.add_argument("--epochs", type=int, default=20)
