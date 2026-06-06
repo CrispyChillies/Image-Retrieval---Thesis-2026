@@ -185,7 +185,7 @@ class NIHChestXrayRetrievalDataSet(Dataset):
         image_path = self.image_names[index]
         image_array = np.load(image_path)
         image_array = _to_uint8_image(image_array)
-        image = Image.fromarray(image_array).jert("L")
+        image = Image.fromarray(image_array).convert("L")
 
         if self.transform is not None:
             image = self.transform(image)
