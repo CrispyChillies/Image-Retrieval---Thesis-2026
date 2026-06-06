@@ -108,9 +108,9 @@ def train_epoch(
                 for key, value in aux_metric.items():
                     if torch.is_tensor(value):
                         value = value.detach().item()
-                    running_aux_metric[key] = running_aux_metric.get(
-                        key, 0.0
-                    ) + float(value)
+                    running_aux_metric[key] = running_aux_metric.get(key, 0.0) + float(
+                        value
+                    )
             else:
                 running_aux_metric += float(aux_metric)
 
@@ -714,9 +714,15 @@ def main(args):
             raise ValueError(
                 "dual_branch loss requires a multi-label dataset such as vindr or nih."
             )
-        if args.model not in ["resnet50", "convnextv2", "convnextv2_sra", "dinov2"]:
+        if args.model not in [
+            "densenet121",
+            "resnet50",
+            "convnextv2",
+            "convnextv2_sra",
+            "dinov2",
+        ]:
             raise ValueError(
-                "dual_branch loss is currently wired for resnet50, convnextv2, "
+                "dual_branch loss is currently wired for densenet121, resnet50, convnextv2, "
                 "convnextv2_sra, and dinov2."
             )
 
@@ -1129,7 +1135,8 @@ def main(args):
             args.use_random_sampler
             or use_conceptclip_collate
             or args.dataset == "nih"
-            or args.loss_name in [
+            or args.loss_name
+            in [
                 "dual_branch",
                 "weighted_multilabel_triplet",
                 "jaccard_supcon",
