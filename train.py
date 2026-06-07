@@ -4,7 +4,7 @@ import random
 import torch
 from torch.optim import Adam, AdamW
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader, RandomSampler
+from torch.utils.data import DataLoader, RandomSampler, Subset
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
@@ -442,48 +442,63 @@ def _compute_single_label_retrieval_metrics(embeds, labels, topk=(1, 5, 10)):
 
 
 def _compute_multilabel_retrieval_metrics(
-    embeds, labels, topk=(1, 5, 10), relevance_threshold=0.4
+    embeds,
+    labels,
+    topk=(1, 5, 10),
+    relevance_threshold=0.4,
+    query_chunk_size=256,
 ):
     if len(labels) <= 1:
         return {"mAP": 0.0, **{f"R@{k}": 0.0 for k in topk}}
 
     embeds_norm = F.normalize(embeds, p=2, dim=1)
-    sim_matrix = torch.mm(embeds_norm, embeds_norm.t())
-    sim_matrix.fill_diagonal_(-float("inf"))
+    labels = labels.float()
+    label_cardinality = labels.sum(dim=1)
+    max_topk = min(max(topk), len(labels) - 1)
+    aps = []
+    recall_hits = {k: 0 for k in topk}
+    sample_count = len(labels)
 
-    max_rank = max(1, len(labels) - 1)
-    _, ranked_indices = sim_matrix.topk(max_rank, dim=1, largest=True, sorted=True)
+    # Compute exact metrics in query chunks so validation memory is O(chunk * N),
+    # rather than allocating multiple O(N^2) matrices for the full NIH dataset.
+    for start in range(0, sample_count, query_chunk_size):
+        end = min(start + query_chunk_size, sample_count)
+        scores = torch.mm(embeds_norm[start:end], embeds_norm.t())
+        row_indices = torch.arange(end - start)
+        global_indices = torch.arange(start, end)
+        # Cosine similarity is at least -1, so -2 safely excludes the query
+        # itself from top-k while remaining valid input for sklearn metrics.
+        scores[row_indices, global_indices] = -2.0
+
+        intersect = torch.mm(labels[start:end], labels.t())
+        union = (
+            label_cardinality[start:end, None]
+            + label_cardinality[None, :]
+            - intersect
+        )
+        relevance = intersect / union.clamp_min(1e-8) > relevance_threshold
+        relevance[row_indices, global_indices] = False
+
+        ranked_indices = scores.topk(max_topk, dim=1, largest=True, sorted=True).indices
+        ranked_relevance = relevance.gather(1, ranked_indices)
+        for k in topk:
+            actual_k = min(k, max_topk)
+            recall_hits[k] += int(
+                ranked_relevance[:, :actual_k].any(dim=1).sum().item()
+            )
+
+        scores_np = scores.numpy()
+        relevance_np = relevance.numpy()
+        for row in range(end - start):
+            if relevance_np[row].any():
+                aps.append(
+                    average_precision_score(relevance_np[row], scores_np[row])
+                )
 
     metrics = {}
-    aps = []
-    recalls = {k: [] for k in topk}
-
-    for i in range(len(embeds)):
-        intersect = (labels[i] * labels).sum(dim=1)
-        union = (labels[i] + labels).clamp(max=1).sum(dim=1)
-        jaccard = intersect / (union + 1e-8)
-
-        binary_relevance = (jaccard > relevance_threshold).float()
-        binary_relevance[i] = 0.0
-
-        if binary_relevance.sum().item() > 0:
-            eval_mask = torch.ones(len(embeds), dtype=torch.bool)
-            eval_mask[i] = False
-            ap = average_precision_score(
-                binary_relevance[eval_mask].numpy(), sim_matrix[i][eval_mask].numpy()
-            )
-            aps.append(ap)
-
-        ranked_relevance = binary_relevance[ranked_indices[i]]
-        for k in topk:
-            actual_k = min(k, ranked_relevance.numel())
-            recalls[k].append(
-                float(ranked_relevance[:actual_k].any().item()) if actual_k > 0 else 0.0
-            )
-
     metrics["mAP"] = float(np.mean(aps) * 100.0) if len(aps) > 0 else 0.0
     for k in topk:
-        metrics[f"R@{k}"] = float(np.mean(recalls[k]) * 100.0) if recalls[k] else 0.0
+        metrics[f"R@{k}"] = recall_hits[k] * 100.0 / sample_count
     return metrics
 
 
@@ -1081,6 +1096,19 @@ def main(args):
     else:
         raise NotImplementedError("Dataset not supported!")
 
+    if args.eval_max_samples and len(val_dataset) > args.eval_max_samples:
+        full_val_size = len(val_dataset)
+        generator = torch.Generator().manual_seed(args.seed)
+        val_indices = torch.randperm(full_val_size, generator=generator)[
+            : args.eval_max_samples
+        ].tolist()
+        val_dataset = Subset(val_dataset, val_indices)
+        if rank == 0:
+            print(
+                f"Using a deterministic validation subset: "
+                f"{len(val_dataset)}/{full_val_size} samples"
+            )
+
     # targets is a list where the i_th element corresponds to the label of i_th dataset element.
     # This is required for PKSampler to randomly sample from exactly p classes. You will need to
     # construct targets while building your dataset. Some datasets (such as ImageFolder) have a
@@ -1365,6 +1393,12 @@ def parse_args():
         help="Number of samples per label in a batch",
     )
     parser.add_argument("--eval-batch-size", default=64, type=int)
+    parser.add_argument(
+        "--eval-max-samples",
+        default=None,
+        type=int,
+        help="Deterministically sample at most this many validation images.",
+    )
     parser.add_argument(
         "--epochs",
         default=20,

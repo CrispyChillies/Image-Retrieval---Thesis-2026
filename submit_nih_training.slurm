@@ -30,5 +30,6 @@ python train.py \
   --dataset-dir "${DATA_DIR}" \
   --model densenet121 \
   --loss-name dual_branch \
+  --eval-max-samples 10000 \
   --workers "${SLURM_CPUS_PER_TASK:-8}" \
   --save-dir "${SAVE_DIR}"
