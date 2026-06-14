@@ -19,3 +19,5 @@ ChestMIR/vindr-physionet-384-with-annotations.zip
 vindr_densenet121_seed_0_best_ckpt.pth
 covid_convnextv2_seed_0_epoch_16_ckpt.pth
 ChestMIR/vintest-384.zip
+datasets/
+c5x35tmj5v_download_1.zip

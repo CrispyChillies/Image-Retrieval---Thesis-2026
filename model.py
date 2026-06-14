@@ -90,7 +90,7 @@ class ConvNeXtV2(nn.Module):
     Uses ConvNeXtV2 Base from timm with optional embedding layer.
     """
 
-    def __init__(self, pretrained=True, embedding_dim=None):
+    def __init__(self, pretrained=True, embedding_dim=None, num_labels=None):
         super(ConvNeXtV2, self).__init__()
         # load pretrained model from timm
         self.convnext = timm.create_model(
@@ -105,6 +105,10 @@ class ConvNeXtV2(nn.Module):
         # optional embedding layer
         self.fc = nn.Linear(
             in_features, embedding_dim) if embedding_dim else None
+        output_features = embedding_dim if embedding_dim else in_features
+        self.classification_head = (
+            nn.Linear(output_features, num_labels) if num_labels else None
+        )
 
     def forward(self, x):
         # extract features
@@ -112,6 +116,11 @@ class ConvNeXtV2(nn.Module):
         x = torch.flatten(x, 1)
         if self.fc:
             x = self.fc(x)
+        if self.classification_head is not None:
+            return {
+                "embedding": F.normalize(x, dim=1),
+                "logits": self.classification_head(x),
+            }
         # normalize features
         x = F.normalize(x, dim=1)
         return x
@@ -169,7 +178,14 @@ class ConvNeXtV2_SRA(nn.Module):
     with multiple attention heads. Outputs same dimension as backbone (1024).
     """
 
-    def __init__(self, pretrained=True, num_heads=8, lam=0.1):
+    def __init__(
+        self,
+        pretrained=True,
+        num_heads=8,
+        lam=0.1,
+        embedding_dim=None,
+        num_labels=None,
+    ):
         super(ConvNeXtV2_SRA, self).__init__()
         # load pretrained model from timm
         self.convnext = timm.create_model(
@@ -185,12 +201,24 @@ class ConvNeXtV2_SRA(nn.Module):
             lam=lam,
             norm_layer=self.convnext.head.norm,
         )
+        self.fc = nn.Linear(in_features, embedding_dim) if embedding_dim else None
+        output_features = embedding_dim if embedding_dim else in_features
+        self.classification_head = (
+            nn.Linear(output_features, num_labels) if num_labels else None
+        )
 
     def forward(self, x):
         # extract spatial feature maps (B, C, H, W) before pooling
         x = self.convnext.forward_features(x)
         # SRA produces attention-refined features (B, C)
         x = self.sra(x)
+        if self.fc:
+            x = self.fc(x)
+        if self.classification_head is not None:
+            return {
+                "embedding": F.normalize(x, dim=1),
+                "logits": self.classification_head(x),
+            }
         # normalize for retrieval
         x = F.normalize(x, dim=1)
         return x

@@ -761,6 +761,7 @@ def main(args):
         model = ConvNeXtV2_SRA(
             num_heads=args.sra_num_heads,
             lam=args.sra_lam,
+            embedding_dim=args.embedding_dim,
             num_labels=dual_branch_num_labels,
         )
     elif args.model == "swinv2":
