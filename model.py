@@ -482,6 +482,7 @@ class DinoV2(nn.Module):
         pretrained=True,
         embedding_dim=None,
         unfreeze_blocks=3,
+        num_labels=None,
     ):
         super(DinoV2, self).__init__()
         self.backbone = timm.create_model(
@@ -512,12 +513,21 @@ class DinoV2(nn.Module):
         in_features = self.backbone.num_features
         self.fc = nn.Linear(
             in_features, embedding_dim) if embedding_dim else None
+        output_features = embedding_dim if embedding_dim else in_features
+        self.classification_head = (
+            nn.Linear(output_features, num_labels) if num_labels else None
+        )
 
     def forward(self, x):
         x = self.backbone(x)
         x = torch.flatten(x, 1)
         if self.fc:
             x = self.fc(x)
+        if self.classification_head is not None:
+            return {
+                "embedding": F.normalize(x, dim=1),
+                "logits": self.classification_head(x),
+            }
         x = F.normalize(x, dim=1)
         return x
 
