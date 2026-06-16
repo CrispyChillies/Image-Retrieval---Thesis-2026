@@ -4,11 +4,17 @@ from collections import Counter
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 import torchvision.transforms as transforms
 import timm
 from timm.data import resolve_model_data_config
-from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet
+from read_data import (
+    ISICDataSet,
+    ChestXrayDataSet,
+    TBX11kDataSet,
+    NIHChestXrayRetrievalDataSet,
+    NIH_U_LABELS,
+)
 from model import ResNet50, DenseNet121, ConvNeXtV2, ConvNeXtV2_SRA, SwinV2, DinoV2, MedSigLIP
 
 def conceptclip_collate_fn(batch):
@@ -984,6 +990,24 @@ def compute_map_multilabel(dists, labels, threshold=0.5):
 
     return np.mean(aps) if aps else 0        
 
+
+def extract_state_dict(checkpoint):
+    if "state_dict" in checkpoint:
+        checkpoint = checkpoint["state_dict"]
+    elif "state-dict" in checkpoint:
+        checkpoint = checkpoint["state-dict"]
+    return checkpoint
+
+
+def infer_num_labels_from_checkpoint(checkpoint, default_num_labels):
+    if not isinstance(checkpoint, dict):
+        return default_num_labels
+    for key in ("classification_head.weight", "module.classification_head.weight"):
+        weight = checkpoint.get(key)
+        if weight is not None and hasattr(weight, "shape") and len(weight.shape) == 2:
+            return int(weight.shape[0])
+    return default_num_labels
+
 @torch.no_grad()
 def evaluate_multilabels(model, loader, device, args):
     model.eval()
@@ -994,7 +1018,10 @@ def evaluate_multilabels(model, loader, device, args):
         _labels = data[1].to(device) 
         out = model(samples)
         
-        embedding = out[0] if isinstance(out, tuple) else out
+        if isinstance(out, dict):
+            embedding = out["embedding"]
+        else:
+            embedding = out[0] if isinstance(out, tuple) else out
         embeds.append(embedding)
         labels.append(_labels)
 
@@ -1006,7 +1033,7 @@ def evaluate_multilabels(model, loader, device, args):
     dists = torch.mm(embeds_norm, embeds_norm.t())
     dists.fill_diagonal_(-float('inf'))
 
-    print('\n--- VinDr-CXR Retrieval Results ---')
+    print('\n--- Multi-label Retrieval Results ---')
     
     # 1. Tính mAP (Giữ nguyên từ code trước)
     for t in [0.25, 0.5]:
@@ -1139,6 +1166,14 @@ def main(args):
     img_model = None
     text_model = None
     text_processor = None
+    checkpoint = None
+    if os.path.isfile(args.resume):
+        checkpoint = extract_state_dict(torch.load(args.resume, map_location=device))
+    num_labels = (
+        infer_num_labels_from_checkpoint(checkpoint, len(NIH_U_LABELS))
+        if args.dataset == 'nih'
+        else None
+    )
 
     # Two-model re-ranking: load both image backbone and ConceptCLIP
     if args.use_rerank_2models:
@@ -1160,16 +1195,16 @@ def main(args):
             img_model = text_model
             is_conceptclip_img = True
         elif args.model == 'densenet121':
-            img_model = DenseNet121(embedding_dim=args.embedding_dim)
+            img_model = DenseNet121(embedding_dim=args.embedding_dim, num_labels=num_labels)
             is_conceptclip_img = False
         elif args.model == 'resnet50':
-            img_model = ResNet50(embedding_dim=args.embedding_dim)
+            img_model = ResNet50(embedding_dim=args.embedding_dim, num_labels=num_labels)
             is_conceptclip_img = False
         elif args.model == 'convnextv2':
-            img_model = ConvNeXtV2(embedding_dim=args.embedding_dim)
+            img_model = ConvNeXtV2(embedding_dim=args.embedding_dim, num_labels=num_labels)
             is_conceptclip_img = False
         elif args.model == 'convnextv2_sra':
-            img_model = ConvNeXtV2_SRA(num_heads=args.sra_num_heads, lam=args.sra_lam)
+            img_model = ConvNeXtV2_SRA(num_heads=args.sra_num_heads, lam=args.sra_lam, num_labels=num_labels)
             is_conceptclip_img = False
         elif args.model == 'swinv2':
             img_model = SwinV2(embedding_dim=args.embedding_dim)
@@ -1179,6 +1214,7 @@ def main(args):
                 model_name=args.dinov2_model_name,
                 embedding_dim=args.embedding_dim,
                 unfreeze_blocks=args.unfreeze_blocks,
+                num_labels=num_labels,
             )
             is_conceptclip_img = False
         elif args.model == 'medsiglip':
@@ -1189,11 +1225,8 @@ def main(args):
         
         # Load checkpoint for image model if not ConceptCLIP
         if not is_conceptclip_img:
-            if os.path.isfile(args.resume):
+            if checkpoint is not None:
                 print("=> loading image model checkpoint")
-                checkpoint = torch.load(args.resume)
-                if 'state-dict' in checkpoint:
-                    checkpoint = checkpoint['state-dict']
                 img_model.load_state_dict(checkpoint, strict=False)
                 print("=> loaded checkpoint")
             else:
@@ -1243,19 +1276,20 @@ def main(args):
                 model_name=args.dinov2_model_name,
                 embedding_dim=args.embedding_dim,
                 unfreeze_blocks=args.unfreeze_blocks,
+                num_labels=num_labels,
             )
             is_conceptclip = False
         elif args.model == 'densenet121':
-            model = DenseNet121(embedding_dim=args.embedding_dim)
+            model = DenseNet121(embedding_dim=args.embedding_dim, num_labels=num_labels)
             is_conceptclip = False
         elif args.model == 'resnet50':
-            model = ResNet50(embedding_dim=args.embedding_dim)
+            model = ResNet50(embedding_dim=args.embedding_dim, num_labels=num_labels)
             is_conceptclip = False
         elif args.model == 'convnextv2':
-            model = ConvNeXtV2(embedding_dim=args.embedding_dim)
+            model = ConvNeXtV2(embedding_dim=args.embedding_dim, num_labels=num_labels)
             is_conceptclip = False
         elif args.model == 'convnextv2_sra':
-            model = ConvNeXtV2_SRA(num_heads=args.sra_num_heads, lam=args.sra_lam)
+            model = ConvNeXtV2_SRA(num_heads=args.sra_num_heads, lam=args.sra_lam, num_labels=num_labels)
             is_conceptclip = False
         elif args.model == 'swinv2':
             model = SwinV2(embedding_dim=args.embedding_dim)
@@ -1268,11 +1302,8 @@ def main(args):
 
     if not use_two_model_rerank:
         if not is_conceptclip and not is_biomedclip:
-            if os.path.isfile(args.resume):
+            if checkpoint is not None:
                 print("=> loading checkpoint")
-                checkpoint = torch.load(args.resume)
-                if 'state-dict' in checkpoint:
-                    checkpoint = checkpoint['state-dict']
                 model.load_state_dict(checkpoint, strict=False)
                 print("=> loaded checkpoint")
             else:
@@ -1317,7 +1348,15 @@ def main(args):
             else:
                 img_size = 224
 
-            if args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'medsiglip']:
+            if args.dataset == 'nih' and args.model in ['convnextv2', 'convnextv2_sra', 'swinv2']:
+                test_transform = transforms.Compose([
+                    transforms.Lambda(lambda img: img.convert('RGB')),
+                    transforms.Resize(432),
+                    transforms.CenterCrop(img_size),
+                    transforms.ToTensor(),
+                    normalize
+                ])
+            elif args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'medsiglip']:
                 test_transform = transforms.Compose([
                     transforms.Lambda(lambda img: img.convert('RGB')),
                     transforms.Resize((img_size, img_size)),
@@ -1346,8 +1385,17 @@ def main(args):
         test_dataset = TBX11kDataSet(data_dir=args.test_dataset_dir,
                                     csv_file=args.test_image_list,
                                     transform=test_transform)
+    elif args.dataset == 'nih':
+        test_dataset = NIHChestXrayRetrievalDataSet(data_dir=args.test_dataset_dir,
+                                                    image_list_file=args.test_image_list,
+                                                    labels_csv_file=args.nih_labels_csv,
+                                                    transform=test_transform)
     else:
         raise NotImplementedError('Dataset not supported!')
+
+    if args.eval_max_samples is not None and args.eval_max_samples > 0:
+        if len(test_dataset) > args.eval_max_samples:
+            test_dataset = Subset(test_dataset, range(args.eval_max_samples))
 
     # Use custom collate function for ConceptCLIP to handle PIL images
     use_conceptclip_collate = (is_conceptclip and not use_two_model_rerank) or (use_two_model_rerank and is_conceptclip_img) or is_biomedclip
@@ -1456,6 +1504,8 @@ def main(args):
             evaluate_conceptclip(model, processor, test_loader, device, args)
     elif is_biomedclip:
         evaluate_biomedclip_zeroshot(model, tokenizer, preprocess, test_loader, device, args)
+    elif args.dataset == 'nih':
+        evaluate_multilabels(model, test_loader, device, args)
     else:
         evaluate(model, test_loader, device, args)
 
@@ -1465,11 +1515,13 @@ def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch Embedding Learning')
 
     parser.add_argument('--dataset', default='covid',
-                        help='Dataset to use (covid, isic, or tbx11k)')
+                        help='Dataset to use (covid, isic, tbx11k, or nih)')
     parser.add_argument('--test-dataset-dir', default='/data/brian.hu/COVID/data/test',
                         help='Test dataset directory path')
     parser.add_argument('--test-image-list', default='./test_COVIDx4.txt',
                         help='Test image list')
+    parser.add_argument('--nih-labels-csv', default=None,
+                        help='NIH metadata CSV with image labels, e.g. Data_Entry_2017.csv')
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--model', default='densenet121',
@@ -1511,6 +1563,8 @@ def parse_args():
     parser.add_argument('--biomedclip-prompt-template', default='this is a medical image of {label}', type=str,
                         help='Prompt template for BiomedCLIP zero-shot classification. Must contain {label}.')
     parser.add_argument('--eval-batch-size', default=64, type=int)
+    parser.add_argument('--eval-max-samples', default=None, type=int,
+                        help='Evaluate at most this many samples from the test/eval dataset')
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                         help='Number of data loading workers')
     parser.add_argument('--allow-pil-multiprocess', action='store_true',

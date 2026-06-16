@@ -4,7 +4,7 @@ import random
 import torch
 from torch.optim import Adam, AdamW
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader, RandomSampler
+from torch.utils.data import DataLoader, RandomSampler, Subset
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
@@ -15,6 +15,7 @@ from read_data import (
     VINDRDataSet,
     VINDRConceptCLIPDataSet,
     NIHChestXrayRetrievalDataSet,
+    NIH_NPY_LABELS,
     NIH_U_LABELS,
 )
 from loss import (
@@ -43,6 +44,15 @@ from sklearn.metrics import average_precision_score
 import numpy as np
 import torch.nn.functional as F
 from torch.amp import autocast, GradScaler
+
+
+def has_npy_files(data_dir):
+    if not data_dir or not os.path.isdir(data_dir):
+        return False
+    for root, _, files in os.walk(data_dir):
+        if any(file_name.lower().endswith(".npy") for file_name in files):
+            return True
+    return False
 
 
 def train_epoch(
@@ -710,7 +720,9 @@ def main(args):
         if args.dataset == "vindr":
             dual_branch_num_labels = 6
         elif args.dataset == "nih":
-            dual_branch_num_labels = len(NIH_U_LABELS)
+            dual_branch_num_labels = (
+                len(NIH_NPY_LABELS) if has_npy_files(args.dataset_dir) else len(NIH_U_LABELS)
+            )
         else:
             raise ValueError(
                 "dual_branch loss requires a multi-label dataset such as vindr or nih."
@@ -1084,6 +1096,15 @@ def main(args):
     else:
         raise NotImplementedError("Dataset not supported!")
 
+    if args.eval_max_samples is not None and args.eval_max_samples > 0:
+        if len(val_dataset) > args.eval_max_samples:
+            if rank == 0:
+                print(
+                    f"Using a deterministic validation subset: "
+                    f"{args.eval_max_samples}/{len(val_dataset)} samples"
+                )
+            val_dataset = Subset(val_dataset, range(args.eval_max_samples))
+
     # targets is a list where the i_th element corresponds to the label of i_th dataset element.
     # This is required for PKSampler to randomly sample from exactly p classes. You will need to
     # construct targets while building your dataset. Some datasets (such as ImageFolder) have a
@@ -1372,6 +1393,12 @@ def parse_args():
         help="Number of samples per label in a batch",
     )
     parser.add_argument("--eval-batch-size", default=64, type=int)
+    parser.add_argument(
+        "--eval-max-samples",
+        default=None,
+        type=int,
+        help="Evaluate at most this many validation samples using a deterministic prefix subset.",
+    )
     parser.add_argument(
         "--epochs",
         default=20,

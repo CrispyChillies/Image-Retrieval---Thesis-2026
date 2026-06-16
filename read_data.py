@@ -15,6 +15,7 @@ import numpy as np
 import cv2
 import pandas as pd
 from pathlib import Path
+from urllib.parse import unquote
 NIH_ORIGINAL_LABELS = [
     "Atelectasis",
     "Cardiomegaly",
@@ -56,6 +57,27 @@ NIH_U_MAPPING = {
 }
 
 NIH_RETRIEVAL_PATHOLOGIES = NIH_U_LABELS
+NIH_NPY_LABELS = [
+    "Atelectasis",
+    "Cardiomegaly",
+    "Effusion",
+    "Infiltration",
+    "Mass",
+    "Nodule",
+    "Pneumonia",
+    "Pneumothorax",
+    "Consolidation",
+    "Edema",
+    "Emphysema",
+    "Fibrosis",
+    "Pleural Thickening",
+    "Hernia",
+]
+NIH_NPY_LABEL_ALIASES = {
+    "pleural_thickening": "Pleural Thickening",
+    "pleural thickening": "Pleural Thickening",
+    "pleuralthickening": "Pleural Thickening",
+}
 NIH_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 NIH_IMAGE_SHARD_PREFIX = "images_"
 
@@ -80,6 +102,51 @@ def _read_nih_image_list(image_list_file=None):
                         if line:
                             image_names.append(line.split(",")[0].strip())
     return image_names
+
+
+def _resolve_nih_npy_paths(data_dir=None, image_list_file=None):
+    paths = []
+
+    if image_list_file:
+        manifest_path = Path(image_list_file)
+        if manifest_path.is_file():
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                for raw_line in f:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    candidate = Path(line.split(",")[0].strip())
+                    if not candidate.is_absolute() and data_dir is not None:
+                        candidate = Path(data_dir) / candidate
+                    if candidate.suffix.lower() == ".npy" and candidate.is_file():
+                        paths.append(str(candidate))
+
+    if not paths and data_dir:
+        paths = sorted(str(path) for path in Path(data_dir).rglob("*.npy"))
+
+    return paths
+
+
+def _to_uint8_image(array):
+    array = np.asarray(array)
+
+    if array.ndim == 3 and array.shape[0] in (1, 3):
+        array = np.transpose(array, (1, 2, 0))
+    if array.ndim == 3 and array.shape[-1] == 1:
+        array = array[..., 0]
+
+    if array.dtype == np.uint8:
+        return array
+
+    array = array.astype(np.float32)
+    min_value = float(array.min())
+    max_value = float(array.max())
+    if max_value <= min_value:
+        return np.zeros_like(array, dtype=np.uint8)
+
+    array = (array - min_value) / (max_value - min_value)
+    array = np.clip(array * 255.0, 0.0, 255.0)
+    return array.astype(np.uint8)
 
 
 def _find_nih_image_column(df):
@@ -187,6 +254,25 @@ class NIHChestXrayRetrievalDataSet(Dataset):
     ):
         self.data_dir = data_dir
         self.transform = transform
+        npy_paths = _resolve_nih_npy_paths(data_dir=data_dir, image_list_file=image_list_file)
+        if npy_paths:
+            self.image_names = npy_paths
+            self.pathology_names = list(pathology_names or NIH_NPY_LABELS)
+            self.pathology_to_index = {
+                name: idx for idx, name in enumerate(self.pathology_names)
+            }
+            self.pathology_aliases = NIH_NPY_LABEL_ALIASES.copy()
+            for name in self.pathology_names:
+                self.pathology_aliases[self._normalize_npy_label(name)] = name
+
+            self.labels = []
+            self.label_sets = []
+            for image_path in self.image_names:
+                label_names, multi_hot = self._parse_npy_labels_from_path(image_path)
+                self.label_sets.append(label_names)
+                self.labels.append(multi_hot)
+            return
+
         self.pathology_names = list(pathology_names or NIH_U_LABELS)
         self.label_mapping = label_mapping or NIH_U_MAPPING
         self.pathology_to_index = {name: idx for idx, name in enumerate(self.pathology_names)}
@@ -268,6 +354,59 @@ class NIHChestXrayRetrievalDataSet(Dataset):
                 original_to_unified[_normalize_nih_label(original_label)] = unified_label
         return original_to_unified
 
+    def _normalize_npy_label(self, label_name):
+        return (
+            label_name.strip()
+            .replace("%20", " ")
+            .replace("_", " ")
+            .replace("-", " ")
+            .lower()
+        )
+
+    def _parse_npy_labels_from_path(self, image_path):
+        stem = Path(image_path).stem
+        prefix = "Chest_X-ray_"
+        prefix_index = stem.find(prefix)
+        if prefix_index < 0:
+            raise ValueError(
+                f"Unsupported NIH file name '{Path(image_path).name}'. "
+                f"Expected token '{prefix}'."
+            )
+
+        stem_without_prefix = stem[prefix_index + len(prefix):]
+        try:
+            encoded_labels, _ = stem_without_prefix.rsplit("_", 1)
+        except ValueError as exc:
+            raise ValueError(
+                f"Unsupported NIH file name '{Path(image_path).name}'. "
+                "Expected labels and numeric identifier separated by the final underscore."
+            ) from exc
+
+        raw_label_names = [label.strip() for label in unquote(encoded_labels).split("|")]
+        label_names = []
+        multi_hot = np.zeros(len(self.pathology_names), dtype=np.float32)
+        unknown_labels = []
+        for raw_label in raw_label_names:
+            normalized_label = self._normalize_npy_label(raw_label)
+            canonical_label = self.pathology_aliases.get(normalized_label)
+            if canonical_label is None:
+                unknown_labels.append(raw_label)
+                continue
+            label_idx = self.pathology_to_index.get(canonical_label)
+            if label_idx is None:
+                unknown_labels.append(raw_label)
+                continue
+            multi_hot[label_idx] = 1.0
+            label_names.append(canonical_label)
+
+        if unknown_labels:
+            raise ValueError(
+                f"Unknown pathologies in '{Path(image_path).name}': {unknown_labels}. "
+                f"Known labels: {self.pathology_names}"
+            )
+
+        return label_names, multi_hot
+
     def _resolve_image_path(self, image_name, path_index):
         image_path = Path(image_name)
         if image_path.is_absolute():
@@ -295,7 +434,12 @@ class NIHChestXrayRetrievalDataSet(Dataset):
 
     def __getitem__(self, index):
         image_path = self.image_names[index]
-        image = Image.open(image_path).convert("RGB")
+        if str(image_path).lower().endswith(".npy"):
+            image_array = np.load(image_path)
+            image_array = _to_uint8_image(image_array)
+            image = Image.fromarray(image_array).convert("L")
+        else:
+            image = Image.open(image_path).convert("RGB")
 
         if self.transform is not None:
             image = self.transform(image)
