@@ -17,9 +17,25 @@ from read_data import (
 
 
 class VinDRRetrievalDataSet(VINDRConceptCLIPDataSet):
+    LEGACY_FINDING6_COLUMNS = [
+        "Aortic enlargement",
+        "Cardiomegaly",
+        "Pleural effusion",
+        "Pleural thickening",
+        "Lung Opacity",
+        "No finding",
+    ]
+
     def __init__(self, *args, label_mode="all", **kwargs):
         super().__init__(*args, return_pil=False, **kwargs)
         self.label_mode = label_mode
+
+    def legacy_finding6_label(self, index):
+        row = self.data.iloc[index]
+        for label_idx, column in enumerate(self.LEGACY_FINDING6_COLUMNS[:-1]):
+            if int(row[column]) == 1:
+                return torch.tensor(label_idx, dtype=torch.long)
+        return torch.tensor(len(self.LEGACY_FINDING6_COLUMNS) - 1, dtype=torch.long)
 
     def __getitem__(self, index):
         sample = super().__getitem__(index)
@@ -27,6 +43,8 @@ class VinDRRetrievalDataSet(VINDRConceptCLIPDataSet):
             label = sample["concept_labels"]
         elif self.label_mode == "disease":
             label = sample["disease_labels"]
+        elif self.label_mode == "legacy_finding6":
+            label = self.legacy_finding6_label(index)
         elif self.label_mode == "all":
             label = sample["all_labels"]
         else:
@@ -333,11 +351,12 @@ def parse_args():
     parser.add_argument(
         "--vindr-label-mode",
         default="all",
-        choices=["all", "concept", "disease"],
+        choices=["all", "concept", "disease", "legacy_finding6"],
         help=(
             "VinDR labels used to define retrieval relevance. "
             "'all' uses 28 concept+disease labels, 'concept' uses 22 finding "
-            "labels, and 'disease' uses 6 disease labels."
+            "labels, 'disease' uses 6 disease labels, and 'legacy_finding6' "
+            "uses the older 6-class primary finding setup."
         ),
     )
     parser.add_argument(
