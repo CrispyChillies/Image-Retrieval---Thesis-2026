@@ -11,6 +11,7 @@ from pymilvus import (
     DataType,
     Collection,
 )
+from pymilvus.exceptions import MilvusException
 import os
 from dotenv import load_dotenv
 
@@ -216,10 +217,30 @@ class MilvusManager:
         print(f"  Index type: {index_type}")
         print(f"  Metric type: {metric_type}")
 
-        collection.create_index(field_name="embedding", index_params=index_params)
+        # If collection already has an index on the embedding field, skip creation
+        try:
+            existing_indexes = None
+            # Some PyMilvus versions expose `collection.indexes`; guard with try/except
+            try:
+                existing_indexes = collection.indexes
+            except Exception:
+                existing_indexes = None
 
-        print(f"✅ Index created for {model_type}")
-        return True
+            if existing_indexes:
+                print(f"Index already exists for collection {collection.name}; skipping creation.")
+                return True
+
+            collection.create_index(field_name="embedding", index_params=index_params)
+            print(f"✅ Index created for {model_type}")
+            return True
+        except MilvusException as me:
+            # Gracefully handle "at most one distinct index is allowed per field"
+            msg = str(me)
+            if "at most one distinct index is allowed per field" in msg or "already exists" in msg:
+                print(f"Index creation skipped: {msg}")
+                return True
+            # re-raise unexpected errors
+            raise
 
     def load_collection(self, model_type):
         """Load collection into memory"""
