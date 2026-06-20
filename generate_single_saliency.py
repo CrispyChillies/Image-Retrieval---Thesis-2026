@@ -9,7 +9,7 @@ import torch.nn as nn
 import numpy as np
 from PIL import Image
 from torchvision import transforms
-from model import ConvNeXtV2, DenseNet121, ResNet50
+from model import ConvNeXtV2, ConvNeXtV2_SRA, DenseNet121, ResNet50
 from explanations import SimAtt, SimCAM, SBSMBatch
 import argparse
 
@@ -21,12 +21,16 @@ def main():
     parser.add_argument('--retrieved_image', type=str, default=None,
                        help='Path to retrieved image (if None, uses query for self-saliency)')
     parser.add_argument('--model_type', type=str, default='convnextv2',
-                       choices=['densenet121', 'resnet50', 'convnextv2'],
+                       choices=['densenet121', 'resnet50', 'convnextv2', 'convnextv2_sra'],
                        help='Model architecture')
     parser.add_argument('--model_weights', type=str, required=True,
                        help='Path to model weights')
     parser.add_argument('--embedding_dim', type=int, default=None,
                        help='Embedding dimension (None for no projection)')
+    parser.add_argument('--sra_num_heads', type=int, default=8,
+                       help='Number of SRA attention heads (ConvNeXtV2_SRA only)')
+    parser.add_argument('--sra_lam', type=float, default=0.1,
+                       help='SRA residual attention weight (ConvNeXtV2_SRA only)')
     parser.add_argument('--explainer', type=str, default='simatt',
                        choices=['simatt', 'simcam', 'sbsm'],
                        help='Explanation method')
@@ -51,14 +55,24 @@ def main():
     elif args.model_type == 'convnextv2':
         model = ConvNeXtV2(embedding_dim=args.embedding_dim)
         img_size = 384
+    elif args.model_type == 'convnextv2_sra':
+        model = ConvNeXtV2_SRA(
+            embedding_dim=args.embedding_dim,
+            num_heads=args.sra_num_heads,
+            lam=args.sra_lam,
+        )
+        img_size = 384
     
     if os.path.exists(args.model_weights):
         checkpoint = torch.load(args.model_weights, map_location=device)
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            checkpoint = checkpoint['model_state_dict']
         model.load_state_dict(checkpoint, strict=False)
         print(f"Loaded weights from: {args.model_weights}")
     else:
         raise FileNotFoundError(f"Model weights not found: {args.model_weights}")
     
+    model.to(device)
     model.eval()
     
     # Setup explainer
@@ -70,21 +84,24 @@ def main():
         elif args.model_type == 'resnet50':
             target_layer = model.resnet50[7][-1].conv3
             explainer = SimAtt(model, target_layer, target_layers=None)
-        elif args.model_type == 'convnextv2':
-            # For ConvNeXtV2, use the last stage
+        elif args.model_type in ['convnextv2', 'convnextv2_sra']:
+            # For ConvNeXtV2 variants, use the last spatial backbone stage.
             target_layer = model.convnext.stages[-1]
             explainer = SimAtt(model, target_layer, target_layers=None)
     
     elif args.explainer == 'simcam':
-        if args.model_type != 'densenet121':
-            raise NotImplementedError('SimCAM currently only supports DenseNet121')
-        model_seq = nn.Sequential(*list(model.children())[0], *list(model.children())[1:])
-        explainer = SimCAM(model_seq, model_seq[0], target_layers=["relu"], 
-                          fc=model_seq[2] if args.embedding_dim else None)
+        if args.model_type == 'densenet121':
+            model_seq = nn.Sequential(*list(model.children())[0], *list(model.children())[1:])
+            explainer = SimCAM(model_seq, model_seq[0], fc=model_seq[2] if args.embedding_dim else None)
+        elif args.model_type in ['convnextv2', 'convnextv2_sra']:
+            target_layer = model.convnext.stages[-1]
+            explainer = SimCAM(model, target_layer, fc=None)
+        else:
+            raise NotImplementedError(f'SimCAM is not implemented for {args.model_type}')
     
     elif args.explainer == 'sbsm':
         explainer = SBSMBatch(model, input_size=(img_size, img_size), gpu_batch=250)
-        maskspath = 'masks.npy'
+        maskspath = f'masks_{img_size}x{img_size}.npy'
         if not os.path.isfile(maskspath):
             print("Generating masks for SBSM...")
             explainer.generate_masks(window_size=24, stride=5, savepath=maskspath)
@@ -120,12 +137,15 @@ def main():
     print(f"\nGenerating saliency map using {args.explainer}...")
     with torch.set_grad_enabled(args.explainer != 'sbsm'):
         if args.explainer == 'sbsm':
-            saliency = explainer(retrieved_tensor)
+            saliency = explainer(query_tensor, retrieved_tensor) if args.retrieved_image else explainer(query_tensor)
         else:
             saliency = explainer(query_tensor, retrieved_tensor)
     
     # Convert to numpy
     saliency = saliency.squeeze().cpu().numpy()
+    if saliency.ndim == 3 and saliency.shape[0] == 2:
+        print("SimCAM returned query and retrieved maps; saving the retrieved-image map.")
+        saliency = saliency[1]
     
     print(f"Saliency map shape: {saliency.shape}")
     print(f"Saliency map range: [{saliency.min():.4f}, {saliency.max():.4f}]")

@@ -607,9 +607,13 @@ class SimAtt(nn.Module):
         super(SimAtt, self).__init__()
         self.model = model
         self.feature_module = feature_module
+        self.use_forward_hook = target_layers is None
 
-        self.extractor = ModelOutputs(
-            self.model, self.feature_module, target_layers, return_gradients=False)
+        if self.use_forward_hook:
+            self.extractor = None
+        else:
+            self.extractor = ModelOutputs(
+                self.model, self.feature_module, target_layers, return_gradients=False)
 
     def forward(self, x_q, x_p=None, x_n=None):
         # Consider all possible conditions:
@@ -626,8 +630,26 @@ class SimAtt(nn.Module):
         if x_n is not None:
             x = torch.cat((x, x_n))
 
-        # Extract intermediate activations and outputs
-        A, x = self.extractor(x)
+        # Extract intermediate activations and outputs. The original extractor only
+        # supports direct child modules; hooks also support nested backbone layers.
+        if self.use_forward_hook:
+            A = []
+
+            def hook_fn(module, inp, out):
+                A.append(out[0] if isinstance(out, (tuple, list)) else out)
+
+            handle = self.feature_module.register_forward_hook(hook_fn)
+            x = self.model(x)
+            handle.remove()
+
+            if isinstance(x, dict):
+                x = x["embedding"]
+            if len(A) == 0:
+                raise RuntimeError("SimAtt hook failed: no features captured.")
+        else:
+            A, x = self.extractor(x)
+            if isinstance(x, dict):
+                x = x["embedding"]
 
         # Compute positive and negative weights
         x_norm = nn.functional.normalize(x.detach(), dim=1)
