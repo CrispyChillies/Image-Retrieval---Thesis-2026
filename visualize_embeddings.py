@@ -83,28 +83,103 @@ def reduce_dim(embeddings, method="umap", n_components=2, random_state=42, **kwa
     return embedding_2d
 
 
-def plot_embeddings(points, labels=None, paths=None, out_path="viz.png", title=None):
+def plot_embeddings(
+    points,
+    labels=None,
+    paths=None,
+    out_path="viz.png",
+    title=None,
+    marker_size=6,
+    alpha=0.8,
+    dpi=200,
+    cluster_k=None,
+    interactive=False,
+    zoom=None,
+):
+    import matplotlib.lines as mlines
+
     plt.figure(figsize=(10, 10))
 
-    unique_labels = None
+    if cluster_k is not None:
+        from sklearn.cluster import KMeans
+
+        kmeans = KMeans(n_clusters=cluster_k, random_state=0)
+        cluster_ids = kmeans.fit_predict(points)
+        centroids = kmeans.cluster_centers_
+    else:
+        cluster_ids = None
+        centroids = None
+
     if labels is not None:
         unique_labels = list(sorted(set(labels)))
         color_map = {lab: i for i, lab in enumerate(unique_labels)}
         colors = [color_map.get(l, 0) for l in labels]
-        scatter = plt.scatter(points[:, 0], points[:, 1], c=colors, cmap="tab10", s=6, alpha=0.8)
-        # legend
+        scatter = plt.scatter(points[:, 0], points[:, 1], c=colors, cmap="tab10", s=marker_size, alpha=alpha)
+
+        # If clustering provided, compute majority label per cluster and mark mismatches
+        if cluster_ids is not None:
+            import numpy as _np
+            mismatches = []
+            cluster_to_major = {}
+            for cid in range(cluster_k):
+                inds = [i for i, c in enumerate(cluster_ids) if c == cid]
+                if not inds:
+                    continue
+                labs = [labels[i] for i in inds]
+                # majority label
+                maj = max(set(labs), key=labs.count)
+                cluster_to_major[cid] = maj
+                for i in inds:
+                    if labels[i] != maj:
+                        mismatches.append(i)
+
+            # highlight mismatches with black edge
+            if mismatches:
+                plt.scatter(points[_np.array(mismatches), 0], points[_np.array(mismatches), 1],
+                            facecolors='none', edgecolors='k', s=marker_size*3, linewidths=0.8)
+
+        # legend for labels
         handles = []
+        cmap = plt.cm.get_cmap('tab10')
         for lab, idx in color_map.items():
-            handles.append(plt.Line2D([0], [0], marker="o", color="w", label=lab, markerfacecolor=scatter.cmap(idx), markersize=6))
+            handles.append(mlines.Line2D([0], [0], marker='o', color='w', label=lab,
+                                         markerfacecolor=cmap(idx), markersize=6))
         plt.legend(handles=handles, title="label", loc="best", fontsize=8)
     else:
-        plt.scatter(points[:, 0], points[:, 1], s=6, alpha=0.8)
+        plt.scatter(points[:, 0], points[:, 1], s=marker_size, alpha=alpha)
+
+    # plot centroids if present
+    if centroids is not None:
+        plt.scatter(centroids[:, 0], centroids[:, 1], c='black', marker='x', s=50)
+
+    if zoom is not None:
+        xmin, xmax, ymin, ymax = zoom
+        plt.xlim(xmin, xmax)
+        plt.ylim(ymin, ymax)
 
     plt.title(title or "Embedding visualization")
     plt.axis("off")
     plt.tight_layout()
-    plt.savefig(out_path, dpi=200)
+    plt.savefig(out_path, dpi=dpi)
     print(f"Saved plot to: {out_path}")
+
+    # Interactive output with Plotly
+    if interactive:
+        try:
+            import plotly.express as px
+            import pandas as pd
+
+            df = pd.DataFrame(points, columns=["x", "y"])
+            if labels is not None:
+                df["label"] = labels
+            if paths is not None:
+                df["path"] = paths
+            fig = px.scatter(df, x="x", y="y", color=("label" if labels is not None else None), hover_data=(['path'] if paths is not None else None), width=1000, height=1000)
+            interactive_path = out_path.replace('.png', '.html')
+            fig.write_html(interactive_path)
+            print(f"Saved interactive HTML to: {interactive_path}")
+        except Exception as e:
+            print(f"Interactive plotly export failed: {e}")
 
 
 def main():
