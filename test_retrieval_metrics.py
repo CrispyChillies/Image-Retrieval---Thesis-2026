@@ -160,7 +160,7 @@ def relevance_matrix(labels):
         rel = labels[:, None].eq(labels[None, :])
     else:
         labels = labels.float()
-        rel = (labels @ labels.t()) > 0
+        rel = (labels @ labels.t()) > 2
     rel.fill_diagonal_(False)
     return rel
 
