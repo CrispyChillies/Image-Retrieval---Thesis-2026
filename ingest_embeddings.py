@@ -473,6 +473,12 @@ def main():
         default=100,
         help="Batch size for Milvus insertion",
     )
+    parser.add_argument(
+        "--save_embeddings_npz",
+        type=str,
+        default=None,
+        help="Optional path to save computed embeddings as .npz (arrays: embeddings, labels, paths)",
+    )
     parser.add_argument("--uri", type=str, default=None, help="Zilliz Cloud URI")
     parser.add_argument("--token", type=str, default=None, help="Zilliz Cloud token")
     parser.add_argument(
@@ -564,6 +570,15 @@ def main():
         )
         print(f"✅ Computed {len(embeddings)} embeddings")
         print(f"   Embedding shape: {embeddings.shape}")
+
+        # Optionally save embeddings locally for visualization/inspection
+        if args.save_embeddings_npz:
+            import numpy as _np
+
+            save_path = args.save_embeddings_npz
+            os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+            _np.savez(save_path, embeddings=embeddings, labels=_np.array(valid_labels, dtype=object), paths=_np.array(valid_paths, dtype=object))
+            print(f"Saved embeddings .npz to: {save_path}")
 
         stored_image_paths = resolve_stored_image_paths(valid_paths, args)
 
