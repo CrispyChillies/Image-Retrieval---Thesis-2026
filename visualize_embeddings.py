@@ -193,6 +193,17 @@ def main():
     parser.add_argument("--limit", type=int, default=2000, help="Max number of points to fetch")
     parser.add_argument("--method", type=str, default="umap", choices=["umap", "tsne"])
     parser.add_argument("--out", type=str, default="embeddings_viz.png")
+    # UMAP / TSNE tuning
+    parser.add_argument("--umap_n_neighbors", type=int, default=15, help="UMAP n_neighbors")
+    parser.add_argument("--umap_min_dist", type=float, default=0.1, help="UMAP min_dist")
+    parser.add_argument("--tsne_perplexity", type=float, default=30.0, help="t-SNE perplexity")
+    # Plot controls
+    parser.add_argument("--marker_size", type=int, default=6, help="Marker size for scatter plot")
+    parser.add_argument("--alpha", type=float, default=0.8, help="Alpha (transparency) for markers")
+    parser.add_argument("--dpi", type=int, default=200, help="Output image DPI")
+    parser.add_argument("--cluster_k", type=int, default=None, help="Optional K for KMeans to highlight mismatches")
+    parser.add_argument("--interactive", action="store_true", help="Also save interactive Plotly HTML")
+    parser.add_argument("--zoom", type=str, default=None, help="Optional zoom window as xmin,xmax,ymin,ymax")
     parser.add_argument("--points_csv", type=str, default=None, help="Optional CSV output with 2D coords and metadata")
     args = parser.parse_args()
 
@@ -220,11 +231,38 @@ def main():
             paths = [paths[i] for i in idx]
 
     # Reduce dimensionality
-    reducer_kwargs = {"n_neighbors": 15, "min_dist": 0.1} if args.method == "umap" else {}
+    # Prepare reducer kwargs from CLI
+    if args.method == "umap":
+        reducer_kwargs = {"n_neighbors": args.umap_n_neighbors, "min_dist": args.umap_min_dist}
+    else:
+        reducer_kwargs = {"perplexity": args.tsne_perplexity}
+
     points = reduce_dim(embeddings, method=args.method, **reducer_kwargs)
 
+    # Parse zoom if provided
+    zoom = None
+    if args.zoom:
+        try:
+            parts = [float(x) for x in args.zoom.split(",")]
+            if len(parts) == 4:
+                zoom = parts
+        except Exception:
+            print("Ignoring invalid --zoom value; expected xmin,xmax,ymin,ymax")
+
     # Plot
-    plot_embeddings(points, labels=labels, paths=paths, out_path=args.out, title=f"{args.model_type or 'embeddings'} ({args.method})")
+    plot_embeddings(
+        points,
+        labels=labels,
+        paths=paths,
+        out_path=args.out,
+        title=f"{args.model_type or 'embeddings'} ({args.method})",
+        marker_size=args.marker_size,
+        alpha=args.alpha,
+        dpi=args.dpi,
+        cluster_k=args.cluster_k,
+        interactive=args.interactive,
+        zoom=zoom,
+    )
 
     # Optionally save CSV with coordinates
     if args.points_csv:
