@@ -155,12 +155,16 @@ def extract_embeddings(model, loader, device):
     return torch.cat(embeds, dim=0), torch.cat(labels, dim=0)
 
 
-def relevance_matrix(labels):
+def relevance_matrix(labels, jaccard_threshold=0.5):
     if labels.ndim == 1:
         rel = labels[:, None].eq(labels[None, :])
     else:
         labels = labels.float()
-        rel = (labels @ labels.t()) > 2
+        intersection = labels @ labels.t()
+        label_counts = labels.sum(dim=1, keepdim=True)
+        union = label_counts + label_counts.t() - intersection
+        jaccard = intersection / union.clamp_min(1e-8)
+        rel = jaccard > jaccard_threshold
     rel.fill_diagonal_(False)
     return rel
 
@@ -229,11 +233,11 @@ def mean_without_nan(values):
     return float(np.nanmean(values)) if not np.all(np.isnan(values)) else float("nan")
 
 
-def compute_retrieval_metrics(embeds, labels, k_values):
+def compute_retrieval_metrics(embeds, labels, k_values, jaccard_threshold=0.5):
     dists = -torch.cdist(embeds, embeds)
     dists.fill_diagonal_(float("-inf"))
     rankings = torch.argsort(dists, dim=1, descending=True).cpu().numpy()
-    relevant = relevance_matrix(labels).cpu().numpy()
+    relevant = relevance_matrix(labels, jaccard_threshold).cpu().numpy()
 
     per_query_full_ap = []
     per_query_full_rr = []
@@ -264,6 +268,7 @@ def compute_retrieval_metrics(embeds, labels, k_values):
     results = {
         "num_queries": int(rankings.shape[0]),
         "num_evaluated_queries": int(np.sum(~np.isnan(per_query_full_ap))),
+        "jaccard_threshold": float(jaccard_threshold),
         "MAP": mean_without_nan(per_query_full_ap),
         "MRR": mean_without_nan(per_query_full_rr),
         "at_k": {},
@@ -283,6 +288,7 @@ def print_metrics(results):
     print("\n=== Retrieval Ranking Metrics ===")
     print(f"Queries: {results['num_queries']}")
     print(f"Evaluated queries: {results['num_evaluated_queries']}")
+    print(f"Jaccard threshold: > {results['jaccard_threshold']:.3f}")
     print(f"MAP: {results['MAP'] * 100.0:.2f}%")
     print(f"MRR: {results['MRR'] * 100.0:.2f}%")
 
@@ -386,6 +392,16 @@ def parse_args():
         default="1,5,10",
         help="Comma-separated K values for nDCG@K, MRR@K, and MAP@K.",
     )
+    parser.add_argument(
+        "--jaccard-threshold",
+        default=0.5,
+        type=float,
+        help=(
+            "Multi-label relevance threshold. Two images are relevant when "
+            "Jaccard(label_a, label_b) is greater than this value. Single-label "
+            "modes ignore this option."
+        ),
+    )
     parser.add_argument("--save-dir", default="./results", help="Result save directory.")
     return parser.parse_args()
 
@@ -409,7 +425,12 @@ def main(args):
 
     print(f"Evaluating {args.model} on {args.dataset}...")
     embeds, labels = extract_embeddings(model, loader, device)
-    results, dists = compute_retrieval_metrics(embeds, labels, k_values)
+    results, dists = compute_retrieval_metrics(
+        embeds,
+        labels,
+        k_values,
+        jaccard_threshold=args.jaccard_threshold,
+    )
     print_metrics(results)
     save_results(args, results, embeds, labels, dists)
 
