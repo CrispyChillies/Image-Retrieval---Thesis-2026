@@ -571,6 +571,13 @@ def main():
         print(f"✅ Computed {len(embeddings)} embeddings")
         print(f"   Embedding shape: {embeddings.shape}")
 
+        # If user did not provide URI/token but did not request a save path,
+        # automatically save embeddings locally so you still have the data.
+        if not args.uri and not args.token and not args.save_embeddings_npz:
+            default_npz = f"./embeddings_{args.model_type}_{args.dataset}.npz"
+            args.save_embeddings_npz = default_npz
+            print(f"No URI/token provided — embeddings will be saved locally to: {args.save_embeddings_npz}")
+
         # Optionally save embeddings locally for visualization/inspection
         if args.save_embeddings_npz:
             import numpy as _np
