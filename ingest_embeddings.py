@@ -71,9 +71,30 @@ def get_model_and_transform(
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 
-    # Load weights
+    # Load weights (support common checkpoint wrappers and DataParallel prefixes)
     checkpoint = torch.load(model_weights, map_location=device)
-    model.load_state_dict(checkpoint, strict=False)
+
+    # unwrap common wrapper keys if present
+    state_dict = None
+    if isinstance(checkpoint, dict):
+        for k in ("model_state_dict", "state_dict", "state-dict", "model_state", "state"):
+            if k in checkpoint:
+                state_dict = checkpoint[k]
+                break
+        if state_dict is None:
+            state_dict = checkpoint
+    else:
+        state_dict = checkpoint
+
+    # strip 'module.' prefix if present (from DataParallel)
+    if isinstance(state_dict, dict):
+        new_state = {}
+        for key, val in state_dict.items():
+            new_key = key[7:] if key.startswith("module.") else key
+            new_state[new_key] = val
+        state_dict = new_state
+
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
     model.to(device)
 
@@ -99,23 +120,12 @@ def get_model_and_transform(
         # Setup transform
         normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         if model_type in ["convnextv2", "convnextv2_sra"]:
-            # Match test.py exactly for ConvNeXtV2 so Milvus embeddings are
-            # directly comparable to non-Milvus evaluation.
-            # transform = transforms.Compose(
-            #     [
-            #         transforms.Lambda(lambda img: img.convert("RGB")),
-            #         transforms.Resize((img_size, img_size)),
-            #         transforms.ToTensor(),
-            #         normalize,
-            #     ]
-            # )
+            # Use same 384x384 resize used in test.py for consistent embeddings
             img_size_convnext = 384
-            resize_size = 432
             transform = transforms.Compose(
                 [
                     transforms.Lambda(lambda image: image.convert("RGB")),
-                    transforms.Resize(resize_size),
-                    transforms.CenterCrop(img_size_convnext),
+                    transforms.Resize((img_size_convnext, img_size_convnext)),
                     transforms.ToTensor(),
                     normalize,
                 ]
