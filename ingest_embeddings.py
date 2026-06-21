@@ -522,22 +522,29 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Connect to Milvus
-    print("\n" + "=" * 70)
-    print("CONNECTING TO MILVUS")
-    print("=" * 70)
-    manager = MilvusManager(uri=args.uri, token=args.token)
-    if not manager.connect():
-        return
+    # Decide whether to use Milvus: require both URI and token to enable automatic cloud insertion.
+    use_milvus = bool(args.uri and args.token)
+    if use_milvus:
+        print("\n" + "=" * 70)
+        print("CONNECTING TO MILVUS")
+        print("=" * 70)
+        manager = MilvusManager(uri=args.uri, token=args.token)
+        if not manager.connect():
+            print("Failed to connect to Milvus — aborting ingestion.")
+            return
+    else:
+        manager = None
+        print("No URI/token provided — skipping Milvus connection and insertion.")
 
     try:
-        # Ensure collection exists and is loaded
-        print("\n" + "=" * 70)
-        print("PREPARING COLLECTION")
-        print("=" * 70)
-        manager.create_collection(args.model_type, drop_old=False)
-        manager.create_index(args.model_type)
-        manager.load_collection(args.model_type)
+        # Ensure collection exists and is loaded only if using Milvus
+        if manager:
+            print("\n" + "=" * 70)
+            print("PREPARING COLLECTION")
+            print("=" * 70)
+            manager.create_collection(args.model_type, drop_old=False)
+            manager.create_index(args.model_type)
+            manager.load_collection(args.model_type)
 
         # Load model
         print("\n" + "=" * 70)
@@ -587,34 +594,38 @@ def main():
             _np.savez(save_path, embeddings=embeddings, labels=_np.array(valid_labels, dtype=object), paths=_np.array(valid_paths, dtype=object))
             print(f"Saved embeddings .npz to: {save_path}")
 
-        stored_image_paths = resolve_stored_image_paths(valid_paths, args)
+        if manager:
+            stored_image_paths = resolve_stored_image_paths(valid_paths, args)
 
-        # Ingest into Milvus
-        print("\n" + "=" * 70)
-        print("INGESTING INTO MILVUS")
-        print("=" * 70)
-        total_inserted = ingest_embeddings(
-            manager,
-            args.model_type,
-            embeddings,
-            stored_image_paths,
-            valid_labels,
-            args.insert_batch_size,
-        )
+            # Ingest into Milvus
+            print("\n" + "=" * 70)
+            print("INGESTING INTO MILVUS")
+            print("=" * 70)
+            total_inserted = ingest_embeddings(
+                manager,
+                args.model_type,
+                embeddings,
+                stored_image_paths,
+                valid_labels,
+                args.insert_batch_size,
+            )
 
-        # Show collection info
-        info = manager.get_collection_info(args.model_type)
-        print("\n" + "=" * 70)
-        print("COLLECTION INFO")
-        print("=" * 70)
-        print(f"Collection: {info['name']}")
-        print(f"Total entities: {info['num_entities']}")
-        print(f"Embeddings ingested: {total_inserted}")
+            # Show collection info
+            info = manager.get_collection_info(args.model_type)
+            print("\n" + "=" * 70)
+            print("COLLECTION INFO")
+            print("=" * 70)
+            print(f"Collection: {info['name']}")
+            print(f"Total entities: {info['num_entities']}")
+            print(f"Embeddings ingested: {total_inserted}")
 
-        print("\n✅ INGESTION COMPLETE!")
+            print("\n✅ INGESTION COMPLETE!")
+        else:
+            print("\n✅ Saved embeddings locally; skipped Milvus ingestion because no URI/token were provided.")
 
     finally:
-        manager.disconnect()
+        if manager:
+            manager.disconnect()
 
 
 if __name__ == "__main__":
