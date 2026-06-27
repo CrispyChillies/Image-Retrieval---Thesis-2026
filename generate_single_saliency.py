@@ -30,7 +30,7 @@ def main():
     parser.add_argument('--sra_num_heads', type=int, default=8,
                        help='Number of SRA attention heads (ConvNeXtV2_SRA only)')
     parser.add_argument('--sra_lam', type=float, default=0.1,
-                       help='SRA residual attention weight (ConvNeXtV2_SRA only)')
+                       help='SRA residual attention weight (ConvNeX tV2_SRA only)')
     parser.add_argument('--explainer', type=str, default='simatt',
                        choices=['simatt', 'simcam', 'sbsm'],
                        help='Explanation method')
@@ -82,7 +82,8 @@ def main():
             # Hook into the densenet121 features module where relu is located
             explainer = SimAtt(model, model.densenet121[0], target_layers=["relu"])
         elif args.model_type == 'resnet50':
-            target_layer = model.resnet50[7][-1].conv3
+            # Hook the full layer4 block to keep a meaningful spatial map.
+            target_layer = model.resnet50[7]
             explainer = SimAtt(model, target_layer, target_layers=None)
         elif args.model_type in ['convnextv2', 'convnextv2_sra']:
             # For ConvNeXtV2 variants, use the last spatial backbone stage.

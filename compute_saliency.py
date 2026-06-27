@@ -200,7 +200,7 @@ def main(args):
         elif args.model == 'densenet121':
             explainer = SimAtt(model, model.densenet121[0], target_layers=["relu"])
         elif args.model == 'resnet50':
-            target_layer = model.resnet50[7][-1].conv3
+            target_layer = model.resnet50[7]
             explainer = SimAtt(model, target_layer, target_layers=None)
     elif args.explainer == 'simcam':
         if args.model == 'densenet121':
