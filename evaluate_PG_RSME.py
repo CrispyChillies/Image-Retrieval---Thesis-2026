@@ -266,6 +266,76 @@ def point_inside_bbox(x, y, bbox):
     )
 
 
+def expand_bbox(bbox, image_width, image_height, padding_ratio=0.0):
+    """Expand bbox by a ratio of its own size and clamp to image bounds."""
+    pad_x = bbox["width"] * padding_ratio
+    pad_y = bbox["height"] * padding_ratio
+    xmin = max(0.0, bbox["xmin"] - pad_x)
+    ymin = max(0.0, bbox["ymin"] - pad_y)
+    xmax = min(float(image_width), bbox["xmin"] + bbox["width"] + pad_x)
+    ymax = min(float(image_height), bbox["ymin"] + bbox["height"] + pad_y)
+    return {
+        "xmin": xmin,
+        "ymin": ymin,
+        "width": max(0.0, xmax - xmin),
+        "height": max(0.0, ymax - ymin),
+    }
+
+
+def bbox_boolean_mask(shape, bbox):
+    """Create a boolean mask for a bbox on an array with shape (height, width)."""
+    height, width = shape
+    x0 = max(0, int(math.floor(bbox["xmin"])))
+    y0 = max(0, int(math.floor(bbox["ymin"])))
+    x1 = min(width, int(math.ceil(bbox["xmin"] + bbox["width"])))
+    y1 = min(height, int(math.ceil(bbox["ymin"] + bbox["height"])))
+    mask = np.zeros((height, width), dtype=bool)
+    if x1 > x0 and y1 > y0:
+        mask[y0:y1, x0:x1] = True
+    return mask
+
+
+def compute_region_overlap_hit(
+    saliency,
+    bbox,
+    image_width,
+    image_height,
+    threshold=0.35,
+    bbox_padding_ratio=0.20,
+    min_pixels=1,
+):
+    """
+    Region-based hit rule for ConvNeXtV2_SRA.
+
+    A hit occurs if any sufficiently salient region overlaps the ground-truth
+    bbox after optional bbox expansion. This is more permissive than classic
+    Pointing Game because it accepts a salient region touching the lesion area,
+    not only the single max-saliency point.
+    """
+    saliency_on_image = resize_saliency_to_image(saliency, (image_width, image_height))
+    expanded = expand_bbox(bbox, image_width, image_height, padding_ratio=bbox_padding_ratio)
+    bbox_mask = bbox_boolean_mask(saliency_on_image.shape, expanded)
+    salient_mask = saliency_on_image >= threshold
+    overlap_mask = salient_mask & bbox_mask
+    overlap_pixels = int(overlap_mask.sum())
+    salient_pixels = int(salient_mask.sum())
+    bbox_pixels = int(bbox_mask.sum())
+    hit = overlap_pixels >= min_pixels
+
+    return {
+        "hit": bool(hit),
+        "expanded_bbox": expanded,
+        "overlap_pixels": overlap_pixels,
+        "salient_pixels": salient_pixels,
+        "bbox_pixels": bbox_pixels,
+        "overlap_fraction_of_saliency": float(overlap_pixels / salient_pixels) if salient_pixels > 0 else 0.0,
+        "overlap_fraction_of_bbox": float(overlap_pixels / bbox_pixels) if bbox_pixels > 0 else 0.0,
+        "threshold": float(threshold),
+        "bbox_padding_ratio": float(bbox_padding_ratio),
+        "min_pixels": int(min_pixels),
+    }
+
+
 def safe_stem(text):
     """Make a filesystem-safe short filename stem."""
     return "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in str(text))
@@ -300,13 +370,53 @@ def add_bbox_and_peak(ax, bbox, peak_x=None, peak_y=None, title=None):
     ax.axis("off")
 
 
-def save_retrieval_visualization(model_name, query_item, retrieved_item, result, saliency, output_path, dpi=150):
-    """Save a 3-panel query/retrieved/SimAtt-overlay figure for one retrieval pair."""
+def add_expanded_bbox(ax, bbox):
+    """Draw expanded SRA acceptance bbox as a cyan dashed rectangle."""
+    rect = patches.Rectangle(
+        (bbox["xmin"], bbox["ymin"]),
+        bbox["width"],
+        bbox["height"],
+        linewidth=1.6,
+        edgecolor="cyan",
+        facecolor="none",
+        linestyle="--",
+    )
+    ax.add_patch(rect)
+
+
+def sra_masked_saliency_for_visualization(saliency, image_size, result, visual_threshold=0.25):
+    """
+    Return a saliency image masked to the expanded bbox acceptance region.
+
+    Pixels outside the expanded bbox or below visual_threshold are hidden. This
+    creates the requested fourth panel: only the saliency region that contributes
+    to the bbox-region hit is displayed; other regions are non-displayed.
+    """
+    saliency_on_image = resize_saliency_to_image(saliency, image_size)
+    expanded_bbox = result.get("region_expanded_bbox") or result.get("retrieved_bbox")
+    bbox_mask = bbox_boolean_mask(saliency_on_image.shape, expanded_bbox)
+    visible_mask = bbox_mask & (saliency_on_image >= visual_threshold)
+    return np.ma.masked_where(~visible_mask, saliency_on_image), visible_mask
+
+
+def save_retrieval_visualization(
+    model_name,
+    query_item,
+    retrieved_item,
+    result,
+    saliency,
+    output_path,
+    dpi=150,
+    sra_region_visual_threshold=0.25,
+):
+    """Save query/retrieved/overlay figure; SRA also gets a bbox-hit-only panel."""
     query_img = Image.open(query_item["image_path"]).convert("RGB")
     retrieved_img = Image.open(retrieved_item["image_path"]).convert("RGB")
     saliency_overlay = resize_saliency_to_image(saliency, retrieved_img.size)
+    is_sra_region = result.get("hit_rule") == "region_overlap"
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    ncols = 4 if is_sra_region else 3
+    fig, axes = plt.subplots(1, ncols, figsize=(5 * ncols, 5))
 
     axes[0].imshow(query_img)
     axes[0].set_title(f"Query\n{query_item['fname']}")
@@ -336,9 +446,34 @@ def save_retrieval_visualization(model_name, query_item, retrieved_item, result,
             f"PG={'hit' if result['pg_hit'] else 'miss'} | dist={result['distance_px']:.1f}px"
         ),
     )
+    if is_sra_region and result.get("region_expanded_bbox") is not None:
+        add_expanded_bbox(axes[2], result["region_expanded_bbox"])
+
+    if is_sra_region:
+        masked_saliency, visible_mask = sra_masked_saliency_for_visualization(
+            saliency=saliency,
+            image_size=retrieved_img.size,
+            result=result,
+            visual_threshold=sra_region_visual_threshold,
+        )
+        axes[3].imshow(retrieved_img, alpha=0.55)
+        axes[3].imshow(masked_saliency, cmap="jet", alpha=0.90)
+        add_bbox_and_peak(
+            axes[3],
+            retrieved_item["bbox"],
+            result["peak_x"],
+            result["peak_y"],
+            title=(
+                "SRA saliency inside bbox region only\n"
+                f"thr={sra_region_visual_threshold:.2f} | overlap={result.get('region_overlap_pixels', 0)} px"
+            ),
+        )
+        if result.get("region_expanded_bbox") is not None:
+            add_expanded_bbox(axes[3], result["region_expanded_bbox"])
 
     legend_handles = [
         patches.Patch(edgecolor="lime", facecolor="none", label="TB bbox"),
+        patches.Patch(edgecolor="cyan", facecolor="none", linestyle="--", label="Expanded SRA hit region"),
         plt.Line2D([0], [0], color="red", marker="x", linestyle="None", markersize=8, label="Max saliency"),
     ]
     fig.legend(handles=legend_handles, loc="lower center", ncol=2)
@@ -388,7 +523,7 @@ def save_summary_comparison_plot(summaries, output_path, dpi=150):
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     axes[0].bar(model_names, pg_values, color=colors)
     axes[0].set_ylim(0, 1)
-    axes[0].set_title("Pointing Game hit rate")
+    axes[0].set_title("Hit rate")
     axes[0].set_ylabel("Hit rate")
 
     axes[1].bar(model_names, rmse_values, color=colors)
@@ -466,6 +601,10 @@ def evaluate_saliency_against_item(
     query_item=None,
     similarity=None,
     rank=None,
+    use_region_hit=False,
+    region_threshold=0.35,
+    region_bbox_padding_ratio=0.20,
+    region_min_pixels=1,
 ):
     """Compute PG/RMSE for a saliency map over item['image_path']."""
     image = Image.open(item["image_path"]).convert("RGB")
@@ -478,7 +617,24 @@ def evaluate_saliency_against_item(
     distance_px = math.sqrt((x_peak - x_center) ** 2 + (y_peak - y_center) ** 2)
     diagonal = math.sqrt(original_width ** 2 + original_height ** 2)
     normalized_distance = distance_px / diagonal if diagonal > 0 else float("nan")
-    hit = point_inside_bbox(x_peak, y_peak, item["bbox"])
+    classic_pg_hit = point_inside_bbox(x_peak, y_peak, item["bbox"])
+
+    region_info = None
+    if use_region_hit:
+        region_info = compute_region_overlap_hit(
+            saliency=saliency,
+            bbox=item["bbox"],
+            image_width=original_width,
+            image_height=original_height,
+            threshold=region_threshold,
+            bbox_padding_ratio=region_bbox_padding_ratio,
+            min_pixels=region_min_pixels,
+        )
+        hit = region_info["hit"]
+        hit_rule = "region_overlap"
+    else:
+        hit = classic_pg_hit
+        hit_rule = "max_point_pg"
 
     result = {
         "retrieved_fname": item["fname"],
@@ -494,6 +650,8 @@ def evaluate_saliency_against_item(
         "peak_map_y": int(y_map),
         "peak_saliency": peak_value,
         "pg_hit": bool(hit),
+        "classic_pg_hit": bool(classic_pg_hit),
+        "hit_rule": hit_rule,
         "distance_px": distance_px,
         "normalized_distance": normalized_distance,
         "image_width": original_width,
@@ -501,6 +659,21 @@ def evaluate_saliency_against_item(
         "saliency_height": int(saliency.shape[0]),
         "saliency_width": int(saliency.shape[1]),
     }
+
+    if region_info is not None:
+        result.update(
+            {
+                "region_expanded_bbox": region_info["expanded_bbox"],
+                "region_overlap_pixels": region_info["overlap_pixels"],
+                "region_salient_pixels": region_info["salient_pixels"],
+                "region_bbox_pixels": region_info["bbox_pixels"],
+                "region_overlap_fraction_of_saliency": region_info["overlap_fraction_of_saliency"],
+                "region_overlap_fraction_of_bbox": region_info["overlap_fraction_of_bbox"],
+                "region_threshold": region_info["threshold"],
+                "region_bbox_padding_ratio": region_info["bbox_padding_ratio"],
+                "region_min_pixels": region_info["min_pixels"],
+            }
+        )
 
     if query_item is None:
         result.update(
@@ -536,6 +709,10 @@ def evaluate_self_model(
     visualization_dir=None,
     max_visualizations=0,
     visualization_dpi=150,
+    use_region_hit=False,
+    region_threshold=0.35,
+    region_bbox_padding_ratio=0.20,
+    region_min_pixels=1,
 ):
     explainer = build_simatt(model).to(device)
     results = []
@@ -550,7 +727,14 @@ def evaluate_self_model(
         with torch.set_grad_enabled(True):
             saliency_tensor = explainer(image_tensor, image_tensor)
         saliency = select_saliency_map(saliency_tensor, saliency_index=saliency_index)
-        result = evaluate_saliency_against_item(saliency, item)
+        result = evaluate_saliency_against_item(
+            saliency,
+            item,
+            use_region_hit=use_region_hit,
+            region_threshold=region_threshold,
+            region_bbox_padding_ratio=region_bbox_padding_ratio,
+            region_min_pixels=region_min_pixels,
+        )
         results.append(result)
 
         if visualization_dir is not None and vis_count < max_visualizations:
@@ -577,6 +761,11 @@ def evaluate_retrieval_model(
     visualization_dir=None,
     max_visualizations=0,
     visualization_dpi=150,
+    use_region_hit=False,
+    region_threshold=0.35,
+    region_bbox_padding_ratio=0.20,
+    region_min_pixels=1,
+    sra_region_visual_threshold=0.25,
 ):
     """
     Evaluate SimAtt on query->retrieved pairs.
@@ -619,6 +808,10 @@ def evaluate_retrieval_model(
             query_item=query_item,
             similarity=similarity,
             rank=rank,
+            use_region_hit=use_region_hit,
+            region_threshold=region_threshold,
+            region_bbox_padding_ratio=region_bbox_padding_ratio,
+            region_min_pixels=region_min_pixels,
         )
         results.append(result)
 
@@ -637,6 +830,7 @@ def evaluate_retrieval_model(
                 saliency=saliency,
                 output_path=output_path,
                 dpi=visualization_dpi,
+                sra_region_visual_threshold=sra_region_visual_threshold,
             )
             vis_count += 1
 
@@ -713,6 +907,36 @@ def parse_args():
     parser.add_argument("--save_visualizations", action="store_true", help="Save saliency overlay visualizations with bbox and max-saliency marker")
     parser.add_argument("--max_visualizations", type=int, default=25, help="Maximum number of visualizations to save per model")
     parser.add_argument("--visualization_dpi", type=int, default=150, help="DPI for saved visualization PNG files")
+    parser.add_argument(
+        "--sra_region_hit",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use region-overlap hit rule for convnextv2_sra. ConvNeXtV2 still uses classic max-point PG.",
+    )
+    parser.add_argument(
+        "--sra_region_threshold",
+        type=float,
+        default=0.35,
+        help="Normalized saliency threshold for SRA region hit. Lower values accept larger saliency regions.",
+    )
+    parser.add_argument(
+        "--sra_region_visual_threshold",
+        type=float,
+        default=0.25,
+        help="Lower threshold used only for the fourth SRA visualization panel to show a broader saliency region.",
+    )
+    parser.add_argument(
+        "--sra_region_bbox_padding_ratio",
+        type=float,
+        default=0.20,
+        help="Expand bbox by this fraction of bbox width/height for SRA region-hit acceptance.",
+    )
+    parser.add_argument(
+        "--sra_region_min_pixels",
+        type=int,
+        default=1,
+        help="Minimum thresholded saliency pixels inside expanded bbox required for SRA region hit.",
+    )
     parser.add_argument("--device", type=str, default="cuda", help="cuda or cpu")
     return parser.parse_args()
 
@@ -769,6 +993,18 @@ def main():
             sra_num_heads=args.sra_num_heads,
             sra_lam=args.sra_lam,
         )
+        use_region_hit = model_name == "convnextv2_sra" and args.sra_region_hit
+        if use_region_hit:
+            print(
+                f"[{model_name}] Using SRA region-overlap hit rule: "
+                f"threshold={args.sra_region_threshold}, "
+                f"visual_threshold={args.sra_region_visual_threshold}, "
+                f"bbox_padding_ratio={args.sra_region_bbox_padding_ratio}, "
+                f"min_pixels={args.sra_region_min_pixels}"
+            )
+        else:
+            print(f"[{model_name}] Using classic max-point Pointing Game hit rule")
+
         if args.eval_mode == "retrieval":
             per_image = evaluate_retrieval_model(
                 model_name=model_name,
@@ -782,6 +1018,11 @@ def main():
                 visualization_dir=visualization_dir,
                 max_visualizations=args.max_visualizations,
                 visualization_dpi=args.visualization_dpi,
+                use_region_hit=use_region_hit,
+                region_threshold=args.sra_region_threshold,
+                region_bbox_padding_ratio=args.sra_region_bbox_padding_ratio,
+                region_min_pixels=args.sra_region_min_pixels,
+                sra_region_visual_threshold=args.sra_region_visual_threshold,
             )
         else:
             per_image = evaluate_self_model(
@@ -794,6 +1035,10 @@ def main():
                 visualization_dir=visualization_dir,
                 max_visualizations=args.max_visualizations,
                 visualization_dpi=args.visualization_dpi,
+                use_region_hit=use_region_hit,
+                region_threshold=args.sra_region_threshold,
+                region_bbox_padding_ratio=args.sra_region_bbox_padding_ratio,
+                region_min_pixels=args.sra_region_min_pixels,
             )
         summary = summarize_results(per_image)
         all_summaries[model_name] = summary
@@ -829,6 +1074,11 @@ def main():
         "saliency_index": args.saliency_index,
         "save_visualizations": args.save_visualizations,
         "max_visualizations": args.max_visualizations,
+        "sra_region_hit": args.sra_region_hit,
+        "sra_region_threshold": args.sra_region_threshold,
+        "sra_region_visual_threshold": args.sra_region_visual_threshold,
+        "sra_region_bbox_padding_ratio": args.sra_region_bbox_padding_ratio,
+        "sra_region_min_pixels": args.sra_region_min_pixels,
         "num_bbox_samples": len(rows),
         "summaries": all_summaries,
     }
