@@ -197,16 +197,15 @@ def main(args):
             backbone = getattr(model, 'convnext')
             target_layer = backbone.get_submodule('stages.3')
             explainer = SimAtt(model, target_layer, target_layers=None)
-        else:
-            model = nn.Sequential(*list(model.children())
-                                  [0], *list(model.children())[1:])
-            explainer = SimAtt(model, model[0], target_layers=["relu"])
+        elif args.model == 'densenet121':
+            explainer = SimAtt(model, model.densenet121[0], target_layers=["relu"])
+        elif args.model == 'resnet50':
+            target_layer = model.resnet50[7][-1].conv3
+            explainer = SimAtt(model, target_layer, target_layers=None)
     elif args.explainer == 'simcam':
         if args.model == 'densenet121':
-            model = nn.Sequential(*list(model.children())
-                                [0], *list(model.children())[1:])
-            explainer = SimCAM_Densenet121(model, model[0], target_layers=[
-                            "relu"], fc=model[2] if args.embedding_dim else None)
+            explainer = SimCAM_Densenet121(model, model.densenet121[0], target_layers=["relu"],
+                                          fc=model.fc if args.embedding_dim else None)
         elif args.model == 'resnet50':
             backbone = model.resnet50
             feature_module = backbone[7]      # layer4 (Sequential of 3 bottlenecks)

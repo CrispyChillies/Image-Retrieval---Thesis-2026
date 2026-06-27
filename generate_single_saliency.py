@@ -79,8 +79,8 @@ def main():
     print(f"\nSetting up {args.explainer} explainer...")
     if args.explainer == 'simatt':
         if args.model_type == 'densenet121':
-            model_seq = nn.Sequential(*list(model.children()))
-            explainer = SimAtt(model_seq, model_seq[0], target_layers=["relu"])
+            # Hook into the densenet121 features module where relu is located
+            explainer = SimAtt(model, model.densenet121[0], target_layers=["relu"])
         elif args.model_type == 'resnet50':
             target_layer = model.resnet50[7][-1].conv3
             explainer = SimAtt(model, target_layer, target_layers=None)
