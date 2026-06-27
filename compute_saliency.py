@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from read_data import ISICDataSet, ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
 
-from model import ConvNeXtV2, ResNet50, DenseNet121, MedSigLIP
+from model import ConvNeXtV2, ConvNeXtV2_SRA, ResNet50, DenseNet121, MedSigLIP
 from explanations import SBSMBatch, SimAtt, SimCAM, SimCAM_Densenet121, SimCAM_MedSigLIP
 
 from PIL import Image
@@ -157,6 +157,12 @@ def main(args):
         model = ResNet50(embedding_dim=args.embedding_dim)
     elif args.model == 'convnextv2':
         model = ConvNeXtV2()
+    elif args.model == 'convnextv2_sra':
+        model = ConvNeXtV2_SRA(
+            num_heads=args.sra_num_heads,
+            lam=args.sra_lam,
+            embedding_dim=args.embedding_dim,
+        )
     elif args.model == 'medsiglip':
         model = MedSigLIP()
     else:
@@ -187,9 +193,14 @@ def main(args):
             explainer.load_masks(maskspath)
             print('Masks are loaded.')
     elif args.explainer == 'simatt':
-        model = nn.Sequential(*list(model.children())
-                              [0], *list(model.children())[1:]) 
-        explainer = SimAtt(model, model[0], target_layers=["relu"])
+        if args.model in ['convnextv2', 'convnextv2_sra']:
+            backbone = getattr(model, 'convnext')
+            target_layer = backbone.get_submodule('stages.3')
+            explainer = SimAtt(model, target_layer, target_layers=None)
+        else:
+            model = nn.Sequential(*list(model.children())
+                                  [0], *list(model.children())[1:])
+            explainer = SimAtt(model, model[0], target_layers=["relu"])
     elif args.explainer == 'simcam':
         if args.model == 'densenet121':
             model = nn.Sequential(*list(model.children())
@@ -206,11 +217,11 @@ def main(args):
                 target_layer=target_layer,
                 fc=None
             )
-        elif args.model == 'convnextv2':
-           backbone = model.convnext
-           target_layer = backbone.stages[3].blocks[2]
-           
-           explainer = SimCAM(
+        elif args.model in ['convnextv2', 'convnextv2_sra']:
+            backbone = getattr(model, 'convnext')
+            target_layer = backbone.get_submodule('stages.3')
+
+            explainer = SimCAM(
                 model=backbone,
                 target_layer=target_layer,
                 fc=None
@@ -230,22 +241,20 @@ def main(args):
                                      [0.229, 0.224, 0.225])
     
     # Use 384x384 for ConvNeXtV2 and SwinV2, 448x448 for MedSigLIP, 224x224 for other models
-    if args.model in ['convnextv2', 'swinv2']:
+    if args.model in ['convnextv2', 'convnextv2_sra', 'swinv2']:
         img_size = 384
     elif args.model == 'medsiglip':
         img_size = 448
     else:
         img_size = 224
 
-    if args.model in ['convnextv2', 'swinv2', 'medsiglip']:
+    if args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'medsiglip']:
         test_transform = transforms.Compose([
             transforms.Lambda(lambda img: img.convert('RGB')),
             transforms.Resize((img_size, img_size)),
             transforms.ToTensor(),
             normalize
         ])
-    elif args.model == 'medsiglip':
-        _, test_transform = get_transforms_medsiglip(img_size=img_size)
     else:
         test_transform = transforms.Compose([transforms.Lambda(lambda image: image.convert('RGB')),
                                             transforms.Resize(256),
@@ -300,9 +309,13 @@ def parse_args():
     parser.add_argument('--results', default=None,
                         help='Results file to load')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121 or resnet50)')
+                        help='Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, or medsiglip)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
+    parser.add_argument('--sra-num-heads', default=8, type=int,
+                        help='Number of attention heads for SRA (ConvNeXtV2_SRA)')
+    parser.add_argument('--sra-lam', default=0.1, type=float,
+                        help='Lambda for residual attention in SRA (ConvNeXtV2_SRA)')
     parser.add_argument('--explainer', default='sbsm',
                         help='Explanation type (sbsm, simatt, or simcam)')
     parser.add_argument('--self-saliency', action='store_true',
