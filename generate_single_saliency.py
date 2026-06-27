@@ -159,8 +159,15 @@ def main():
     # Also save a visualization
     import matplotlib.pyplot as plt
     viz_path = args.output_path.replace('.npy', '_visualization.png')
+
+    saliency_min = float(np.min(saliency))
+    saliency_max = float(np.max(saliency))
+    if saliency_max > saliency_min:
+        saliency_norm = (saliency - saliency_min) / (saliency_max - saliency_min)
+    else:
+        saliency_norm = np.zeros_like(saliency)
     
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    fig, axes = plt.subplots(1, 4, figsize=(20, 5))
     
     # Original query image
     axes[0].imshow(query_img)
@@ -181,6 +188,13 @@ def main():
     axes[2].set_title('Saliency Map')
     axes[2].axis('off')
     plt.colorbar(im, ax=axes[2])
+
+    # Retrieved image overlay
+    overlay_base = retrieved_img if args.retrieved_image else query_img
+    axes[3].imshow(overlay_base)
+    axes[3].imshow(saliency_norm, cmap='jet', alpha=0.45)
+    axes[3].set_title('Overlay on Retrieved Image')
+    axes[3].axis('off')
     
     plt.tight_layout()
     plt.savefig(viz_path, dpi=150, bbox_inches='tight')
