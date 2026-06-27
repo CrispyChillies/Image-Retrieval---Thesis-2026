@@ -14,6 +14,28 @@ from explanations import SimAtt, SimCAM, SBSMBatch
 import argparse
 
 
+def resize_saliency_to_image(saliency_map, image):
+    """
+    Resize a 2D saliency map to exactly match a PIL image size.
+
+    Matplotlib's imshow uses the dimensions of the most recently drawn image
+    to set the axis limits. If the retrieved image is, for example, 1024x1024
+    and the saliency map is 384x384, plotting the saliency directly on top of
+    the image makes the axes show only the top-left 384x384 region. Resizing
+    the saliency map to the displayed image dimensions avoids that crop and
+    overlays the heatmap over the full retrieved image.
+    """
+    saliency_map = np.asarray(saliency_map, dtype=np.float32)
+    saliency_img = Image.fromarray((saliency_map * 255).astype(np.uint8), mode='L')
+
+    try:
+        resample = Image.Resampling.BILINEAR
+    except AttributeError:  # Pillow < 9.1
+        resample = Image.BILINEAR
+
+    return np.asarray(saliency_img.resize(image.size, resample=resample), dtype=np.float32) / 255.0
+
+
 def main():
     parser = argparse.ArgumentParser(description='Generate saliency map for a single image')
     parser.add_argument('--query_image', type=str, required=True,
@@ -191,8 +213,9 @@ def main():
 
     # Retrieved image overlay
     overlay_base = retrieved_img if args.retrieved_image else query_img
+    saliency_overlay = resize_saliency_to_image(saliency_norm, overlay_base)
     axes[3].imshow(overlay_base)
-    axes[3].imshow(saliency_norm, cmap='jet', alpha=0.45)
+    axes[3].imshow(saliency_overlay, cmap='jet', alpha=0.45)
     axes[3].set_title('Overlay on Retrieved Image')
     axes[3].axis('off')
     
