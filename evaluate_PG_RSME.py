@@ -16,16 +16,25 @@ Metrics implemented
    A normalized RMSE is also reported by dividing each distance by the image
    diagonal before computing RMSE.
 
-Notes
------
-- This script evaluates only rows with a valid bbox, i.e. TB-positive rows.
-- SimAtt is a pairwise/retrieval explainer. For localization against a single
-  image-level bbox, this script uses self-similarity by default:
+Retrieval-pair evaluation
+-------------------------
+By default this script uses the actual query/retrieved-image similarity setup:
 
-      saliency = SimAtt(image, image)
+1. Encode all TB-positive bbox images with the model.
+2. For each query image, retrieve the top-k most similar other TB bbox images
+    using cosine similarity.
+3. Run SimAtt on each pair:
 
-  You can switch to the first returned map with --saliency-index 0, but the
-  default --saliency-index -1 uses the explained/retrieved image map.
+         saliency = SimAtt(query_image, retrieved_image)
+
+4. Use the retrieved-image saliency map, find its max point, and compare that
+    point with the retrieved image's TB bbox.
+
+This matches the retrieval xAI use case: "why is this retrieved image similar
+to the query?" The pair cosine similarity is saved for every evaluated pair.
+
+You can still reproduce the old single-image sanity check with
+--eval_mode self.
 - The file name intentionally follows the user's requested spelling:
   evaluate_PG_RSME.py. The metric name printed in outputs uses RMSE.
 
@@ -36,6 +45,7 @@ python evaluate_PG_RSME.py ^
   --csv_file test.csv ^
   --convnextv2_weights checkpoints/convnextv2.pth ^
   --convnextv2_sra_weights checkpoints/convnextv2_sra.pth ^
+    --top_k 1 ^
   --embedding_dim 512 ^
   --output_dir pg_rmse_results
 """
@@ -51,6 +61,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
 from torchvision.transforms import InterpolationMode
@@ -248,13 +259,129 @@ def point_inside_bbox(x, y, bbox):
     )
 
 
-def evaluate_model(model_name, model, rows, transform, device, saliency_index=-1):
+def compute_embeddings(model, rows, transform, device, batch_size=32):
+    """Compute L2-normalized image embeddings for retrieval."""
+    embeddings = []
+
+    for start in tqdm(range(0, len(rows), batch_size), desc="Computing retrieval embeddings"):
+        batch_rows = rows[start:start + batch_size]
+        batch_tensors = []
+
+        for item in batch_rows:
+            image = Image.open(item["image_path"]).convert("RGB")
+            batch_tensors.append(transform(image))
+
+        batch = torch.stack(batch_tensors, dim=0).to(device)
+        with torch.no_grad():
+            batch_embeddings = model(batch)
+            if isinstance(batch_embeddings, dict):
+                batch_embeddings = batch_embeddings["embedding"]
+            batch_embeddings = F.normalize(batch_embeddings, p=2, dim=1)
+        embeddings.append(batch_embeddings.detach().cpu())
+
+        del batch, batch_embeddings
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
+    return torch.cat(embeddings, dim=0)
+
+
+def build_retrieval_pairs(embeddings, top_k=1):
+    """
+    Build query->retrieved index pairs from cosine similarity matrix.
+
+    Returns tuples: (query_idx, retrieved_idx, rank, similarity).
+    Self matches are excluded.
+    """
+    if len(embeddings) < 2:
+        raise ValueError("Retrieval-pair evaluation needs at least 2 bbox images.")
+
+    sim_matrix = torch.matmul(embeddings, embeddings.T).numpy()
+    pairs = []
+    k = min(top_k, len(embeddings) - 1)
+
+    for query_idx in range(sim_matrix.shape[0]):
+        sims = sim_matrix[query_idx].copy()
+        sims[query_idx] = -np.inf
+        retrieved_indices = np.argsort(sims)[::-1][:k]
+        for rank, retrieved_idx in enumerate(retrieved_indices, start=1):
+            pairs.append((query_idx, int(retrieved_idx), rank, float(sims[retrieved_idx])))
+
+    return pairs
+
+
+def evaluate_saliency_against_item(
+    saliency,
+    item,
+    query_item=None,
+    similarity=None,
+    rank=None,
+):
+    """Compute PG/RMSE for a saliency map over item['image_path']."""
+    image = Image.open(item["image_path"]).convert("RGB")
+    original_width, original_height = image.size
+
+    x_peak, y_peak, x_map, y_map, peak_value = argmax_point_original_coords(
+        saliency, original_width, original_height
+    )
+    x_center, y_center = bbox_center(item["bbox"])
+    distance_px = math.sqrt((x_peak - x_center) ** 2 + (y_peak - y_center) ** 2)
+    diagonal = math.sqrt(original_width ** 2 + original_height ** 2)
+    normalized_distance = distance_px / diagonal if diagonal > 0 else float("nan")
+    hit = point_inside_bbox(x_peak, y_peak, item["bbox"])
+
+    result = {
+        "retrieved_fname": item["fname"],
+        "retrieved_image_path": item["image_path"],
+        "retrieved_target": item.get("target", ""),
+        "retrieved_tb_type": item.get("tb_type", ""),
+        "retrieved_bbox": item["bbox"],
+        "bbox_center_x": x_center,
+        "bbox_center_y": y_center,
+        "peak_x": x_peak,
+        "peak_y": y_peak,
+        "peak_map_x": int(x_map),
+        "peak_map_y": int(y_map),
+        "peak_saliency": peak_value,
+        "pg_hit": bool(hit),
+        "distance_px": distance_px,
+        "normalized_distance": normalized_distance,
+        "image_width": original_width,
+        "image_height": original_height,
+        "saliency_height": int(saliency.shape[0]),
+        "saliency_width": int(saliency.shape[1]),
+    }
+
+    if query_item is None:
+        result.update(
+            {
+                "fname": item["fname"],
+                "image_path": item["image_path"],
+                "target": item.get("target", ""),
+                "tb_type": item.get("tb_type", ""),
+                "bbox": item["bbox"],
+            }
+        )
+    else:
+        result.update(
+            {
+                "query_fname": query_item["fname"],
+                "query_image_path": query_item["image_path"],
+                "query_tb_type": query_item.get("tb_type", ""),
+                "retrieval_rank": int(rank),
+                "query_retrieved_similarity": float(similarity),
+            }
+        )
+
+    return result
+
+
+def evaluate_self_model(model_name, model, rows, transform, device, saliency_index=-1):
     explainer = build_simatt(model).to(device)
     results = []
 
-    for item in tqdm(rows, desc=f"Evaluating {model_name}"):
+    for item in tqdm(rows, desc=f"Evaluating {model_name} self-SimAtt"):
         image = Image.open(item["image_path"]).convert("RGB")
-        original_width, original_height = image.size
         image_tensor = transform(image).unsqueeze(0).to(device)
 
         # Self-similarity SimAtt: evaluate localization on the same image that has bbox.
@@ -262,41 +389,70 @@ def evaluate_model(model_name, model, rows, transform, device, saliency_index=-1
         with torch.set_grad_enabled(True):
             saliency_tensor = explainer(image_tensor, image_tensor)
         saliency = select_saliency_map(saliency_tensor, saliency_index=saliency_index)
-
-        x_peak, y_peak, x_map, y_map, peak_value = argmax_point_original_coords(
-            saliency, original_width, original_height
-        )
-        x_center, y_center = bbox_center(item["bbox"])
-        distance_px = math.sqrt((x_peak - x_center) ** 2 + (y_peak - y_center) ** 2)
-        diagonal = math.sqrt(original_width ** 2 + original_height ** 2)
-        normalized_distance = distance_px / diagonal if diagonal > 0 else float("nan")
-        hit = point_inside_bbox(x_peak, y_peak, item["bbox"])
-
-        results.append(
-            {
-                "fname": item["fname"],
-                "image_path": item["image_path"],
-                "target": item.get("target", ""),
-                "tb_type": item.get("tb_type", ""),
-                "bbox": item["bbox"],
-                "bbox_center_x": x_center,
-                "bbox_center_y": y_center,
-                "peak_x": x_peak,
-                "peak_y": y_peak,
-                "peak_map_x": int(x_map),
-                "peak_map_y": int(y_map),
-                "peak_saliency": peak_value,
-                "pg_hit": bool(hit),
-                "distance_px": distance_px,
-                "normalized_distance": normalized_distance,
-                "image_width": original_width,
-                "image_height": original_height,
-                "saliency_height": int(saliency.shape[0]),
-                "saliency_width": int(saliency.shape[1]),
-            }
-        )
+        results.append(evaluate_saliency_against_item(saliency, item))
 
         del image_tensor, saliency_tensor
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
+    return results
+
+
+def evaluate_retrieval_model(
+    model_name,
+    model,
+    rows,
+    transform,
+    device,
+    top_k=1,
+    embedding_batch_size=32,
+    saliency_index=-1,
+):
+    """
+    Evaluate SimAtt on query->retrieved pairs.
+
+    The saliency map evaluated is the retrieved-image map from
+    SimAtt(query_tensor, retrieved_tensor), selected by saliency_index=-1.
+    """
+    print(f"[{model_name}] Building retrieval set using cosine similarity...")
+    embeddings = compute_embeddings(
+        model=model,
+        rows=rows,
+        transform=transform,
+        device=device,
+        batch_size=embedding_batch_size,
+    )
+    pairs = build_retrieval_pairs(embeddings, top_k=top_k)
+    print(f"[{model_name}] Evaluating {len(pairs)} query->retrieved SimAtt pairs")
+
+    explainer = build_simatt(model).to(device)
+    results = []
+
+    for query_idx, retrieved_idx, rank, similarity in tqdm(pairs, desc=f"Evaluating {model_name} retrieval-SimAtt"):
+        query_item = rows[query_idx]
+        retrieved_item = rows[retrieved_idx]
+
+        query_image = Image.open(query_item["image_path"]).convert("RGB")
+        retrieved_image = Image.open(retrieved_item["image_path"]).convert("RGB")
+        query_tensor = transform(query_image).unsqueeze(0).to(device)
+        retrieved_tensor = transform(retrieved_image).unsqueeze(0).to(device)
+
+        model.zero_grad(set_to_none=True)
+        with torch.set_grad_enabled(True):
+            saliency_tensor = explainer(query_tensor, retrieved_tensor)
+        saliency = select_saliency_map(saliency_tensor, saliency_index=saliency_index)
+
+        results.append(
+            evaluate_saliency_against_item(
+                saliency=saliency,
+                item=retrieved_item,
+                query_item=query_item,
+                similarity=similarity,
+                rank=rank,
+            )
+        )
+
+        del query_tensor, retrieved_tensor, saliency_tensor
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
@@ -354,7 +510,16 @@ def parse_args():
     parser.add_argument("--sra_num_heads", type=int, default=8, help="Number of SRA heads")
     parser.add_argument("--sra_lam", type=float, default=0.1, help="SRA residual attention lambda")
     parser.add_argument("--img_size", type=int, default=384, help="ConvNeXtV2 input size")
-    parser.add_argument("--saliency_index", type=int, default=-1, help="Map index if SimAtt returns multiple maps; -1 = retrieved/self positive map")
+    parser.add_argument(
+        "--eval_mode",
+        type=str,
+        default="retrieval",
+        choices=["retrieval", "self"],
+        help="retrieval = SimAtt(query, retrieved) from top-k cosine retrieval; self = SimAtt(image, image) sanity check",
+    )
+    parser.add_argument("--top_k", type=int, default=1, help="Number of retrieved bbox images per query for retrieval mode")
+    parser.add_argument("--embedding_batch_size", type=int, default=32, help="Batch size for retrieval embedding computation")
+    parser.add_argument("--saliency_index", type=int, default=-1, help="Map index if SimAtt returns multiple maps; -1 = retrieved/positive image map")
     parser.add_argument("--limit", type=int, default=None, help="Optional limit for quick debugging")
     parser.add_argument("--output_dir", type=str, default="pg_rmse_results", help="Output directory")
     parser.add_argument("--device", type=str, default="cuda", help="cuda or cpu")
@@ -412,14 +577,26 @@ def main():
             sra_num_heads=args.sra_num_heads,
             sra_lam=args.sra_lam,
         )
-        per_image = evaluate_model(
-            model_name=model_name,
-            model=model,
-            rows=rows,
-            transform=transform,
-            device=device,
-            saliency_index=args.saliency_index,
-        )
+        if args.eval_mode == "retrieval":
+            per_image = evaluate_retrieval_model(
+                model_name=model_name,
+                model=model,
+                rows=rows,
+                transform=transform,
+                device=device,
+                top_k=args.top_k,
+                embedding_batch_size=args.embedding_batch_size,
+                saliency_index=args.saliency_index,
+            )
+        else:
+            per_image = evaluate_self_model(
+                model_name=model_name,
+                model=model,
+                rows=rows,
+                transform=transform,
+                device=device,
+                saliency_index=args.saliency_index,
+            )
         summary = summarize_results(per_image)
         all_summaries[model_name] = summary
 
@@ -449,6 +626,8 @@ def main():
         "csv_file": os.path.abspath(args.csv_file),
         "data_dir": os.path.abspath(args.data_dir),
         "img_size": args.img_size,
+        "eval_mode": args.eval_mode,
+        "top_k": args.top_k,
         "saliency_index": args.saliency_index,
         "num_bbox_samples": len(rows),
         "summaries": all_summaries,
