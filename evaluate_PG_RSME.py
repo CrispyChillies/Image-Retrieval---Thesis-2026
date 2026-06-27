@@ -105,6 +105,27 @@ def parse_bbox(value):
     return bbox
 
 
+def resolve_image_path(data_dir, image_id_or_fname, image_ext=".png"):
+    """Resolve an image path for TBX11k fname or VinDR image_id."""
+    data_dir = Path(data_dir)
+    raw = str(image_id_or_fname).strip()
+    candidates = []
+
+    raw_path = Path(raw)
+    if raw_path.suffix:
+        candidates.append(data_dir / raw)
+    else:
+        candidates.append(data_dir / f"{raw}{image_ext}")
+        for ext in (".png", ".jpg", ".jpeg"):
+            if ext != image_ext:
+                candidates.append(data_dir / f"{raw}{ext}")
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
 def load_tbx11k_bbox_rows(csv_file, data_dir, only_target="tb", limit=None):
     """Load TBX11k rows that contain valid bounding boxes."""
     rows = []
@@ -145,7 +166,7 @@ def load_tbx11k_bbox_rows(csv_file, data_dir, only_target="tb", limit=None):
             if only_target and target_key is None and image_type != only_target:
                 continue
 
-            image_path = data_dir / fname
+            image_path = resolve_image_path(data_dir, fname)
             if not image_path.exists():
                 print(f"Warning: missing image for CSV row {row_idx}: {image_path}")
                 continue
@@ -156,15 +177,141 @@ def load_tbx11k_bbox_rows(csv_file, data_dir, only_target="tb", limit=None):
                     "fname": fname,
                     "image_path": str(image_path),
                     "bbox": bbox,
+                    "bboxes": [bbox],
+                    "bbox_classes": [row.get(tb_type_key, "").strip() if tb_type_key else "tb"],
                     "target": target,
                     "tb_type": row.get(tb_type_key, "").strip() if tb_type_key else "",
                     "image_type": image_type,
+                    "dataset": "tbx11k",
                 }
             )
             if limit is not None and len(rows) >= limit:
                 break
 
     return rows
+
+
+def load_vindr_bbox_rows(csv_file, data_dir, image_ext=".png", classes=None, limit=None, bbox_coord_size=None):
+    """
+    Load VinDR-CXR bbox annotations and group multiple boxes per image.
+
+    Expected columns:
+        image_id,class_name,x_min,y_min,x_max,y_max
+
+    The provided annotations_rescaled_384.csv is already in 384x384 coordinate
+    space. If your actual images are also 384x384, no extra scaling is needed.
+    """
+    wanted_classes = None
+    if classes:
+        wanted_classes = {c.strip() for c in classes.split(",") if c.strip()}
+
+    grouped = {}
+    image_size_cache = {}
+    with open(csv_file, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            raise ValueError(f"CSV has no header row: {csv_file}")
+
+        normalized = {
+            name.strip().lstrip("\ufeff").lower(): name
+            for name in reader.fieldnames
+            if name is not None
+        }
+        image_id_key = normalized.get("image_id")
+        class_key = normalized.get("class_name")
+        x_min_key = normalized.get("x_min")
+        y_min_key = normalized.get("y_min")
+        x_max_key = normalized.get("x_max")
+        y_max_key = normalized.get("y_max")
+
+        required = [image_id_key, class_key, x_min_key, y_min_key, x_max_key, y_max_key]
+        if any(key is None for key in required):
+            raise ValueError(
+                "VinDR CSV must contain image_id,class_name,x_min,y_min,x_max,y_max. "
+                f"Found columns: {reader.fieldnames}"
+            )
+
+        for row_idx, row in enumerate(reader, start=2):
+            image_id = row.get(image_id_key, "").strip()
+            class_name = row.get(class_key, "").strip()
+            if not image_id or not class_name:
+                continue
+            if wanted_classes is not None and class_name not in wanted_classes:
+                continue
+
+            try:
+                x_min = float(row[x_min_key])
+                y_min = float(row[y_min_key])
+                x_max = float(row[x_max_key])
+                y_max = float(row[y_max_key])
+            except (TypeError, ValueError):
+                print(f"Warning: invalid VinDR bbox on CSV row {row_idx}: {row}")
+                continue
+
+            width = x_max - x_min
+            height = y_max - y_min
+            if width <= 0 or height <= 0:
+                continue
+
+            image_path = resolve_image_path(data_dir, image_id, image_ext=image_ext)
+            if not image_path.exists():
+                print(f"Warning: missing VinDR image for CSV row {row_idx}: {image_path}")
+                continue
+
+            if bbox_coord_size is not None:
+                if image_id not in image_size_cache:
+                    image_size_cache[image_id] = Image.open(image_path).size
+                image_width, image_height = image_size_cache[image_id]
+                scale_x = float(image_width) / float(bbox_coord_size)
+                scale_y = float(image_height) / float(bbox_coord_size)
+                x_min *= scale_x
+                x_max *= scale_x
+                y_min *= scale_y
+                y_max *= scale_y
+                width = x_max - x_min
+                height = y_max - y_min
+
+            bbox = {"xmin": x_min, "ymin": y_min, "width": width, "height": height}
+            if image_id not in grouped:
+                grouped[image_id] = {
+                    "row": row_idx,
+                    "fname": f"{image_id}{image_path.suffix}",
+                    "image_id": image_id,
+                    "image_path": str(image_path),
+                    "bbox": bbox,
+                    "bboxes": [],
+                    "bbox_classes": [],
+                    "target": "abnormality",
+                    "tb_type": "",
+                    "image_type": "vindr_cxr",
+                    "dataset": "vindr",
+                }
+            grouped[image_id]["bboxes"].append(bbox)
+            grouped[image_id]["bbox_classes"].append(class_name)
+
+    rows = list(grouped.values())
+    for item in rows:
+        item["bbox"] = item["bboxes"][0]
+
+    if limit is not None:
+        rows = rows[:limit]
+    return rows
+
+
+def load_annotation_rows(dataset, csv_file, data_dir, limit=None, image_ext=".png", vindr_classes=None, bbox_coord_size=None):
+    """Dispatch to the correct annotation parser."""
+    if dataset == "tbx11k":
+        return load_tbx11k_bbox_rows(csv_file, data_dir, only_target="tb", limit=limit)
+    if dataset == "vindr":
+        return load_vindr_bbox_rows(
+            csv_file=csv_file,
+            data_dir=data_dir,
+            image_ext=image_ext,
+            classes=vindr_classes,
+            limit=limit,
+            bbox_coord_size=bbox_coord_size,
+        )
+    raise ValueError(f"Unsupported dataset: {dataset}")
 
 
 def load_model(model_name, weights_path, device, embedding_dim=None, sra_num_heads=8, sra_lam=0.1):
@@ -259,11 +406,55 @@ def bbox_center(bbox):
     return bbox["xmin"] + bbox["width"] / 2.0, bbox["ymin"] + bbox["height"] / 2.0
 
 
+def get_item_bboxes(item):
+    """Return all bboxes for an item; TBX11k has one, VinDR may have many."""
+    bboxes = item.get("bboxes")
+    if bboxes:
+        return bboxes
+    return [item["bbox"]]
+
+
+def get_item_bbox_classes(item):
+    classes = item.get("bbox_classes") or []
+    bboxes = get_item_bboxes(item)
+    if len(classes) < len(bboxes):
+        classes = classes + [""] * (len(bboxes) - len(classes))
+    return classes
+
+
 def point_inside_bbox(x, y, bbox):
     return (
         bbox["xmin"] <= x <= bbox["xmin"] + bbox["width"]
         and bbox["ymin"] <= y <= bbox["ymin"] + bbox["height"]
     )
+
+
+def find_best_bbox_for_peak(x, y, item):
+    """
+    Select the bbox used for distance/RMSE.
+
+    If the peak falls inside one or more boxes, use the hit box whose center is
+    nearest to the peak. Otherwise use the nearest bbox center among all boxes.
+    """
+    bboxes = get_item_bboxes(item)
+    classes = get_item_bbox_classes(item)
+    candidates = []
+    for idx, bbox in enumerate(bboxes):
+        cx, cy = bbox_center(bbox)
+        dist = math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+        inside = point_inside_bbox(x, y, bbox)
+        candidates.append((not inside, dist, idx, bbox, classes[idx], inside, cx, cy))
+    candidates.sort(key=lambda value: (value[0], value[1]))
+    _, dist, idx, bbox, cls, inside, cx, cy = candidates[0]
+    return {
+        "index": idx,
+        "bbox": bbox,
+        "class_name": cls,
+        "inside": bool(inside),
+        "center_x": cx,
+        "center_y": cy,
+        "distance_px": dist,
+    }
 
 
 def expand_bbox(bbox, image_width, image_height, padding_ratio=0.0):
@@ -297,12 +488,13 @@ def bbox_boolean_mask(shape, bbox):
 
 def compute_region_overlap_hit(
     saliency,
-    bbox,
+    bboxes,
     image_width,
     image_height,
     threshold=0.35,
     bbox_padding_ratio=0.20,
     min_pixels=1,
+    bbox_classes=None,
 ):
     """
     Region-based hit rule for ConvNeXtV2_SRA.
@@ -312,24 +504,63 @@ def compute_region_overlap_hit(
     Pointing Game because it accepts a salient region touching the lesion area,
     not only the single max-saliency point.
     """
+    if isinstance(bboxes, dict):
+        bboxes = [bboxes]
+    bbox_classes = bbox_classes or [""] * len(bboxes)
+
     saliency_on_image = resize_saliency_to_image(saliency, (image_width, image_height))
-    expanded = expand_bbox(bbox, image_width, image_height, padding_ratio=bbox_padding_ratio)
-    bbox_mask = bbox_boolean_mask(saliency_on_image.shape, expanded)
     salient_mask = saliency_on_image >= threshold
-    overlap_mask = salient_mask & bbox_mask
-    overlap_pixels = int(overlap_mask.sum())
     salient_pixels = int(salient_mask.sum())
-    bbox_pixels = int(bbox_mask.sum())
-    hit = overlap_pixels >= min_pixels
+
+    best = None
+    for idx, bbox in enumerate(bboxes):
+        expanded = expand_bbox(bbox, image_width, image_height, padding_ratio=bbox_padding_ratio)
+        bbox_mask = bbox_boolean_mask(saliency_on_image.shape, expanded)
+        overlap_mask = salient_mask & bbox_mask
+        overlap_pixels = int(overlap_mask.sum())
+        bbox_pixels = int(bbox_mask.sum())
+        candidate = {
+            "hit": bool(overlap_pixels >= min_pixels),
+            "bbox_index": int(idx),
+            "bbox_class": bbox_classes[idx] if idx < len(bbox_classes) else "",
+            "matched_bbox": bbox,
+            "expanded_bbox": expanded,
+            "overlap_pixels": overlap_pixels,
+            "salient_pixels": salient_pixels,
+            "bbox_pixels": bbox_pixels,
+            "overlap_fraction_of_saliency": float(overlap_pixels / salient_pixels) if salient_pixels > 0 else 0.0,
+            "overlap_fraction_of_bbox": float(overlap_pixels / bbox_pixels) if bbox_pixels > 0 else 0.0,
+        }
+        if best is None or candidate["overlap_pixels"] > best["overlap_pixels"]:
+            best = candidate
+
+    if best is None:
+        best = {
+            "hit": False,
+            "bbox_index": -1,
+            "bbox_class": "",
+            "matched_bbox": None,
+            "expanded_bbox": None,
+            "overlap_pixels": 0,
+            "salient_pixels": salient_pixels,
+            "bbox_pixels": 0,
+            "overlap_fraction_of_saliency": 0.0,
+            "overlap_fraction_of_bbox": 0.0,
+        }
+
+    hit = bool(best["hit"])
 
     return {
         "hit": bool(hit),
-        "expanded_bbox": expanded,
-        "overlap_pixels": overlap_pixels,
-        "salient_pixels": salient_pixels,
-        "bbox_pixels": bbox_pixels,
-        "overlap_fraction_of_saliency": float(overlap_pixels / salient_pixels) if salient_pixels > 0 else 0.0,
-        "overlap_fraction_of_bbox": float(overlap_pixels / bbox_pixels) if bbox_pixels > 0 else 0.0,
+        "bbox_index": best["bbox_index"],
+        "bbox_class": best["bbox_class"],
+        "matched_bbox": best["matched_bbox"],
+        "expanded_bbox": best["expanded_bbox"],
+        "overlap_pixels": best["overlap_pixels"],
+        "salient_pixels": best["salient_pixels"],
+        "bbox_pixels": best["bbox_pixels"],
+        "overlap_fraction_of_saliency": best["overlap_fraction_of_saliency"],
+        "overlap_fraction_of_bbox": best["overlap_fraction_of_bbox"],
         "threshold": float(threshold),
         "bbox_padding_ratio": float(bbox_padding_ratio),
         "min_pixels": int(min_pixels),
@@ -344,7 +575,7 @@ def safe_stem(text):
 def resize_saliency_to_image(saliency, image_size):
     """Resize normalized 2D saliency to PIL image size=(width, height)."""
     saliency = normalize_saliency(saliency)
-    saliency_img = Image.fromarray((saliency * 255).astype(np.uint8), mode="L")
+    saliency_img = Image.fromarray((saliency * 255).astype(np.uint8))
     try:
         resample = Image.Resampling.BILINEAR
     except AttributeError:
@@ -363,6 +594,39 @@ def add_bbox_and_peak(ax, bbox, peak_x=None, peak_y=None, title=None):
         facecolor="none",
     )
     ax.add_patch(rect)
+    if peak_x is not None and peak_y is not None:
+        ax.scatter([peak_x], [peak_y], s=70, c="red", marker="x", linewidths=2.5)
+    if title:
+        ax.set_title(title)
+    ax.axis("off")
+
+
+def add_item_bboxes_and_peak(ax, item, result, peak_x=None, peak_y=None, title=None):
+    """Draw all bboxes for an item and highlight the matched/evaluated bbox."""
+    bboxes = get_item_bboxes(item)
+    classes = get_item_bbox_classes(item)
+    matched_idx = int(result.get("matched_bbox_index", 0))
+    for idx, bbox in enumerate(bboxes):
+        is_matched = idx == matched_idx
+        rect = patches.Rectangle(
+            (bbox["xmin"], bbox["ymin"]),
+            bbox["width"],
+            bbox["height"],
+            linewidth=2.4 if is_matched else 1.4,
+            edgecolor="lime" if is_matched else "yellow",
+            facecolor="none",
+            linestyle="-" if is_matched else ":",
+        )
+        ax.add_patch(rect)
+        if classes[idx]:
+            ax.text(
+                bbox["xmin"],
+                max(0, bbox["ymin"] - 3),
+                classes[idx],
+                color="lime" if is_matched else "yellow",
+                fontsize=7,
+                bbox=dict(facecolor="black", alpha=0.35, edgecolor="none", pad=1),
+            )
     if peak_x is not None and peak_y is not None:
         ax.scatter([peak_x], [peak_y], s=70, c="red", marker="x", linewidths=2.5)
     if title:
@@ -423,9 +687,10 @@ def save_retrieval_visualization(
     axes[0].axis("off")
 
     axes[1].imshow(retrieved_img)
-    add_bbox_and_peak(
+    add_item_bboxes_and_peak(
         axes[1],
-        retrieved_item["bbox"],
+        retrieved_item,
+        result,
         result["peak_x"],
         result["peak_y"],
         title=(
@@ -436,9 +701,10 @@ def save_retrieval_visualization(
 
     axes[2].imshow(retrieved_img)
     axes[2].imshow(saliency_overlay, cmap="jet", alpha=0.45)
-    add_bbox_and_peak(
+    add_item_bboxes_and_peak(
         axes[2],
-        retrieved_item["bbox"],
+        retrieved_item,
+        result,
         result["peak_x"],
         result["peak_y"],
         title=(
@@ -458,9 +724,10 @@ def save_retrieval_visualization(
         )
         axes[3].imshow(retrieved_img, alpha=0.55)
         axes[3].imshow(masked_saliency, cmap="jet", alpha=0.90)
-        add_bbox_and_peak(
+        add_item_bboxes_and_peak(
             axes[3],
-            retrieved_item["bbox"],
+            retrieved_item,
+            result,
             result["peak_x"],
             result["peak_y"],
             title=(
@@ -472,7 +739,8 @@ def save_retrieval_visualization(
             add_expanded_bbox(axes[3], result["region_expanded_bbox"])
 
     legend_handles = [
-        patches.Patch(edgecolor="lime", facecolor="none", label="TB bbox"),
+        patches.Patch(edgecolor="lime", facecolor="none", label="Matched bbox"),
+        patches.Patch(edgecolor="yellow", facecolor="none", linestyle=":", label="Other bbox"),
         patches.Patch(edgecolor="cyan", facecolor="none", linestyle="--", label="Expanded SRA hit region"),
         plt.Line2D([0], [0], color="red", marker="x", linestyle="None", markersize=8, label="Max saliency"),
     ]
@@ -490,12 +758,13 @@ def save_self_visualization(model_name, item, result, saliency, output_path, dpi
 
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
     axes[0].imshow(image)
-    add_bbox_and_peak(axes[0], item["bbox"], result["peak_x"], result["peak_y"], title=f"Image\n{item['fname']}")
+    add_item_bboxes_and_peak(axes[0], item, result, result["peak_x"], result["peak_y"], title=f"Image\n{item['fname']}")
     axes[1].imshow(image)
     axes[1].imshow(saliency_overlay, cmap="jet", alpha=0.45)
-    add_bbox_and_peak(
+    add_item_bboxes_and_peak(
         axes[1],
-        item["bbox"],
+        item,
+        result,
         result["peak_x"],
         result["peak_y"],
         title=(
@@ -613,22 +882,24 @@ def evaluate_saliency_against_item(
     x_peak, y_peak, x_map, y_map, peak_value = argmax_point_original_coords(
         saliency, original_width, original_height
     )
-    x_center, y_center = bbox_center(item["bbox"])
-    distance_px = math.sqrt((x_peak - x_center) ** 2 + (y_peak - y_center) ** 2)
+    matched = find_best_bbox_for_peak(x_peak, y_peak, item)
+    x_center, y_center = matched["center_x"], matched["center_y"]
+    distance_px = matched["distance_px"]
     diagonal = math.sqrt(original_width ** 2 + original_height ** 2)
     normalized_distance = distance_px / diagonal if diagonal > 0 else float("nan")
-    classic_pg_hit = point_inside_bbox(x_peak, y_peak, item["bbox"])
+    classic_pg_hit = bool(matched["inside"])
 
     region_info = None
     if use_region_hit:
         region_info = compute_region_overlap_hit(
             saliency=saliency,
-            bbox=item["bbox"],
+            bboxes=get_item_bboxes(item),
             image_width=original_width,
             image_height=original_height,
             threshold=region_threshold,
             bbox_padding_ratio=region_bbox_padding_ratio,
             min_pixels=region_min_pixels,
+            bbox_classes=get_item_bbox_classes(item),
         )
         hit = region_info["hit"]
         hit_rule = "region_overlap"
@@ -641,7 +912,11 @@ def evaluate_saliency_against_item(
         "retrieved_image_path": item["image_path"],
         "retrieved_target": item.get("target", ""),
         "retrieved_tb_type": item.get("tb_type", ""),
-        "retrieved_bbox": item["bbox"],
+        "retrieved_bbox": matched["bbox"],
+        "retrieved_bboxes": get_item_bboxes(item),
+        "retrieved_bbox_classes": get_item_bbox_classes(item),
+        "matched_bbox_index": int(matched["index"]),
+        "matched_bbox_class": matched["class_name"],
         "bbox_center_x": x_center,
         "bbox_center_y": y_center,
         "peak_x": x_peak,
@@ -664,6 +939,9 @@ def evaluate_saliency_against_item(
         result.update(
             {
                 "region_expanded_bbox": region_info["expanded_bbox"],
+                "region_matched_bbox": region_info["matched_bbox"],
+                "region_matched_bbox_index": region_info["bbox_index"],
+                "region_matched_bbox_class": region_info["bbox_class"],
                 "region_overlap_pixels": region_info["overlap_pixels"],
                 "region_salient_pixels": region_info["salient_pixels"],
                 "region_bbox_pixels": region_info["bbox_pixels"],
@@ -683,6 +961,8 @@ def evaluate_saliency_against_item(
                 "target": item.get("target", ""),
                 "tb_type": item.get("tb_type", ""),
                 "bbox": item["bbox"],
+                "bboxes": get_item_bboxes(item),
+                "bbox_classes": get_item_bbox_classes(item),
             }
         )
     else:
@@ -884,8 +1164,22 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Evaluate Pointing Game and RMSE localization for SimAtt on TBX11k."
     )
-    parser.add_argument("--data_dir", type=str, required=True, help="Directory containing TBX11k images")
-    parser.add_argument("--csv_file", type=str, default="test.csv", help="TBX11k test CSV with bbox column")
+    parser.add_argument("--dataset", type=str, default="tbx11k", choices=["tbx11k", "vindr"], help="Annotation format/dataset to evaluate")
+    parser.add_argument("--data_dir", type=str, required=True, help="Directory containing images")
+    parser.add_argument("--csv_file", type=str, default="test.csv", help="Annotation CSV file")
+    parser.add_argument("--image_ext", type=str, default=".png", help="Image extension for VinDR image_id lookup, e.g. .png, .jpg")
+    parser.add_argument(
+        "--vindr_classes",
+        type=str,
+        default=None,
+        help="Optional comma-separated VinDR class filter, e.g. 'Nodule/Mass,ILD'. Default uses all annotated classes.",
+    )
+    parser.add_argument(
+        "--bbox_coord_size",
+        type=int,
+        default=None,
+        help="If annotation bboxes are in a fixed square coordinate size, e.g. 384 for annotations_rescaled_384.csv, scale them to actual image size.",
+    )
     parser.add_argument("--convnextv2_weights", type=str, default=None, help="Checkpoint for ConvNeXtV2")
     parser.add_argument("--convnextv2_sra_weights", type=str, default=None, help="Checkpoint for ConvNeXtV2_SRA")
     parser.add_argument("--embedding_dim", type=int, default=None, help="Embedding dimension used during training")
@@ -950,12 +1244,20 @@ def main():
     device = torch.device(args.device if args.device == "cuda" and torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    rows = load_tbx11k_bbox_rows(args.csv_file, args.data_dir, only_target="tb", limit=args.limit)
+    rows = load_annotation_rows(
+        dataset=args.dataset,
+        csv_file=args.csv_file,
+        data_dir=args.data_dir,
+        limit=args.limit,
+        image_ext=args.image_ext,
+        vindr_classes=args.vindr_classes,
+        bbox_coord_size=args.bbox_coord_size,
+    )
     if not rows:
         raise RuntimeError(
-            "No valid TB bbox rows found. Check --csv_file, --data_dir, and the CSV bbox/target columns."
+            "No valid bbox rows found. Check --dataset, --csv_file, --data_dir, image extension, and optional class filters."
         )
-    print(f"Loaded {len(rows)} TB bbox samples from {args.csv_file}")
+    print(f"Loaded {len(rows)} {args.dataset} annotated image samples from {args.csv_file}")
 
     transform = transforms.Compose(
         [
@@ -1068,6 +1370,10 @@ def main():
         "finished": datetime.now().isoformat(timespec="seconds"),
         "csv_file": os.path.abspath(args.csv_file),
         "data_dir": os.path.abspath(args.data_dir),
+        "dataset": args.dataset,
+        "image_ext": args.image_ext,
+        "vindr_classes": args.vindr_classes,
+        "bbox_coord_size": args.bbox_coord_size,
         "img_size": args.img_size,
         "eval_mode": args.eval_mode,
         "top_k": args.top_k,
