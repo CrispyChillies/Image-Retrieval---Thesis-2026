@@ -47,6 +47,8 @@ python evaluate_PG_RSME.py ^
   --convnextv2_sra_weights checkpoints/convnextv2_sra.pth ^
     --top_k 1 ^
   --embedding_dim 512 ^
+    --save_visualizations ^
+    --max_visualizations 50 ^
   --output_dir pg_rmse_results
 """
 
@@ -69,6 +71,11 @@ from tqdm import tqdm
 
 from explanations import SimAtt
 from model import ConvNeXtV2, ConvNeXtV2_SRA
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
@@ -259,6 +266,149 @@ def point_inside_bbox(x, y, bbox):
     )
 
 
+def safe_stem(text):
+    """Make a filesystem-safe short filename stem."""
+    return "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in str(text))
+
+
+def resize_saliency_to_image(saliency, image_size):
+    """Resize normalized 2D saliency to PIL image size=(width, height)."""
+    saliency = normalize_saliency(saliency)
+    saliency_img = Image.fromarray((saliency * 255).astype(np.uint8), mode="L")
+    try:
+        resample = Image.Resampling.BILINEAR
+    except AttributeError:
+        resample = Image.BILINEAR
+    return np.asarray(saliency_img.resize(image_size, resample=resample), dtype=np.float32) / 255.0
+
+
+def add_bbox_and_peak(ax, bbox, peak_x=None, peak_y=None, title=None):
+    """Draw TB bbox and optional max-saliency point on an axis."""
+    rect = patches.Rectangle(
+        (bbox["xmin"], bbox["ymin"]),
+        bbox["width"],
+        bbox["height"],
+        linewidth=2.0,
+        edgecolor="lime",
+        facecolor="none",
+    )
+    ax.add_patch(rect)
+    if peak_x is not None and peak_y is not None:
+        ax.scatter([peak_x], [peak_y], s=70, c="red", marker="x", linewidths=2.5)
+    if title:
+        ax.set_title(title)
+    ax.axis("off")
+
+
+def save_retrieval_visualization(model_name, query_item, retrieved_item, result, saliency, output_path, dpi=150):
+    """Save a 3-panel query/retrieved/SimAtt-overlay figure for one retrieval pair."""
+    query_img = Image.open(query_item["image_path"]).convert("RGB")
+    retrieved_img = Image.open(retrieved_item["image_path"]).convert("RGB")
+    saliency_overlay = resize_saliency_to_image(saliency, retrieved_img.size)
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    axes[0].imshow(query_img)
+    axes[0].set_title(f"Query\n{query_item['fname']}")
+    axes[0].axis("off")
+
+    axes[1].imshow(retrieved_img)
+    add_bbox_and_peak(
+        axes[1],
+        retrieved_item["bbox"],
+        result["peak_x"],
+        result["peak_y"],
+        title=(
+            f"Retrieved rank {result['retrieval_rank']}\n"
+            f"{retrieved_item['fname']} | sim={result['query_retrieved_similarity']:.4f}"
+        ),
+    )
+
+    axes[2].imshow(retrieved_img)
+    axes[2].imshow(saliency_overlay, cmap="jet", alpha=0.45)
+    add_bbox_and_peak(
+        axes[2],
+        retrieved_item["bbox"],
+        result["peak_x"],
+        result["peak_y"],
+        title=(
+            f"{model_name} SimAtt on retrieved image\n"
+            f"PG={'hit' if result['pg_hit'] else 'miss'} | dist={result['distance_px']:.1f}px"
+        ),
+    )
+
+    legend_handles = [
+        patches.Patch(edgecolor="lime", facecolor="none", label="TB bbox"),
+        plt.Line2D([0], [0], color="red", marker="x", linestyle="None", markersize=8, label="Max saliency"),
+    ]
+    fig.legend(handles=legend_handles, loc="lower center", ncol=2)
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def save_self_visualization(model_name, item, result, saliency, output_path, dpi=150):
+    """Save a 2-panel self-SimAtt sanity-check visualization."""
+    image = Image.open(item["image_path"]).convert("RGB")
+    saliency_overlay = resize_saliency_to_image(saliency, image.size)
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    axes[0].imshow(image)
+    add_bbox_and_peak(axes[0], item["bbox"], result["peak_x"], result["peak_y"], title=f"Image\n{item['fname']}")
+    axes[1].imshow(image)
+    axes[1].imshow(saliency_overlay, cmap="jet", alpha=0.45)
+    add_bbox_and_peak(
+        axes[1],
+        item["bbox"],
+        result["peak_x"],
+        result["peak_y"],
+        title=(
+            f"{model_name} self-SimAtt overlay\n"
+            f"PG={'hit' if result['pg_hit'] else 'miss'} | dist={result['distance_px']:.1f}px"
+        ),
+    )
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def save_summary_comparison_plot(summaries, output_path, dpi=150):
+    """Save a compact bar plot comparing PG hit rate and RMSE across models."""
+    if not summaries:
+        return
+
+    model_names = list(summaries.keys())
+    pg_values = [summaries[name]["pg_hit_rate"] for name in model_names]
+    rmse_values = [summaries[name]["rmse_distance_px"] for name in model_names]
+    norm_rmse_values = [summaries[name]["rmse_normalized_distance"] for name in model_names]
+    colors = ["#4C78A8", "#F58518", "#54A24B", "#B279A2"][: len(model_names)]
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    axes[0].bar(model_names, pg_values, color=colors)
+    axes[0].set_ylim(0, 1)
+    axes[0].set_title("Pointing Game hit rate")
+    axes[0].set_ylabel("Hit rate")
+
+    axes[1].bar(model_names, rmse_values, color=colors)
+    axes[1].set_title("RMSE distance")
+    axes[1].set_ylabel("Pixels")
+
+    axes[2].bar(model_names, norm_rmse_values, color=colors)
+    axes[2].set_title("Normalized RMSE")
+    axes[2].set_ylabel("Distance / image diagonal")
+
+    for ax in axes:
+        ax.grid(axis="y", alpha=0.25)
+        ax.tick_params(axis="x", rotation=20)
+
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
 def compute_embeddings(model, rows, transform, device, batch_size=32):
     """Compute L2-normalized image embeddings for retrieval."""
     embeddings = []
@@ -376,9 +526,20 @@ def evaluate_saliency_against_item(
     return result
 
 
-def evaluate_self_model(model_name, model, rows, transform, device, saliency_index=-1):
+def evaluate_self_model(
+    model_name,
+    model,
+    rows,
+    transform,
+    device,
+    saliency_index=-1,
+    visualization_dir=None,
+    max_visualizations=0,
+    visualization_dpi=150,
+):
     explainer = build_simatt(model).to(device)
     results = []
+    vis_count = 0
 
     for item in tqdm(rows, desc=f"Evaluating {model_name} self-SimAtt"):
         image = Image.open(item["image_path"]).convert("RGB")
@@ -389,7 +550,13 @@ def evaluate_self_model(model_name, model, rows, transform, device, saliency_ind
         with torch.set_grad_enabled(True):
             saliency_tensor = explainer(image_tensor, image_tensor)
         saliency = select_saliency_map(saliency_tensor, saliency_index=saliency_index)
-        results.append(evaluate_saliency_against_item(saliency, item))
+        result = evaluate_saliency_against_item(saliency, item)
+        results.append(result)
+
+        if visualization_dir is not None and vis_count < max_visualizations:
+            output_path = Path(visualization_dir) / model_name / f"self_{vis_count + 1:04d}_{safe_stem(item['fname'])}.png"
+            save_self_visualization(model_name, item, result, saliency, output_path, dpi=visualization_dpi)
+            vis_count += 1
 
         del image_tensor, saliency_tensor
         if device.type == "cuda":
@@ -407,6 +574,9 @@ def evaluate_retrieval_model(
     top_k=1,
     embedding_batch_size=32,
     saliency_index=-1,
+    visualization_dir=None,
+    max_visualizations=0,
+    visualization_dpi=150,
 ):
     """
     Evaluate SimAtt on query->retrieved pairs.
@@ -427,6 +597,7 @@ def evaluate_retrieval_model(
 
     explainer = build_simatt(model).to(device)
     results = []
+    vis_count = 0
 
     for query_idx, retrieved_idx, rank, similarity in tqdm(pairs, desc=f"Evaluating {model_name} retrieval-SimAtt"):
         query_item = rows[query_idx]
@@ -442,15 +613,32 @@ def evaluate_retrieval_model(
             saliency_tensor = explainer(query_tensor, retrieved_tensor)
         saliency = select_saliency_map(saliency_tensor, saliency_index=saliency_index)
 
-        results.append(
-            evaluate_saliency_against_item(
-                saliency=saliency,
-                item=retrieved_item,
-                query_item=query_item,
-                similarity=similarity,
-                rank=rank,
-            )
+        result = evaluate_saliency_against_item(
+            saliency=saliency,
+            item=retrieved_item,
+            query_item=query_item,
+            similarity=similarity,
+            rank=rank,
         )
+        results.append(result)
+
+        if visualization_dir is not None and vis_count < max_visualizations:
+            fname = (
+                f"pair_{vis_count + 1:04d}_"
+                f"q_{safe_stem(query_item['fname'])}_"
+                f"r{rank}_{safe_stem(retrieved_item['fname'])}.png"
+            )
+            output_path = Path(visualization_dir) / model_name / fname
+            save_retrieval_visualization(
+                model_name=model_name,
+                query_item=query_item,
+                retrieved_item=retrieved_item,
+                result=result,
+                saliency=saliency,
+                output_path=output_path,
+                dpi=visualization_dpi,
+            )
+            vis_count += 1
 
         del query_tensor, retrieved_tensor, saliency_tensor
         if device.type == "cuda":
@@ -522,6 +710,9 @@ def parse_args():
     parser.add_argument("--saliency_index", type=int, default=-1, help="Map index if SimAtt returns multiple maps; -1 = retrieved/positive image map")
     parser.add_argument("--limit", type=int, default=None, help="Optional limit for quick debugging")
     parser.add_argument("--output_dir", type=str, default="pg_rmse_results", help="Output directory")
+    parser.add_argument("--save_visualizations", action="store_true", help="Save saliency overlay visualizations with bbox and max-saliency marker")
+    parser.add_argument("--max_visualizations", type=int, default=25, help="Maximum number of visualizations to save per model")
+    parser.add_argument("--visualization_dpi", type=int, default=150, help="DPI for saved visualization PNG files")
     parser.add_argument("--device", type=str, default="cuda", help="cuda or cpu")
     return parser.parse_args()
 
@@ -553,6 +744,7 @@ def main():
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    visualization_dir = output_dir / "visualizations" if args.save_visualizations else None
 
     all_summaries = {}
     started = datetime.now().isoformat(timespec="seconds")
@@ -587,6 +779,9 @@ def main():
                 top_k=args.top_k,
                 embedding_batch_size=args.embedding_batch_size,
                 saliency_index=args.saliency_index,
+                visualization_dir=visualization_dir,
+                max_visualizations=args.max_visualizations,
+                visualization_dpi=args.visualization_dpi,
             )
         else:
             per_image = evaluate_self_model(
@@ -596,6 +791,9 @@ def main():
                 transform=transform,
                 device=device,
                 saliency_index=args.saliency_index,
+                visualization_dir=visualization_dir,
+                max_visualizations=args.max_visualizations,
+                visualization_dpi=args.visualization_dpi,
             )
         summary = summarize_results(per_image)
         all_summaries[model_name] = summary
@@ -629,12 +827,17 @@ def main():
         "eval_mode": args.eval_mode,
         "top_k": args.top_k,
         "saliency_index": args.saliency_index,
+        "save_visualizations": args.save_visualizations,
+        "max_visualizations": args.max_visualizations,
         "num_bbox_samples": len(rows),
         "summaries": all_summaries,
     }
     summary_path = output_dir / "summary_pg_rmse.json"
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary_payload, f, indent=2)
+
+    summary_plot_path = output_dir / "summary_comparison.png"
+    save_summary_comparison_plot(all_summaries, summary_plot_path, dpi=args.visualization_dpi)
 
     print("\n" + "=" * 80)
     print("Final summary")
@@ -646,6 +849,9 @@ def main():
             f"RMSE_norm={summary['rmse_normalized_distance']:.4f}"
         )
     print(f"Saved summary JSON: {summary_path}")
+    print(f"Saved summary plot: {summary_plot_path}")
+    if visualization_dir is not None:
+        print(f"Saved overlay visualizations under: {visualization_dir}")
 
 
 if __name__ == "__main__":
