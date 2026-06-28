@@ -298,6 +298,56 @@ def load_vindr_bbox_rows(csv_file, data_dir, image_ext=".png", classes=None, lim
     return rows
 
 
+def item_image_id(item):
+    """Return the image_id for an item, falling back to the fname stem."""
+    image_id = item.get("image_id")
+    if image_id:
+        return str(image_id).strip()
+    return Path(str(item.get("fname", ""))).stem
+
+
+def load_excluded_image_ids(labels_csv, exclude_label="No finding"):
+    """
+    Return image_ids whose exclude_label column is set in a multi-label CSV.
+
+    The CSV is expected to have an 'image_id' column plus one-hot label columns,
+    e.g. vindr/image_labels_test.csv. A value is treated as "set" when it is a
+    non-zero number (or a truthy string like true/yes).
+    """
+    excluded = set()
+    with open(labels_csv, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            raise ValueError(f"Labels CSV has no header row: {labels_csv}")
+
+        normalized = {
+            name.strip().lstrip("\ufeff").lower(): name
+            for name in reader.fieldnames
+            if name is not None
+        }
+        image_id_key = normalized.get("image_id")
+        label_key = normalized.get(exclude_label.strip().lower())
+        if image_id_key is None or label_key is None:
+            raise ValueError(
+                f"Labels CSV must contain 'image_id' and '{exclude_label}' columns. "
+                f"Found columns: {reader.fieldnames}"
+            )
+
+        for row in reader:
+            image_id = row.get(image_id_key, "").strip()
+            if not image_id:
+                continue
+            value = (row.get(label_key, "") or "").strip()
+            try:
+                is_set = float(value) != 0.0
+            except (TypeError, ValueError):
+                is_set = value.lower() in {"true", "yes", "y"}
+            if is_set:
+                excluded.add(image_id)
+
+    return excluded
+
+
 def load_annotation_rows(dataset, csv_file, data_dir, limit=None, image_ext=".png", vindr_classes=None, bbox_coord_size=None):
     """Dispatch to the correct annotation parser."""
     if dataset == "tbx11k":
@@ -1180,6 +1230,18 @@ def parse_args():
         default=None,
         help="If annotation bboxes are in a fixed square coordinate size, e.g. 384 for annotations_rescaled_384.csv, scale them to actual image size.",
     )
+    parser.add_argument(
+        "--exclude_labels_csv",
+        type=str,
+        default=None,
+        help="Optional multi-label CSV (image_id + one-hot labels). Images flagged with --exclude_label are removed before retrieval and evaluation.",
+    )
+    parser.add_argument(
+        "--exclude_label",
+        type=str,
+        default="No finding",
+        help="Label column in --exclude_labels_csv to exclude, e.g. 'No finding'.",
+    )
     parser.add_argument("--convnextv2_weights", type=str, default=None, help="Checkpoint for ConvNeXtV2")
     parser.add_argument("--convnextv2_sra_weights", type=str, default=None, help="Checkpoint for ConvNeXtV2_SRA")
     parser.add_argument("--embedding_dim", type=int, default=None, help="Embedding dimension used during training")
@@ -1258,6 +1320,19 @@ def main():
             "No valid bbox rows found. Check --dataset, --csv_file, --data_dir, image extension, and optional class filters."
         )
     print(f"Loaded {len(rows)} {args.dataset} annotated image samples from {args.csv_file}")
+
+    if args.exclude_labels_csv:
+        excluded_ids = load_excluded_image_ids(args.exclude_labels_csv, args.exclude_label)
+        before = len(rows)
+        rows = [row for row in rows if item_image_id(row) not in excluded_ids]
+        print(
+            f"Excluded {before - len(rows)} images with label '{args.exclude_label}' "
+            f"({len(excluded_ids)} flagged ids in {args.exclude_labels_csv}); {len(rows)} remain"
+        )
+        if not rows:
+            raise RuntimeError(
+                f"All images were excluded by label '{args.exclude_label}'. Nothing left to evaluate."
+            )
 
     transform = transforms.Compose(
         [
@@ -1374,6 +1449,8 @@ def main():
         "image_ext": args.image_ext,
         "vindr_classes": args.vindr_classes,
         "bbox_coord_size": args.bbox_coord_size,
+        "exclude_labels_csv": os.path.abspath(args.exclude_labels_csv) if args.exclude_labels_csv else None,
+        "exclude_label": args.exclude_label if args.exclude_labels_csv else None,
         "img_size": args.img_size,
         "eval_mode": args.eval_mode,
         "top_k": args.top_k,
