@@ -617,6 +617,64 @@ def compute_region_overlap_hit(
     }
 
 
+def compute_energy_pointing_game(saliency, bboxes, image_width, image_height):
+    """Energy-based Pointing Game (EPG).
+
+    EPG = sum(saliency inside GT bbox) / sum(saliency over all pixels).
+    Measures the fraction of saliency energy that falls within the ground-truth
+    region. High EPG = energy concentrated on the lesion; low EPG = diffuse.
+    Multiple bboxes are combined into a single GT mask (union).
+    """
+    saliency_on_image = resize_saliency_to_image(saliency, (image_width, image_height))
+    total_energy = float(saliency_on_image.sum())
+    if total_energy <= 0.0:
+        return 0.0
+
+    if isinstance(bboxes, dict):
+        bboxes = [bboxes]
+
+    gt_mask = np.zeros(saliency_on_image.shape, dtype=bool)
+    for bbox in bboxes:
+        gt_mask |= bbox_boolean_mask(saliency_on_image.shape, bbox)
+
+    inside_energy = float(saliency_on_image[gt_mask].sum())
+    return inside_energy / total_energy
+
+
+def compute_saliency_sparsity(saliency, eps=1e-12):
+    """Concentration metrics of the saliency map, independent of the GT bbox.
+
+    Returns:
+        gini: Gini coefficient of the saliency values (high = focused/peaky,
+            low = diffuse/uniform).
+        entropy: Shannon entropy of the saliency distribution (low = focused).
+        normalized_entropy: entropy divided by log(N) so it lies in [0, 1].
+    """
+    values = np.asarray(saliency, dtype=np.float64).flatten()
+    values = np.clip(values, 0.0, None)
+    n = values.size
+    total = float(values.sum())
+    if n == 0 or total <= 0.0:
+        return {"gini": 0.0, "entropy": 0.0, "normalized_entropy": 0.0}
+
+    # Gini coefficient over sorted values.
+    sorted_vals = np.sort(values)
+    index = np.arange(1, n + 1)
+    gini = float(np.sum((2 * index - n - 1) * sorted_vals) / (n * total))
+
+    # Shannon entropy over the normalized saliency distribution.
+    p = values / total
+    nonzero = p > eps
+    entropy = float(-np.sum(p[nonzero] * np.log(p[nonzero])))
+    normalized_entropy = float(entropy / math.log(n)) if n > 1 else 0.0
+
+    return {
+        "gini": gini,
+        "entropy": entropy,
+        "normalized_entropy": normalized_entropy,
+    }
+
+
 def safe_stem(text):
     """Make a filesystem-safe short filename stem."""
     return "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in str(text))
@@ -939,6 +997,11 @@ def evaluate_saliency_against_item(
     normalized_distance = distance_px / diagonal if diagonal > 0 else float("nan")
     classic_pg_hit = bool(matched["inside"])
 
+    energy_pg = compute_energy_pointing_game(
+        saliency, get_item_bboxes(item), original_width, original_height
+    )
+    sparsity = compute_saliency_sparsity(saliency)
+
     region_info = None
     if use_region_hit:
         region_info = compute_region_overlap_hit(
@@ -983,6 +1046,10 @@ def evaluate_saliency_against_item(
         "image_height": original_height,
         "saliency_height": int(saliency.shape[0]),
         "saliency_width": int(saliency.shape[1]),
+        "epg": energy_pg,
+        "saliency_gini": sparsity["gini"],
+        "saliency_entropy": sparsity["entropy"],
+        "saliency_normalized_entropy": sparsity["normalized_entropy"],
     }
 
     if region_info is not None:
@@ -1182,11 +1249,21 @@ def summarize_results(results):
             "rmse_distance_px": None,
             "mean_normalized_distance": None,
             "rmse_normalized_distance": None,
+            "mean_epg": None,
+            "mean_saliency_gini": None,
+            "mean_saliency_entropy": None,
+            "mean_saliency_normalized_entropy": None,
         }
 
     hits = np.array([r["pg_hit"] for r in results], dtype=np.float32)
     distances = np.array([r["distance_px"] for r in results], dtype=np.float64)
     norm_distances = np.array([r["normalized_distance"] for r in results], dtype=np.float64)
+    epg = np.array([r.get("epg", np.nan) for r in results], dtype=np.float64)
+    gini = np.array([r.get("saliency_gini", np.nan) for r in results], dtype=np.float64)
+    entropy = np.array([r.get("saliency_entropy", np.nan) for r in results], dtype=np.float64)
+    norm_entropy = np.array(
+        [r.get("saliency_normalized_entropy", np.nan) for r in results], dtype=np.float64
+    )
 
     return {
         "num_samples": int(len(results)),
@@ -1197,6 +1274,10 @@ def summarize_results(results):
         "rmse_distance_px": float(np.sqrt(np.mean(distances ** 2))),
         "mean_normalized_distance": float(norm_distances.mean()),
         "rmse_normalized_distance": float(np.sqrt(np.mean(norm_distances ** 2))),
+        "mean_epg": float(np.nanmean(epg)),
+        "mean_saliency_gini": float(np.nanmean(gini)),
+        "mean_saliency_entropy": float(np.nanmean(entropy)),
+        "mean_saliency_normalized_entropy": float(np.nanmean(norm_entropy)),
     }
 
 
@@ -1465,6 +1546,9 @@ def main():
         print(f"  Median distance (px): {summary['median_distance_px']:.2f}")
         print(f"  RMSE distance (px):   {summary['rmse_distance_px']:.2f}")
         print(f"  RMSE normalized:      {summary['rmse_normalized_distance']:.4f}")
+        print(f"  Mean EPG:             {summary['mean_epg']:.4f}")
+        print(f"  Mean saliency Gini:   {summary['mean_saliency_gini']:.4f}")
+        print(f"  Mean norm. entropy:   {summary['mean_saliency_normalized_entropy']:.4f}")
         print(f"  Saved per-image CSV:  {per_image_csv}")
 
         del model
@@ -1513,7 +1597,10 @@ def main():
         print(
             f"{model_name}: PG={summary['pg_hit_rate']:.4f}, "
             f"RMSE_px={summary['rmse_distance_px']:.2f}, "
-            f"RMSE_norm={summary['rmse_normalized_distance']:.4f}"
+            f"RMSE_norm={summary['rmse_normalized_distance']:.4f}, "
+            f"EPG={summary['mean_epg']:.4f}, "
+            f"Gini={summary['mean_saliency_gini']:.4f}, "
+            f"NormEntropy={summary['mean_saliency_normalized_entropy']:.4f}"
         )
     print(f"Saved summary JSON: {summary_path}")
     print(f"Saved summary plot: {summary_plot_path}")
