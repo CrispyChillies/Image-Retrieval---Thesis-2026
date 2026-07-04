@@ -1293,6 +1293,25 @@ def parse_args():
         default=1,
         help="Minimum thresholded saliency pixels inside expanded bbox required for SRA region hit.",
     )
+    parser.add_argument(
+        "--convnextv2_region_threshold",
+        type=float,
+        default=None,
+        help="Normalized saliency threshold enabling region-overlap hit for convnextv2. "
+        "If unset (default), convnextv2 uses classic max-point Pointing Game.",
+    )
+    parser.add_argument(
+        "--convnextv2_region_bbox_padding_ratio",
+        type=float,
+        default=0.20,
+        help="Expand bbox by this fraction of bbox width/height for convnextv2 region-hit acceptance.",
+    )
+    parser.add_argument(
+        "--convnextv2_region_min_pixels",
+        type=int,
+        default=1,
+        help="Minimum thresholded saliency pixels inside expanded bbox required for convnextv2 region hit.",
+    )
     parser.add_argument("--device", type=str, default="cuda", help="cuda or cpu")
     return parser.parse_args()
 
@@ -1371,13 +1390,25 @@ def main():
             sra_lam=args.sra_lam,
         )
         use_region_hit = model_name == "convnextv2_sra" and args.sra_region_hit
+        if model_name == "convnextv2_sra":
+            region_threshold = args.sra_region_threshold
+            region_bbox_padding_ratio = args.sra_region_bbox_padding_ratio
+            region_min_pixels = args.sra_region_min_pixels
+        else:
+            # convnextv2 (and any non-SRA model) only uses region-overlap when a
+            # threshold is explicitly provided; otherwise it stays classic PG.
+            use_region_hit = args.convnextv2_region_threshold is not None
+            region_threshold = args.convnextv2_region_threshold
+            region_bbox_padding_ratio = args.convnextv2_region_bbox_padding_ratio
+            region_min_pixels = args.convnextv2_region_min_pixels
+
         if use_region_hit:
             print(
-                f"[{model_name}] Using SRA region-overlap hit rule: "
-                f"threshold={args.sra_region_threshold}, "
+                f"[{model_name}] Using region-overlap hit rule: "
+                f"threshold={region_threshold}, "
                 f"visual_threshold={args.sra_region_visual_threshold}, "
-                f"bbox_padding_ratio={args.sra_region_bbox_padding_ratio}, "
-                f"min_pixels={args.sra_region_min_pixels}"
+                f"bbox_padding_ratio={region_bbox_padding_ratio}, "
+                f"min_pixels={region_min_pixels}"
             )
         else:
             print(f"[{model_name}] Using classic max-point Pointing Game hit rule")
@@ -1396,9 +1427,9 @@ def main():
                 max_visualizations=args.max_visualizations,
                 visualization_dpi=args.visualization_dpi,
                 use_region_hit=use_region_hit,
-                region_threshold=args.sra_region_threshold,
-                region_bbox_padding_ratio=args.sra_region_bbox_padding_ratio,
-                region_min_pixels=args.sra_region_min_pixels,
+                region_threshold=region_threshold,
+                region_bbox_padding_ratio=region_bbox_padding_ratio,
+                region_min_pixels=region_min_pixels,
                 sra_region_visual_threshold=args.sra_region_visual_threshold,
             )
         else:
@@ -1413,9 +1444,9 @@ def main():
                 max_visualizations=args.max_visualizations,
                 visualization_dpi=args.visualization_dpi,
                 use_region_hit=use_region_hit,
-                region_threshold=args.sra_region_threshold,
-                region_bbox_padding_ratio=args.sra_region_bbox_padding_ratio,
-                region_min_pixels=args.sra_region_min_pixels,
+                region_threshold=region_threshold,
+                region_bbox_padding_ratio=region_bbox_padding_ratio,
+                region_min_pixels=region_min_pixels,
             )
         summary = summarize_results(per_image)
         all_summaries[model_name] = summary
@@ -1462,6 +1493,9 @@ def main():
         "sra_region_visual_threshold": args.sra_region_visual_threshold,
         "sra_region_bbox_padding_ratio": args.sra_region_bbox_padding_ratio,
         "sra_region_min_pixels": args.sra_region_min_pixels,
+        "convnextv2_region_threshold": args.convnextv2_region_threshold,
+        "convnextv2_region_bbox_padding_ratio": args.convnextv2_region_bbox_padding_ratio,
+        "convnextv2_region_min_pixels": args.convnextv2_region_min_pixels,
         "num_bbox_samples": len(rows),
         "summaries": all_summaries,
     }
