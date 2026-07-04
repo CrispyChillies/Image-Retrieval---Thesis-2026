@@ -418,6 +418,12 @@ class DualBranchMultiLabelLoss(nn.Module):
                 "'embedding' and 'logits' keys."
             )
 
+        # Support single-label datasets (e.g. covid, isic, tbx11k) whose labels
+        # are class indices. Convert them to multi-hot so both branches work.
+        if labels.dim() == 1:
+            num_classes = outputs["logits"].size(1)
+            labels = F.one_hot(labels.long(), num_classes=num_classes).float()
+
         contrastive_loss = self.contrastive(outputs["embedding"], labels)
         asl_loss = self.asl(outputs["logits"], labels)
         total_loss = contrastive_loss + self.alpha * asl_loss

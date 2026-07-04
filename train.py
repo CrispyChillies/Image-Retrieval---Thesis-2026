@@ -725,9 +725,14 @@ def main(args):
             dual_branch_num_labels = 6
         elif args.dataset == "nih":
             dual_branch_num_labels = 14
+        elif args.dataset in ("covid", "isic", "tbx11k"):
+            # Single-label datasets with 3 classes each. Labels are class
+            # indices and get converted to one-hot inside the dual_branch loss.
+            dual_branch_num_labels = 3
         else:
             raise ValueError(
-                "dual_branch loss requires a multi-label dataset such as vindr or nih."
+                "dual_branch loss requires a multi-label dataset such as vindr or nih, "
+                "or a supported single-label dataset (covid, isic, tbx11k)."
             )
         if args.model not in [
             "densenet121",
