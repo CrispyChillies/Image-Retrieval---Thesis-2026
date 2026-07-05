@@ -413,6 +413,49 @@ def build_simatt(model, model_name="convnextv2"):
     return explainer
 
 
+def compute_sra_attention_saliency(model, image_tensor):
+    """SRA-native saliency: read the spatial attention map from the SRA head.
+
+    Registers a forward hook on ``model.sra.conv_att``, runs a forward pass, then
+    applies the same spatial softmax and head-averaging that SRA uses internally
+    (see SRA.forward in model.py). This reflects exactly where SRA attends,
+    without Grad-CAM's spatial gradient-averaging that washes out the attention.
+
+    Args:
+        model: a ConvNeXtV2_SRA instance (must expose model.sra.conv_att).
+        image_tensor: (1, C, H, W) input tensor for a single image.
+
+    Returns:
+        Normalized 2D saliency map (H_feat, W_feat).
+    """
+    if not hasattr(model, "sra") or not hasattr(model.sra, "conv_att"):
+        raise ValueError("compute_sra_attention_saliency requires a ConvNeXtV2_SRA model.")
+
+    captured = {}
+
+    def hook_fn(module, inp, out):
+        captured["att"] = out  # (B, num_heads, H, W)
+
+    handle = model.sra.conv_att.register_forward_hook(hook_fn)
+    try:
+        with torch.no_grad():
+            model(image_tensor)
+    finally:
+        handle.remove()
+
+    att = captured.get("att")
+    if att is None:
+        raise RuntimeError("SRA attention hook failed: no attention captured.")
+
+    b, k, h, w = att.shape
+    # Match SRA.forward: softmax over spatial positions, then average heads.
+    att = att.view(b, k, h * w)
+    att = torch.softmax(att, dim=2)
+    att = att.mean(dim=1).view(b, h, w)
+    saliency = att[0].detach().cpu().numpy()
+    return normalize_saliency(saliency)
+
+
 def normalize_saliency(saliency):
     saliency = np.asarray(saliency, dtype=np.float32)
     saliency = np.nan_to_num(saliency, nan=0.0, posinf=0.0, neginf=0.0)
@@ -1124,8 +1167,10 @@ def evaluate_self_model(
     region_threshold=0.35,
     region_bbox_padding_ratio=0.20,
     region_min_pixels=1,
+    sra_saliency="simatt",
 ):
-    explainer = build_simatt(model, model_name).to(device)
+    use_attention = sra_saliency == "attention" and model_name == "convnextv2_sra"
+    explainer = None if use_attention else build_simatt(model, model_name).to(device)
     results = []
     vis_count = 0
 
@@ -1133,11 +1178,17 @@ def evaluate_self_model(
         image = Image.open(item["image_path"]).convert("RGB")
         image_tensor = transform(image).unsqueeze(0).to(device)
 
-        # Self-similarity SimAtt: evaluate localization on the same image that has bbox.
-        model.zero_grad(set_to_none=True)
-        with torch.set_grad_enabled(True):
-            saliency_tensor = explainer(image_tensor, image_tensor)
-        saliency = select_saliency_map(saliency_tensor, saliency_index=saliency_index)
+        saliency_tensor = None
+        if use_attention:
+            # SRA-native saliency read directly from the attention head.
+            saliency = compute_sra_attention_saliency(model, image_tensor)
+        else:
+            # Self-similarity SimAtt on the same image that has the bbox.
+            model.zero_grad(set_to_none=True)
+            with torch.set_grad_enabled(True):
+                saliency_tensor = explainer(image_tensor, image_tensor)
+            saliency = select_saliency_map(saliency_tensor, saliency_index=saliency_index)
+
         result = evaluate_saliency_against_item(
             saliency,
             item,
@@ -1153,7 +1204,9 @@ def evaluate_self_model(
             save_self_visualization(model_name, item, result, saliency, output_path, dpi=visualization_dpi)
             vis_count += 1
 
-        del image_tensor, saliency_tensor
+        del image_tensor
+        if saliency_tensor is not None:
+            del saliency_tensor
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
@@ -1177,6 +1230,7 @@ def evaluate_retrieval_model(
     region_bbox_padding_ratio=0.20,
     region_min_pixels=1,
     sra_region_visual_threshold=0.25,
+    sra_saliency="simatt",
 ):
     """
     Evaluate SimAtt on query->retrieved pairs.
@@ -1195,7 +1249,8 @@ def evaluate_retrieval_model(
     pairs = build_retrieval_pairs(embeddings, top_k=top_k)
     print(f"[{model_name}] Evaluating {len(pairs)} query->retrieved SimAtt pairs")
 
-    explainer = build_simatt(model, model_name).to(device)
+    use_attention = sra_saliency == "attention" and model_name == "convnextv2_sra"
+    explainer = None if use_attention else build_simatt(model, model_name).to(device)
     results = []
     vis_count = 0
 
@@ -1208,10 +1263,15 @@ def evaluate_retrieval_model(
         query_tensor = transform(query_image).unsqueeze(0).to(device)
         retrieved_tensor = transform(retrieved_image).unsqueeze(0).to(device)
 
-        model.zero_grad(set_to_none=True)
-        with torch.set_grad_enabled(True):
-            saliency_tensor = explainer(query_tensor, retrieved_tensor)
-        saliency = select_saliency_map(saliency_tensor, saliency_index=saliency_index)
+        saliency_tensor = None
+        if use_attention:
+            # SRA-native saliency on the retrieved image (the one being localized).
+            saliency = compute_sra_attention_saliency(model, retrieved_tensor)
+        else:
+            model.zero_grad(set_to_none=True)
+            with torch.set_grad_enabled(True):
+                saliency_tensor = explainer(query_tensor, retrieved_tensor)
+            saliency = select_saliency_map(saliency_tensor, saliency_index=saliency_index)
 
         result = evaluate_saliency_against_item(
             saliency=saliency,
@@ -1245,7 +1305,9 @@ def evaluate_retrieval_model(
             )
             vis_count += 1
 
-        del query_tensor, retrieved_tensor, saliency_tensor
+        del query_tensor, retrieved_tensor
+        if saliency_tensor is not None:
+            del saliency_tensor
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
@@ -1344,6 +1406,15 @@ def parse_args():
     parser.add_argument("--embedding_dim", type=int, default=None, help="Embedding dimension used during training")
     parser.add_argument("--sra_num_heads", type=int, default=8, help="Number of SRA heads")
     parser.add_argument("--sra_lam", type=float, default=0.1, help="SRA residual attention lambda")
+    parser.add_argument(
+        "--sra_saliency",
+        type=str,
+        default="simatt",
+        choices=["simatt", "attention"],
+        help="Saliency source for convnextv2_sra: 'simatt' = Grad-CAM-style SimAtt on "
+        "the last conv stage (default); 'attention' = read the SRA head's spatial "
+        "attention map directly (faithful to what SRA attends to). Other models always use SimAtt.",
+    )
     parser.add_argument("--img_size", type=int, default=384, help="ConvNeXtV2 input size")
     parser.add_argument(
         "--eval_mode",
@@ -1522,6 +1593,9 @@ def main():
         else:
             print(f"[{model_name}] Using classic max-point Pointing Game hit rule")
 
+        if model_name == "convnextv2_sra":
+            print(f"[{model_name}] Saliency source: {args.sra_saliency}")
+
         if args.eval_mode == "retrieval":
             per_image = evaluate_retrieval_model(
                 model_name=model_name,
@@ -1540,6 +1614,7 @@ def main():
                 region_bbox_padding_ratio=region_bbox_padding_ratio,
                 region_min_pixels=region_min_pixels,
                 sra_region_visual_threshold=args.sra_region_visual_threshold,
+                sra_saliency=args.sra_saliency,
             )
         else:
             per_image = evaluate_self_model(
@@ -1556,6 +1631,7 @@ def main():
                 region_threshold=region_threshold,
                 region_bbox_padding_ratio=region_bbox_padding_ratio,
                 region_min_pixels=region_min_pixels,
+                sra_saliency=args.sra_saliency,
             )
         summary = summarize_results(per_image)
         all_summaries[model_name] = summary
@@ -1602,6 +1678,7 @@ def main():
         "max_visualizations": args.max_visualizations,
         "sra_region_hit": args.sra_region_hit,
         "sra_region_threshold": args.sra_region_threshold,
+        "sra_saliency": args.sra_saliency,
         "sra_region_visual_threshold": args.sra_region_visual_threshold,
         "sra_region_bbox_padding_ratio": args.sra_region_bbox_padding_ratio,
         "sra_region_min_pixels": args.sra_region_min_pixels,

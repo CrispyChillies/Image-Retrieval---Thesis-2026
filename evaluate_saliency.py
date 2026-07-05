@@ -5,7 +5,7 @@ import torch
 import numpy as np
 from PIL import Image
 import torch.nn as nn
-from model import ConvNeXtV2, DenseNet121, ResNet50, MedSigLIP
+from model import ConvNeXtV2, ConvNeXtV2_SRA, DenseNet121, ResNet50, MedSigLIP
 from torchvision import transforms
 from evaluation import CausalMetric, gkern
 import argparse
@@ -120,8 +120,11 @@ def main():
     # Argument parser for configurable parameters
     parser = argparse.ArgumentParser(description='Evaluate saliency maps with configurable parameters.')
     parser.add_argument('--dataset_type', type=str, default='covid', help='Dataset type: covid, isic, tbx11k, or vindr')
-    parser.add_argument('--model_type', type=str, default='densenet121', choices=['densenet121', 'resnet50', 'convnextv2', 'medsiglip'], help='Model architecture: densenet121, resnet50, or convnextv2')
+    parser.add_argument('--model_type', type=str, default='densenet121', choices=['densenet121', 'resnet50', 'convnextv2', 'convnextv2_sra', 'medsiglip'], help='Model architecture: densenet121, resnet50, convnextv2, convnextv2_sra, or medsiglip')
     parser.add_argument('--model_weights', type=str, default='/data/brian.hu/covid_saliency/covid_densenet121_embed_256_seed_1_epoch_20_ckpt.pth', help='Path to model weights')
+    parser.add_argument('--embedding-dim', dest='embedding_dim', default=None, type=int, help='Embedding dimension of the trained model (must match the checkpoint)')
+    parser.add_argument('--sra-num-heads', dest='sra_num_heads', default=8, type=int, help='Number of SRA attention heads (convnextv2_sra)')
+    parser.add_argument('--sra-lam', dest='sra_lam', default=0.1, type=float, help='SRA residual attention lambda (convnextv2_sra)')
     parser.add_argument('--main_path', type=str, default='/data/brian.hu/covid_saliency/simatt/', help='Path to saliency maps')
     parser.add_argument('--query_img_path', type=str, default='/data/brian.hu/COVID/data/test/', help='Path to query images')
     parser.add_argument('--csv_path', type=str, default='./ISIC-2017_Test_v2_Part3_GroundTruth_balanced.csv', help='Path to ISIC CSV file (only for isic dataset)')
@@ -134,11 +137,17 @@ def main():
 
     # Load model based on model_type argument
     if args.model_type == 'densenet121':
-        model = DenseNet121()
+        model = DenseNet121(embedding_dim=args.embedding_dim)
     elif args.model_type == 'resnet50':
-        model = ResNet50()
+        model = ResNet50(embedding_dim=args.embedding_dim)
     elif args.model_type == 'convnextv2':
-        model = ConvNeXtV2()
+        model = ConvNeXtV2(embedding_dim=args.embedding_dim)
+    elif args.model_type == 'convnextv2_sra':
+        model = ConvNeXtV2_SRA(
+            num_heads=args.sra_num_heads,
+            lam=args.sra_lam,
+            embedding_dim=args.embedding_dim,
+        )
     elif args.model_type == 'medsiglip':
         model = MedSigLIP()
     else:
@@ -238,12 +247,12 @@ def main():
     # Use 384x384 for ConvNeXtV2 and SwinV2, 448x448 for MedSigLIP, 224x224 for other models
     if args.model_type == 'medsiglip':
         img_size = 448
-    elif args.model_type in ['convnextv2', 'swinv2']:
+    elif args.model_type in ['convnextv2', 'convnextv2_sra', 'swinv2']:
         img_size = 384
     else:
         img_size = 224
 
-    if args.model_type in ['convnextv2', 'swinv2', 'medsiglip']:
+    if args.model_type in ['convnextv2', 'convnextv2_sra', 'swinv2', 'medsiglip']:
         transform = transforms.Compose([
             transforms.Lambda(lambda img: img.convert('RGB')),
             transforms.Resize((img_size, img_size)),
@@ -276,7 +285,7 @@ def main():
     # Use 448 for MedSigLIP, 384 for ConvNeXtV2 and SwinV2, 224 for other models
     if args.model_type == 'medsiglip':
         input_size = 448
-    elif args.model_type in ['convnextv2', 'swinv2']:
+    elif args.model_type in ['convnextv2', 'convnextv2_sra', 'swinv2']:
         input_size = 384
     else:
         input_size = 224
