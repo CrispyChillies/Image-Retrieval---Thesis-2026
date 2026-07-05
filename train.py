@@ -35,6 +35,7 @@ from model import (
     ConvNeXtV2_SRA,
     SwinV2,
     DinoV2,
+    MedSigLIP,
     conceptCLIP,
 )
 
@@ -740,10 +741,11 @@ def main(args):
             "convnextv2",
             "convnextv2_sra",
             "dinov2",
+            "medsiglip",
         ]:
             raise ValueError(
                 "dual_branch loss is currently wired for densenet121, resnet50, convnextv2, "
-                "convnextv2_sra, and dinov2."
+                "convnextv2_sra, dinov2, and medsiglip."
             )
 
     # Choose model
@@ -771,6 +773,8 @@ def main(args):
         )
     elif args.model == "swinv2":
         model = SwinV2(embedding_dim=args.embedding_dim)
+    elif args.model == "medsiglip":
+        model = MedSigLIP(num_labels=dual_branch_num_labels)
     elif args.model == "dinov2":
         model = DinoV2(
             model_name=args.dinov2_model_name,
@@ -948,6 +952,37 @@ def main(args):
             param_groups.append({"params": head_params, "lr": args.lr})
 
         optimizer = AdamW(param_groups, lr=args.lr, weight_decay=args.weight_decay)
+    elif args.model == "medsiglip":
+        # MedSigLIP: frozen backbone except last layers + projection/head.
+        model_without_ddp = model.module if args.use_ddp else model
+        backbone_params = []
+        head_params = []
+
+        for name, param in model_without_ddp.named_parameters():
+            if not param.requires_grad:
+                continue
+            if name.startswith("projection") or name.startswith("classification_head"):
+                head_params.append(param)
+            else:
+                backbone_params.append(param)
+
+        trainable_count = sum(
+            p.numel() for p in model_without_ddp.parameters() if p.requires_grad
+        )
+        total_count = sum(p.numel() for p in model_without_ddp.parameters())
+        if rank == 0:
+            print(
+                f"MedSigLIP: {trainable_count:,} / {total_count:,} parameters trainable "
+                f"({100*trainable_count/total_count:.1f}%)"
+            )
+
+        param_groups = []
+        if backbone_params:
+            param_groups.append({"params": backbone_params, "lr": args.lr * 0.1})
+        if head_params:
+            param_groups.append({"params": head_params, "lr": args.lr})
+
+        optimizer = AdamW(param_groups, lr=args.lr, weight_decay=args.weight_decay)
     else:
         # Simple optimizer for other models
         optimizer = Adam(model.parameters(), lr=args.lr)
@@ -965,15 +1000,25 @@ def main(args):
     else:
         normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
-        # Use 384x384 for ConvNeXtV2, SwinV2 and Hybrid models, 224x224 for other models
-        default_img_size = (
-            384
-            if args.model
-            in ["convnextv2", "convnextv2_sra", "swinv2", "hybrid_convnext_vit"]
-            else 224
-        )
+        # Use 448 for MedSigLIP, 384 for ConvNeXtV2/SwinV2/Hybrid, 224 for others
+        if args.model == "medsiglip":
+            default_img_size = 448
+        elif args.model in [
+            "convnextv2",
+            "convnextv2_sra",
+            "swinv2",
+            "hybrid_convnext_vit",
+        ]:
+            default_img_size = 384
+        else:
+            default_img_size = 224
         img_size = args.image_size or default_img_size
-        resize_size = 432 if img_size == 384 else 256
+        if img_size == 448:
+            resize_size = 512
+        elif img_size == 384:
+            resize_size = 432
+        else:
+            resize_size = 256
 
     if args.dataset == "nih":
         train_transform = transforms.Compose(

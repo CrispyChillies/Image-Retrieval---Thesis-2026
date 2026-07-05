@@ -572,7 +572,7 @@ def _convert_sdpa_to_eager_attention(model):
 
 
 class MedSigLIP(nn.Module):
-    def __init__(self, model_name="google/medsiglip-448", embed_dim=512, unfreeze_layers=2):
+    def __init__(self, model_name="google/medsiglip-448", embed_dim=512, unfreeze_layers=2, num_labels=None):
         super().__init__()
         # Load with eager attention to enable attention weight extraction
         # Note: attn_implementation must be set BEFORE model instantiation
@@ -628,6 +628,10 @@ class MedSigLIP(nn.Module):
             nn.ReLU(),
             nn.Linear(512, embed_dim)
         )
+        # Optional classification head for dual-branch training (embedding + logits)
+        self.classification_head = (
+            nn.Linear(embed_dim, num_labels) if num_labels else None
+        )
 
     def ensure_eager_attention(self):
         """
@@ -669,6 +673,11 @@ class MedSigLIP(nn.Module):
         outputs = self.backbone(pixel_values=x)
         features = outputs.pooler_output 
         embeddings = self.projection(features)
+        if self.classification_head is not None:
+            return {
+                "embedding": torch.nn.functional.normalize(embeddings, p=2, dim=1),
+                "logits": self.classification_head(embeddings),
+            }
         return torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
 # Use transformer Automodel for ConceptCLIP using JerrryNie/ConceptCLIP
