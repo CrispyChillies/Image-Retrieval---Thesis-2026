@@ -70,7 +70,7 @@ from torchvision.transforms import InterpolationMode
 from tqdm import tqdm
 
 from explanations import SimAtt
-from model import ConvNeXtV2, ConvNeXtV2_SRA
+from model import ConvNeXtV2, ConvNeXtV2_SRA, DenseNet121, ResNet50
 
 import matplotlib
 matplotlib.use("Agg")
@@ -365,7 +365,7 @@ def load_annotation_rows(dataset, csv_file, data_dir, limit=None, image_ext=".pn
 
 
 def load_model(model_name, weights_path, device, embedding_dim=None, sra_num_heads=8, sra_lam=0.1):
-    """Load ConvNeXtV2 or ConvNeXtV2_SRA with project checkpoint conventions."""
+    """Load a retrieval backbone with project checkpoint conventions."""
     if model_name == "convnextv2":
         model = ConvNeXtV2(embedding_dim=embedding_dim)
     elif model_name == "convnextv2_sra":
@@ -374,6 +374,10 @@ def load_model(model_name, weights_path, device, embedding_dim=None, sra_num_hea
             num_heads=sra_num_heads,
             lam=sra_lam,
         )
+    elif model_name == "densenet121":
+        model = DenseNet121(embedding_dim=embedding_dim)
+    elif model_name == "resnet50":
+        model = ResNet50(embedding_dim=embedding_dim)
     else:
         raise ValueError(f"Unsupported model_name: {model_name}")
 
@@ -391,9 +395,19 @@ def load_model(model_name, weights_path, device, embedding_dim=None, sra_num_hea
     return model
 
 
-def build_simatt(model):
-    """Build SimAtt on the last spatial ConvNeXt stage."""
-    target_layer = model.convnext.stages[-1]
+def build_simatt(model, model_name="convnextv2"):
+    """Build SimAtt on the last spatial feature map of the given backbone."""
+    if model_name in ("convnextv2", "convnextv2_sra"):
+        target_layer = model.convnext.stages[-1]
+    elif model_name == "densenet121":
+        # model.densenet121[0] is the DenseNet 'features' module; its output is the
+        # last spatial feature map (B, 1024, H, W) before global pooling.
+        target_layer = model.densenet121[0]
+    elif model_name == "resnet50":
+        # model.resnet50[7] is layer4; output is (B, 2048, H, W) before avgpool.
+        target_layer = model.resnet50[7]
+    else:
+        raise ValueError(f"Unsupported model_name for SimAtt: {model_name}")
     explainer = SimAtt(model, target_layer, target_layers=None)
     explainer.eval()
     return explainer
@@ -1111,7 +1125,7 @@ def evaluate_self_model(
     region_bbox_padding_ratio=0.20,
     region_min_pixels=1,
 ):
-    explainer = build_simatt(model).to(device)
+    explainer = build_simatt(model, model_name).to(device)
     results = []
     vis_count = 0
 
@@ -1181,7 +1195,7 @@ def evaluate_retrieval_model(
     pairs = build_retrieval_pairs(embeddings, top_k=top_k)
     print(f"[{model_name}] Evaluating {len(pairs)} query->retrieved SimAtt pairs")
 
-    explainer = build_simatt(model).to(device)
+    explainer = build_simatt(model, model_name).to(device)
     results = []
     vis_count = 0
 
@@ -1325,6 +1339,8 @@ def parse_args():
     )
     parser.add_argument("--convnextv2_weights", type=str, default=None, help="Checkpoint for ConvNeXtV2")
     parser.add_argument("--convnextv2_sra_weights", type=str, default=None, help="Checkpoint for ConvNeXtV2_SRA")
+    parser.add_argument("--densenet121_weights", type=str, default=None, help="Checkpoint for DenseNet121")
+    parser.add_argument("--resnet50_weights", type=str, default=None, help="Checkpoint for ResNet50")
     parser.add_argument("--embedding_dim", type=int, default=None, help="Embedding dimension used during training")
     parser.add_argument("--sra_num_heads", type=int, default=8, help="Number of SRA heads")
     parser.add_argument("--sra_lam", type=float, default=0.1, help="SRA residual attention lambda")
@@ -1400,8 +1416,16 @@ def parse_args():
 def main():
     args = parse_args()
 
-    if args.convnextv2_weights is None and args.convnextv2_sra_weights is None:
-        raise ValueError("Provide at least one checkpoint: --convnextv2_weights or --convnextv2_sra_weights")
+    if (
+        args.convnextv2_weights is None
+        and args.convnextv2_sra_weights is None
+        and args.densenet121_weights is None
+        and args.resnet50_weights is None
+    ):
+        raise ValueError(
+            "Provide at least one checkpoint: --convnextv2_weights, --convnextv2_sra_weights, "
+            "--densenet121_weights or --resnet50_weights"
+        )
 
     device = torch.device(args.device if args.device == "cuda" and torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -1455,6 +1479,10 @@ def main():
         model_specs.append(("convnextv2", args.convnextv2_weights))
     if args.convnextv2_sra_weights:
         model_specs.append(("convnextv2_sra", args.convnextv2_sra_weights))
+    if args.densenet121_weights:
+        model_specs.append(("densenet121", args.densenet121_weights))
+    if args.resnet50_weights:
+        model_specs.append(("resnet50", args.resnet50_weights))
 
     for model_name, weights_path in model_specs:
         print("\n" + "=" * 80)
