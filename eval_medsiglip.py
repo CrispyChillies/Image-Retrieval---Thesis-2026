@@ -61,7 +61,7 @@ def compute_map(ranks, gnd, kappas=None):
             nempty += 1
             continue
 
-        pos = np.arange(ranks.shape[0])[np.in1d(ranks[:, i], qgnd)]
+        pos = np.arange(ranks.shape[0])[np.isin(ranks[:, i], qgnd)]
         ap = compute_ap(pos, len(qgnd))
         m_ap += ap
         aps[i] = ap

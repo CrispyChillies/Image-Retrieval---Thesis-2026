@@ -126,7 +126,7 @@ def compute_map(ranks, gnd, kappas=[]):
             continue
 
         # sorted positions of positive images (0 based)
-        pos = np.arange(ranks.shape[0])[np.in1d(ranks[:, i], qgnd)]
+        pos = np.arange(ranks.shape[0])[np.isin(ranks[:, i], qgnd)]
 
         # compute ap
         ap = compute_ap(pos, len(qgnd))
