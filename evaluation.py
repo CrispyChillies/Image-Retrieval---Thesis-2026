@@ -45,7 +45,7 @@ def auc(arr):
 
 class CausalMetric():
 
-    def __init__(self, model, mode, step, substrate_fn, input_size=224):
+    def __init__(self, model, mode, step, substrate_fn, input_size=224, fp16=False):
         r"""Create deletion/insertion metric instance.
 
         Args:
@@ -54,6 +54,7 @@ class CausalMetric():
             step (int): number of pixels modified per one iteration.
             substrate_fn (func): a mapping from old pixels to new pixels.
             input_size (int): size of input image (default: 224).
+            fp16 (bool): run the model forward passes under fp16 autocast.
         """
         assert mode in ['del', 'ins']
         self.model = model
@@ -61,6 +62,7 @@ class CausalMetric():
         self.step = step
         self.substrate_fn = substrate_fn
         self.hw = input_size * input_size  # image area
+        self.fp16 = fp16
 
     def single_run(self, img_tensor, retrieved_tensor, explanation, verbose=0, save_to=None, batch_size=64):
         r"""Run metric on one image-saliency pair.
@@ -85,9 +87,10 @@ class CausalMetric():
         Return:
             scores (nd.array): Array containing scores at every step.
         """
-        with torch.no_grad():
+        use_amp = self.fp16 and retrieved_tensor.is_cuda
+        with torch.no_grad(), torch.autocast('cuda', dtype=torch.float16, enabled=use_amp):
             device = retrieved_tensor.device
-            q_feat = self.model(img_tensor.to(device))
+            q_feat = self.model(img_tensor.to(device)).float()
             n_steps = (self.hw + self.step - 1) // self.step
 
             if self.mode == 'del':
@@ -135,7 +138,7 @@ class CausalMetric():
                     start_flat.unsqueeze(0),
                 ).reshape(-1, 3, side, side)                          # (bs, 3, H, W)
 
-                feats = self.model(imgs)
+                feats = self.model(imgs).float()
                 sims = torch.nn.functional.cosine_similarity(q_feat, feats)  # (bs,)
                 zero_cntr += int((sims < 0).sum().item())
                 sims = torch.clamp(sims, 0.0, 1.0)
