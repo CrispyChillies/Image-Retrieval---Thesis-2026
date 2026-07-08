@@ -62,78 +62,111 @@ class CausalMetric():
         self.substrate_fn = substrate_fn
         self.hw = input_size * input_size  # image area
 
-    def single_run(self, img_tensor, retrieved_tensor, explanation, verbose=0, save_to=None):
+    def single_run(self, img_tensor, retrieved_tensor, explanation, verbose=0, save_to=None, batch_size=64):
         r"""Run metric on one image-saliency pair.
 
+        Pixels are revealed/removed ``self.step`` at a time in order of
+        decreasing saliency. Instead of running the model once per step
+        (batch size 1), all masked variants are materialised and pushed
+        through the model in mini-batches, which is numerically identical
+        but far faster on the GPU.
+
         Args:
-            img_tensor (Tensor): normalized image tensor.
-            explanation (np.ndarray): saliency map.
+            img_tensor (Tensor): normalized query image tensor.
+            retrieved_tensor (Tensor): normalized retrieved image tensor.
+            explanation (np.ndarray | Tensor): saliency map.
             verbose (int): in [0, 1, 2].
                 0 - return list of scores.
                 1 - also plot final step.
                 2 - also plot every step and print 2 top classes.
             save_to (str): directory to save every step plots to.
+            batch_size (int): number of masked steps evaluated per forward pass.
 
         Return:
             scores (nd.array): Array containing scores at every step.
         """
-        q_feat = self.model(img_tensor.cuda())
-        n_steps = (self.hw + self.step - 1) // self.step
+        with torch.no_grad():
+            device = retrieved_tensor.device
+            q_feat = self.model(img_tensor.to(device))
+            n_steps = (self.hw + self.step - 1) // self.step
 
-        if self.mode == 'del':
-            title = 'Deletion game'
-            ylabel = 'Pixels deleted'
-            start = retrieved_tensor.clone()
-            finish = self.substrate_fn(retrieved_tensor)
-        elif self.mode == 'ins':
-            title = 'Insertion game'
-            ylabel = 'Pixels inserted'
-            start = self.substrate_fn(retrieved_tensor)
-            finish = retrieved_tensor.clone()
+            if self.mode == 'del':
+                title = 'Deletion game'
+                ylabel = 'Pixels deleted'
+                start = retrieved_tensor.clone()
+                finish = self.substrate_fn(retrieved_tensor)
+            elif self.mode == 'ins':
+                title = 'Insertion game'
+                ylabel = 'Pixels inserted'
+                start = self.substrate_fn(retrieved_tensor)
+                finish = retrieved_tensor.clone()
 
-        scores = np.empty(n_steps + 1)
-        # Coordinates of pixels in order of decreasing saliency
-        t_r = explanation.reshape(-1, self.hw)
-        salient_order = np.argsort(t_r, axis=1)
-        salient_order = torch.flip(salient_order, [0, 1])
-        zero_cntr = 0
-        for i in range(n_steps+1):
-            r_feat = self.model(start.cuda())
-            c_dist = torch.nn.functional.cosine_similarity(q_feat, r_feat)[0]
-            diff_dist = c_dist
-            if diff_dist < 0:
-                diff_dist = np.clip(
-                    diff_dist.detach().cpu().numpy(), a_min=0, a_max=1)
-                #print('Negative value clipped to 0')
-                zero_cntr += 1
-            scores[i] = diff_dist
+            side = int(round(self.hw ** 0.5))
+            start_flat = start.reshape(3, self.hw).to(device)
+            finish_flat = finish.reshape(3, self.hw).to(device)
 
-            # Render image if verbose, if it's the last step or if save is required.
-            if verbose == 2 or (verbose == 1 and i == n_steps) or save_to:
-                plt.figure(figsize=(10, 5))
-                plt.subplot(121)
-                plt.title('{} {:.1f}%, P={:.4f}'.format(
-                    ylabel, 100 * i / n_steps, scores[i]))
-                plt.axis('off')
-                tensor_imshow(start[0])
+            # Pixel indices ordered from most to least salient.
+            if isinstance(explanation, torch.Tensor):
+                t_r = explanation.detach().cpu().numpy()
+            else:
+                t_r = np.asarray(explanation)
+            t_r = t_r.reshape(-1, self.hw)
+            salient_order = np.argsort(t_r, axis=1)          # ascending saliency
+            order_desc = np.ascontiguousarray(salient_order[:, ::-1]).reshape(-1)
+            order_flat = torch.from_numpy(order_desc).long().to(device)
 
-                plt.subplot(122)
-                plt.plot(np.arange(i+1) / n_steps, scores[:i+1])
-                plt.xlim(-0.1, 1.1)
-                plt.ylim(0, 1.05)
-                plt.fill_between(np.arange(i+1) / n_steps,
-                                 0, scores[:i+1], alpha=0.4)
-                plt.title(title)
-                plt.xlabel(ylabel)
-                if save_to:
-                    plt.savefig(save_to + '/{:03d}.png'.format(i))
-                    plt.close()
-                # else:
-                    # plt.show()
-            if i < n_steps:
-                coords = salient_order[:, self.step * i:self.step * (i + 1)]
-                start.cpu().numpy().reshape(1, 3, self.hw)[
-                    0, :, coords] = finish.cpu().numpy().reshape(1, 3, self.hw)[0, :, coords]
+            # reveal_img_idx[p] = first step index at which pixel p equals `finish`.
+            # Pixel at position `pos` in the ordering is revealed after step pos//step.
+            positions = torch.arange(self.hw, device=device)
+            reveal_img_idx = torch.empty(self.hw, dtype=torch.long, device=device)
+            reveal_img_idx[order_flat] = positions // self.step + 1
+
+            scores = np.empty(n_steps + 1)
+            zero_cntr = 0
+            step_indices = torch.arange(n_steps + 1, device=device)
+
+            for b in range(0, n_steps + 1, batch_size):
+                idx = step_indices[b:b + batch_size]                 # (bs,)
+                # mask[j, p] = True -> pixel p is `finish` for step idx[j].
+                mask = reveal_img_idx.unsqueeze(0) <= idx.unsqueeze(1)  # (bs, hw)
+                imgs = torch.where(
+                    mask.unsqueeze(1),
+                    finish_flat.unsqueeze(0),
+                    start_flat.unsqueeze(0),
+                ).reshape(-1, 3, side, side)                          # (bs, 3, H, W)
+
+                feats = self.model(imgs)
+                sims = torch.nn.functional.cosine_similarity(q_feat, feats)  # (bs,)
+                zero_cntr += int((sims < 0).sum().item())
+                sims = torch.clamp(sims, 0.0, 1.0)
+                scores[b:b + idx.shape[0]] = sims.detach().cpu().numpy()
+
+            if verbose or save_to:
+                for i in range(n_steps + 1):
+                    if not (verbose == 2 or (verbose == 1 and i == n_steps) or save_to):
+                        continue
+                    cur = torch.where(
+                        (reveal_img_idx <= i).unsqueeze(0),
+                        finish_flat, start_flat,
+                    ).reshape(3, side, side)
+                    plt.figure(figsize=(10, 5))
+                    plt.subplot(121)
+                    plt.title('{} {:.1f}%, P={:.4f}'.format(
+                        ylabel, 100 * i / n_steps, scores[i]))
+                    plt.axis('off')
+                    tensor_imshow(cur.cpu())
+
+                    plt.subplot(122)
+                    plt.plot(np.arange(i + 1) / n_steps, scores[:i + 1])
+                    plt.xlim(-0.1, 1.1)
+                    plt.ylim(0, 1.05)
+                    plt.fill_between(np.arange(i + 1) / n_steps,
+                                     0, scores[:i + 1], alpha=0.4)
+                    plt.title(title)
+                    plt.xlabel(ylabel)
+                    if save_to:
+                        plt.savefig(save_to + '/{:03d}.png'.format(i))
+                        plt.close()
 
         return auc(scores), zero_cntr
 
