@@ -1317,10 +1317,21 @@ def main(args):
             else:
                 img_size = 224
 
-            if args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'medsiglip']:
+            # There is some problem with the img_size variable, if the img_size is 384 it seems when crop to 384 it will crop to 224, so we need to resize to 432 first then crop to 384. For further processing or testing just change it back to 384 
+
+            if args.model in ['convnextv2', 'convnextv2_sra', 'swinv2']:
                 test_transform = transforms.Compose([
                     transforms.Lambda(lambda img: img.convert('RGB')),
-                    transforms.Resize((img_size, img_size)),
+                    transforms.Resize(432),
+                    transforms.CenterCrop(img_size),
+                    transforms.ToTensor(),
+                    normalize
+                ])
+            elif args.model == 'medsiglip':
+                test_transform = transforms.Compose([
+                    transforms.Lambda(lambda img: img.convert('RGB')),
+                    transforms.Resize(512),
+                    transforms.CenterCrop(img_size),
                     transforms.ToTensor(),
                     normalize
                 ])
