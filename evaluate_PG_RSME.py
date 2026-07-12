@@ -1440,8 +1440,9 @@ def parse_args():
     parser.add_argument(
         "--sra_region_threshold",
         type=float,
-        default=0.35,
-        help="Normalized saliency threshold for SRA region hit. Lower values accept larger saliency regions.",
+        default=None,
+        help="Normalized saliency threshold enabling region-overlap hit for convnextv2_sra. "
+        "If unset (default), convnextv2_sra uses classic max-point Pointing Game (same as other models).",
     )
     parser.add_argument(
         "--sra_region_visual_threshold",
@@ -1569,7 +1570,7 @@ def main():
             sra_num_heads=args.sra_num_heads,
             sra_lam=args.sra_lam,
         )
-        use_region_hit = model_name == "convnextv2_sra" and args.sra_region_hit
+        use_region_hit = model_name == "convnextv2_sra" and args.sra_region_hit and args.sra_region_threshold is not None
         if model_name == "convnextv2_sra":
             region_threshold = args.sra_region_threshold
             region_bbox_padding_ratio = args.sra_region_bbox_padding_ratio

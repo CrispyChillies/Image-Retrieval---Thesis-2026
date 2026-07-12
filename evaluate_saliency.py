@@ -34,10 +34,20 @@ class InsDel():
     def __init__(self,
                  model,
                  device='cuda',
-                 input_size=224):
+                 input_size=224,
+                 num_steps=None,
+                 batch_size=64,
+                 fp16=False):
         self.model = model
         self.device = device
-        net_in_size = input_size
+        self.batch_size = batch_size
+        # Pixels revealed/removed per iteration. `num_steps` controls the
+        # insertion/deletion resolution: fewer steps -> far fewer model
+        # forward passes (near-linear speedup) at the cost of a coarser curve.
+        if num_steps is None:
+            step = input_size            # legacy default: input_size steps
+        else:
+            step = max(1, math.ceil(input_size * input_size / num_steps))
         klen = 51
         ksig = math.sqrt(50)
         kern = gkern(klen, ksig)
@@ -45,9 +55,9 @@ class InsDel():
         def blur(x): return nn.functional.conv2d(
             x, kern, padding=klen//2)
         self.insertion = CausalMetric(
-            self.model, 'ins', net_in_size, substrate_fn=blur, input_size=input_size)
+            self.model, 'ins', step, substrate_fn=blur, input_size=input_size, fp16=fp16)
         self.deletion = CausalMetric(
-            self.model, 'del', net_in_size, substrate_fn=torch.zeros_like, input_size=input_size)
+            self.model, 'del', step, substrate_fn=torch.zeros_like, input_size=input_size, fp16=fp16)
 
     def evaluate(self, new_sal, ret_image):
         """
@@ -66,9 +76,11 @@ class InsDel():
         score_del = 0
         zero_cnt_del = 0
         score_del, zero_cnt_ins = self.deletion.single_run(self.q_image.to(self.device),
-                                                           ret_image.to(self.device), new_sal, verbose=0)
+                                                           ret_image.to(self.device), new_sal, verbose=0,
+                                                           batch_size=self.batch_size)
         score_ins, zero_cnt_del = self.insertion.single_run(self.q_image.to(self.device),
-                                                            ret_image.to(self.device),  new_sal, verbose=0)
+                                                            ret_image.to(self.device),  new_sal, verbose=0,
+                                                            batch_size=self.batch_size)
         return score_del, score_ins, zero_cnt_ins, zero_cnt_del
 
     def load_query(self, query_image):
@@ -129,6 +141,9 @@ def main():
     parser.add_argument('--query_img_path', type=str, default='/data/brian.hu/COVID/data/test/', help='Path to query images')
     parser.add_argument('--csv_path', type=str, default='./ISIC-2017_Test_v2_Part3_GroundTruth_balanced.csv', help='Path to ISIC CSV file (only for isic dataset)')
     parser.add_argument('--device', type=str, default='cuda', choices=['cuda', 'cpu'], help='Device to use: cuda or cpu')
+    parser.add_argument('--num-steps', dest='num_steps', default=None, type=int, help='Insertion/deletion steps per image (fewer = faster; default: input_size, e.g. 384). Try 50 for a large speedup.')
+    parser.add_argument('--ins-del-batch-size', dest='ins_del_batch_size', default=64, type=int, help='Mini-batch size for insertion/deletion forward passes')
+    parser.add_argument('--fp16', action='store_true', help='Run insertion/deletion forward passes under fp16 autocast (CUDA only)')
     args = parser.parse_args()
 
     # Select device
@@ -289,7 +304,10 @@ def main():
         input_size = 384
     else:
         input_size = 224
-    get_insert_dele = InsDel(model, device, input_size=input_size)
+    get_insert_dele = InsDel(model, device, input_size=input_size,
+                             num_steps=args.num_steps,
+                             batch_size=args.ins_del_batch_size,
+                             fp16=args.fp16)
     for file_n in os.listdir(main_path):
         print(file_n)
         query_image_tensor = prep_image_(file_n)
