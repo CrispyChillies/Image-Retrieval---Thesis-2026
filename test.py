@@ -1071,18 +1071,21 @@ def evaluate(model, loader, device, args):
         samples = data[0].to(device)
         _labels = data[1].to(device)
         out = model(samples)
-        if isinstance(out, dict):
-            embedding = out["embedding"]
-        else:
-            embedding = out[0] if isinstance(out, tuple) else out
-        embeds.append(embedding.cpu())
+        # Reverted to the older behavior for easy rollback.
+        # if isinstance(out, dict):
+        #     embedding = out["embedding"]
+        # else:
+        #     embedding = out[0] if isinstance(out, tuple) else out
+        embeds.append(out)
         labels.append(_labels)
 
     embeds = torch.cat(embeds, dim=0)
     labels = torch.cat(labels, dim=0)
 
-    embeds = torch.nn.functional.normalize(embeds, p=2, dim=1)
-    dists = embeds @ embeds.t()
+    # Reverted to the older behavior for easy rollback.
+    # embeds = torch.nn.functional.normalize(embeds, p=2, dim=1)
+    # dists = embeds @ embeds.t()
+    dists = -torch.cdist(embeds, embeds)
     dists.fill_diagonal_(float('-inf'))
 
     # top-k accuracy (i.e. R@K)
