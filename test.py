@@ -1071,13 +1071,18 @@ def evaluate(model, loader, device, args):
         samples = data[0].to(device)
         _labels = data[1].to(device)
         out = model(samples)
-        embeds.append(out)
+        if isinstance(out, dict):
+            embedding = out["embedding"]
+        else:
+            embedding = out[0] if isinstance(out, tuple) else out
+        embeds.append(embedding.cpu())
         labels.append(_labels)
 
     embeds = torch.cat(embeds, dim=0)
     labels = torch.cat(labels, dim=0)
 
-    dists = -torch.cdist(embeds, embeds)
+    embeds = torch.nn.functional.normalize(embeds, p=2, dim=1)
+    dists = embeds @ embeds.t()
     dists.fill_diagonal_(float('-inf'))
 
     # top-k accuracy (i.e. R@K)
@@ -1319,6 +1324,9 @@ def main(args):
 
             # There is some problem with the img_size variable, if the img_size is 384 it seems when crop to 384 it will crop to 224, so we need to resize to 432 first then crop to 384. For further processing or testing just change it back to 384 
 
+            # Legacy version kept for easy rollback:
+            # if args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'medsiglip']:
+            #     test_transform = transforms.Compose([
             if args.model in ['convnextv2', 'convnextv2_sra', 'swinv2']:
                 test_transform = transforms.Compose([
                     transforms.Lambda(lambda img: img.convert('RGB')),
@@ -1330,6 +1338,9 @@ def main(args):
             elif args.model == 'medsiglip':
                 test_transform = transforms.Compose([
                     transforms.Lambda(lambda img: img.convert('RGB')),
+    
+                    # Legacy version kept for easy rollback:
+                    # dists = -torch.cdist(embeds, embeds)
                     transforms.Resize(512),
                     transforms.CenterCrop(img_size),
                     transforms.ToTensor(),
