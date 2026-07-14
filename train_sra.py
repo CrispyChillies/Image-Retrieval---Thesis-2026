@@ -259,7 +259,8 @@ def main(args):
                 print(f'Evaluating SRA epoch {epoch}...')
                 print(f'{"=" * 60}')
 
-            current_metric = evaluate(model, test_loader, device, rank=rank, world_size=world_size)
+            current_metrics = evaluate(model, test_loader, device, rank=rank, world_size=world_size)
+            current_metric = current_metrics.get("mAP", next(iter(current_metrics.values())))
 
             if rank == 0:
                 model_to_save = model.module if args.use_ddp else model
