@@ -1,164 +1,259 @@
-# CIMVR2026
+# Image Retrieval Thesis 2026
 
-...
-This code reposistory is built on "X-MIR: EXplainable Medical Image Retrieval"
+This repository contains the source code for our thesis on explainable medical image retrieval. It includes training and evaluation scripts for retrieval models, saliency and explainability utilities, and several dataset-specific workflows for chest X-ray and skin lesion experiments.
 
-This code was developed on Ubuntu 18.04 and has been confirmed to work with Pytorch 1.9.0. Please note that newer versions of Pytorch may introduce breaking changes. Other dependencies (such as scikit-learn) may also be required.
+## Authors
 
-## Embedding model for medical image retrieval
+- Nguyen Van Tu - nvtu22@clc.fitus.edu.vn
+- Pham Nguyen Hai Long - pnhlong22@clc.fitus.edu.vn
 
-This repository trains an embedding model using deep metric learning techniques (e.g. triplet loss), which can then be used for medical image retrieval on chest X-ray or skin lesion images. The main application is to aid clinicians in diagnosing different cases (e.g. COVID or melanoma). This repository makes use of several publicly available resources:
+## Thesis Contributions
 
-### Datasets
+This thesis focuses on two main contributions:
 
-[COVIDx chest X-ray dataset](https://github.com/lindawangg/COVID-Net/blob/master/docs/COVIDx.md)
+1. Spatial Residual Attention Module.
+2. Dual Branch Loss.
 
-Please see the instructions on the Github repo on how to download and prepare the data. Note that this dataset is not static but constantly changes due to new COVID images being added, so your model results may be slightly different than ours. The set of training and testing images we used can be found in `train_split.txt` and `test_COVIDx4.txt`, respectively.
+## Architecture Proposal
 
-[ISIC 2017 lesion classification dataset](https://challenge.isic-archive.com/data#2017)
+The figure below shows the proposed architecture used in this thesis.
 
-We use data from the ISIC 2017 skin lesion classification challenge (please see [this website](https://challenge.isic-archive.com/landing/2017) for more information). The set of training and testing images we used can be found in `ISIC-2017_Training_Part3_GroundTruth.csv` and `ISIC-2017_Test_v2_Part3_GroundTruth_balanced.csv`, respectively.
+![Architecture proposal](img/architecture.png)
 
-### Pretrained chest X-ray classification model
+## Table Of Contents
 
-[CheXNet](https://github.com/arnoweng/CheXNet)
+- [What This Repo Does](#what-this-repo-does)
+- [Authors](#authors)
+- [Thesis Contributions](#thesis-contributions)
+- [Architecture Proposal](#architecture-proposal)
+- [Repository Layout](#repository-layout)
+- [Setup](#setup)
+- [Quickstart](#quickstart)
+- [Data Preparation](#data-preparation)
+- [Train A Model](#train-a-model)
+- [Evaluate A Model](#evaluate-a-model)
+- [Saliency And Explainability](#saliency-and-explainability)
+- [Special Workflows](#special-workflows)
+- [Reproducibility Notes](#reproducibility-notes)
+- [Citation](#citation)
+- [Contact](#contact)
+- [Acknowledgment](#acknowledgment)
+- [Disclaimer](#disclaimer)
 
-The pretrained Pytorch model weights are provided as `model.pt` in this repository. Please see the Github repo for more information about how this model was trained. When working with chest X-rays, we initialize our similarity models with these pretrained weights.
+## What This Repo Does
 
-### Similarity learning using triplet loss
+- Trains embedding models for medical image retrieval with deep metric learning.
+- Evaluates trained models on COVID, ISIC, TBX11K, VinDr, NIH, and related datasets.
+- Generates similarity-based saliency maps and insertion/deletion metrics.
+- Supports model families such as DenseNet121, ResNet50, ConvNeXtV2, ConvNeXtV2-SRA, SwinV2, DINOv2, MedSigLIP, and ConceptCLIP.
 
-[Torchvision Reference](https://github.com/pytorch/vision/tree/master/references/similarity)
+## Repository Layout
 
-We made use of the above reference example when developing our own deep metric learning training and testing code.
+- `train.py`: main training entry point.
+- `test.py`: main evaluation entry point.
+- `compute_saliency.py`, `compute_saliency_convnextv2.py`, `medsiglip_saliency.py`: saliency generation scripts.
+- `evaluate_saliency.py`, `evaluate_test_dataset_milvus.py`, `test_retrieval_metrics.py`: evaluation helpers and metrics.
+- `generate_single_saliency.py`: generate a single saliency output for a query image or query/retrieved pair.
+- `concept_clip.py`, `xai_conceptclip.py`, `test_conceptclip.py`: ConceptCLIP experiments.
+- `milvus/`, `retrieval_analysis/`, `fusion_eval/`, `ChestMIR/`: retrieval and analysis utilities.
+- `anomaly/`: experimental anomaly-style training and evaluation.
 
-### Training
+## Setup
 
-To train a model, run `python train.py`. By default, trained models will be saved to `./checkpoints`. Please run `python train.py --h` to find out more about the possible command-line options.
+1. Create and activate a Python environment.
+2. Install dependencies:
 
-For example, to train a baseline chest X-ray similarity model:
-
-```python
- python train.py --dataset-dir '/data/brian.hu/COVID/data' --resume model.pt
+```bash
+pip install -r requirements.txt
 ```
 
-To train a skin lesion similarity model with an additional 256-dimension embedding layer:
+3. Prepare your dataset files and update the command-line paths in the examples below.
 
-```python
-python train.py --dataset 'isic' --dataset-dir '/data/brian.hu/isic/ISIC-2017_Training_Data' --train-image-list 'ISIC-2017_Training_Part3_GroundTruth.csv' --test-image-list 'ISIC-2017_Test_v2_Part3_GroundTruth_balanced.csv' --embedding-dim 256
+The repo was originally developed for GPU training. If you want reproducible results, keep your dataset split files fixed and reuse the same random seed, checkpoint, and embedding dimension across training and evaluation.
+
+### Prerequisites
+
+- Python 3.10 or newer is recommended.
+- A CUDA-capable GPU is recommended for training and saliency generation.
+- Install the Python packages listed in `requirements.txt`.
+- Some scripts expect local dataset manifests and pretrained checkpoints.
+
+## Quickstart
+
+If you only want the shortest path to a working experiment, start here.
+
+COVIDx training:
+
+```bash
+python train.py --dataset-dir /path/to/COVID/data --resume model.pth
 ```
 
-**Note**: We also provide experimental functionality to train an "anomaly" version of the model (using the `--anomaly` flag), where the anomaly class (e.g. COVID or melanoma) is not used during training. See the `./anomaly` directory for more information.
+COVIDx evaluation:
 
-### Evaluation
-
-To test a model, run `python test.py`. You must pass an appropriate model path for loading a trained model using the `--resume` flag. **Please make sure the embedding dimension matches that of the trained model using the `--embedding-dim` flag.** By default, model results are saved in the `./results` directory. Please run `python test.py --h` to see all possible command-line options.
-
-For example, to evaluate the COVID chest X-ray model trained above:
-
-```python
-python test.py --test-dataset-dir '/data/brian.hu/COVID/data/test' --resume 'covid_densenet121_seed_0_epoch_20_ckpt.pth'
+```bash
+python test.py --test-dataset-dir /path/to/COVID/data/test --resume /path/to/checkpoint.pth
 ```
 
-To evaluate the trained ISIC skin lesion model above:
+ISIC training with a custom embedding size:
 
-```python
-python test.py --dataset 'isic' --test-dataset-dir '/data/brian.hu/isic/ISIC-2017_Test_v2_Data' --test-image-list 'ISIC-2017_Test_v2_Part3_GroundTruth_balanced.csv' --resume 'isic_densenet121_embed_256_seed_0_epoch_20_ckpt.pth' --embedding-dim 256
+```bash
+python train.py \
+  --dataset isic \
+  --dataset-dir /path/to/ISIC-2017_Training_Data \
+  --train-image-list ISIC-2017_Training_Part3_GroundTruth.csv \
+  --test-image-list ISIC-2017_Test_v2_Part3_GroundTruth_balanced.csv \
+  --embedding-dim 256
 ```
 
-## Similarity-based saliency maps
+VinDr retrieval metrics:
 
-This repository also contains implementations of several similarity-based saliency map algorithms, which can be found in `explanations.py`. The code is loosely inspired by the [RISE](https://github.com/eclique/RISE) repository and an earlier version of the [pytorch-grad-cam](https://github.com/jacobgil/pytorch-grad-cam) repository. The methods below were used in the paper, but several other methods (not described below) are also implemented.
-
-### Implemented Methods
-
-[Explainability for Content-Based Image Retrieval (Dong et al., '19)](http://openaccess.thecvf.com/content_CVPRW_2019/html/Explainable_AI/Dong_Explainability_for_Content-Based_Image_Retrieval_CVPRW_2019_paper.html)  
-Black-box saliency method based on occlusion sensitivity
-
-[Visualizing Deep Similarity Networks (Stylianou et al., '19)](https://arxiv.org/abs/1901.00536) / [Visual Explanation for Deep Metric Learning (Zhu et al., '19)](https://arxiv.org/abs/1909.12977)  
-White-box saliency method based on pairwise similarity between features in the last convolutional layer
-
-[Learning Similarity Attention (Zheng et al., '19)](https://arxiv.org/abs/1911.07381)  
-White-box saliency method based on image triplets: anchor, positive, and negative examples
-
-### Generating Saliency Maps
-
-We also include code for producing saliency maps (including self-similarity saliency maps) which can then be evaluated using different metrics. Please see `compute_saliency.py --h` for more information. **This code currently makes use of Pytorch's [DataParallel](https://pytorch.org/docs/stable/generated/torch.nn.DataParallel.html), which means it will try to use all GPUs on your machine. To restrict it to only certain GPUs (e.g. GPU 0), you can use `CUDA_VISIBLE_DEVICES=0 python compute_saliency.py`.** Note that only the `sbsm` method has been optimized to make use of multiple GPUs for parallelized saliency map generation (which can be tuned using the `--eval-batch-size` parameter).
-
-### Evaluating Saliency Maps
-
-We also include code for computing the insertion and deletion metrics used to evaluate similarity-based saliency maps (see `evaluate_saliency.py`). At the moment, this requires manually changing the dataset type, paths to the model weights, saliency maps, and test images, and the output filenames in the code. The final results are stored in a `.json` file, where each key is the name of the query image, and the first set of results are the insertion scores and the second set of results are the deletion scores.
-
-# Testing on ConceptCLIP command
-
-```python
-python test_conceptclip.py \
-    --test-dataset-dir /data/brian.hu/COVID/data/test \
-    --test-image-list ./test_COVIDx4.txt \
-    --eval-batch-size 32 \
-    --save-dir ./results
+```bash
+python test_retrieval_metrics.py \
+  --dataset vindr \
+  --test-dataset-dir /path/to/VinDr/test \
+  --test-image-list vindr/image_labels_test.csv \
+  --model convnextv2_sra \
+  --resume model_sra.pth \
+  --k-values 1,5,10 \
+  --vindr-label-mode all
 ```
 
-Please address all questions to Brian Hu: brian.hu@kitware.com.
+## Data Preparation
 
-### Acknowledgment
+The scripts expect you to point to your own local dataset folders and split files.
 
-This material is based on research sponsored by the Air Force Research Laboratory and DARPA under Cooperative Agreement number N66001-17-2-4028. The U.S. Government is authorized to reproduce and distribute the code for governmental purposes notwithstanding any copyright notation thereon. Distribution Statement "A" (Approved for Public Release, Distribution Unlimited).
+| Dataset   | Typical manifest / list file                                                                   | Notes                                               |
+| --------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| COVIDx    | `train_split.txt`, `test_COVIDx4.txt`                                                          | Chest X-ray retrieval workflow                      |
+| ISIC 2017 | `ISIC-2017_Training_Part3_GroundTruth.csv`, `ISIC-2017_Test_v2_Part3_GroundTruth_balanced.csv` | Skin lesion retrieval workflow                      |
+| VinDr     | `vindr/image_labels_test.csv`                                                                  | Used in retrieval metrics and evaluation scripts    |
+| TBX11K    | dataset-specific list file                                                                     | Check the script help for the exact expected format |
+| NIH       | dataset-specific list file                                                                     | Check the script help for the exact expected format |
 
-### Disclaimer
+- COVIDx uses text manifests such as `train_split.txt` and `test_COVIDx4.txt`.
+- ISIC 2017 uses CSV manifests such as `ISIC-2017_Training_Part3_GroundTruth.csv` and `ISIC-2017_Test_v2_Part3_GroundTruth_balanced.csv`.
+- Other datasets such as VinDr, TBX11K, and NIH have their own dataset directories and manifest formats.
 
-The views and conclusions contained herein are those of the authors and should not be interpreted as necessarily representing the official policies or endorsements, either expressed or implied, of the Air Force Research Laboratory and DARPA or the U.S. Government.
+If a script mentions a dataset manifest, pass the correct local file path rather than relying on the defaults.
 
-# Command for running insertion and deletion xAi metrics
+## Train A Model
 
-```python
-python evaluate_test_dataset_milvus.py \
-  --data_dir /media/vhviet03/datasets/covidx-cxr/data/test \
-  --image_list test_COVIDx4.txt \
-  --model_type convnextv2 \
-  --model_weights model.pth \
-  --explainer sbsm \
-  --local_data_base_path /media/vhviet03/datasets/covidx-cxr/data/train \
-  --top_k 5 \
-  --output_dir ./covid_results \
-  --uri <your_zilliz_uri> \
-  --token <your_zilliz_token> \
+Run the main training script with `train.py`. Trained checkpoints are saved in `./checkpoints` by default.
+
+Basic usage:
+
+```bash
+python train.py --dataset-dir /path/to/data --resume model.pth
 ```
 
-# Command to run generating a single saliency map
+Example: train an ISIC retrieval model with a 256-dimensional embedding layer.
 
-```python
-python generate_single_saliency.py `
-  --query_image "path\to\query.png" `
-  --model_type convnextv2_sra `
-  --model_weights "path\to\sra_checkpoint.pth" `
-  --explainer simatt `
-  --output_path outputs\sra_saliency.npy `
+```bash
+python train.py \
+  --dataset isic \
+  --dataset-dir /path/to/ISIC-2017_Training_Data \
+  --train-image-list ISIC-2017_Training_Part3_GroundTruth.csv \
+  --test-image-list ISIC-2017_Test_v2_Part3_GroundTruth_balanced.csv \
+  --embedding-dim 256
+```
+
+Useful training flags include `--model`, `--embedding-dim`, `--loss-name`, `--epochs`, `--lr`, `--batch-size`, `--seed`, `--anomaly`, and `--freeze-backbone`.
+
+## Evaluate A Model
+
+Run `test.py` to evaluate a checkpoint. Results are saved in `./results` by default.
+
+Basic usage:
+
+```bash
+python test.py --test-dataset-dir /path/to/test_data --resume /path/to/checkpoint.pth
+```
+
+Example: evaluate an ISIC model with a matching embedding size.
+
+```bash
+python test.py \
+  --dataset isic \
+  --test-dataset-dir /path/to/ISIC-2017_Test_v2_Data \
+  --test-image-list ISIC-2017_Test_v2_Part3_GroundTruth_balanced.csv \
+  --resume /path/to/isic_checkpoint.pth \
+  --embedding-dim 256
+```
+
+Important: the embedding dimension used during evaluation must match the one used during training.
+
+## Saliency And Explainability
+
+The saliency code lives primarily in `explanations.py` and related scripts.
+
+- `compute_saliency.py` generates saliency maps, including self-similarity variants.
+- `evaluate_saliency.py` computes insertion and deletion metrics.
+- `generate_single_saliency.py` creates a single saliency output for a query image or query/retrieved pair.
+
+Example: generate a saliency map for one query image.
+
+```bash
+python generate_single_saliency.py \
+  --query_image /path/to/query.png \
+  --model_type convnextv2_sra \
+  --model_weights /path/to/checkpoint.pth \
+  --explainer simatt \
+  --output_path outputs/saliency.npy \
   --device cuda
 ```
 
-```python
-python generate_single_saliency.py `
-  --query_image "path\to\query.png" `
-  --retrieved_image "path\to\retrieved.png" `
-  --model_type convnextv2_sra `
-  --model_weights "path\to\sra_checkpoint.pth" `
-  --explainer simatt `
-  --output_path outputs\sra_pair_saliency.npy
+Example: generate a saliency map from a query/retrieved pair.
+
+```bash
+python generate_single_saliency.py \
+  --query_image /path/to/query.png \
+  --retrieved_image /path/to/retrieved.png \
+  --model_type convnextv2_sra \
+  --model_weights /path/to/checkpoint.pth \
+  --explainer simatt \
+  --output_path outputs/pair_saliency.npy
 ```
 
-# Run evaluate Vindr
+Note: some saliency scripts use `torch.nn.DataParallel`, so they may try to use all available GPUs. Set `CUDA_VISIBLE_DEVICES` if you want to restrict execution to a specific GPU.
 
-```python
-python test_retrieval_metrics.py `
-  --dataset vindr `
-  --test-dataset-dir "D:\VinDR-CXR-dataset\vinbigdata-chest-xray-original-png\test\test" `
-  --test-image-list vindr\image_labels_test.csv `
-  --model convnextv2_sra `
-  --resume model_sra.pth `
-  --k-values 1,5,10 `
-  --vindr-label-mode all
+## Special Workflows
 
+- ConceptCLIP experiments: `test_conceptclip.py`, `concept_clip.py`, `xai_conceptclip.py`.
+- Milvus-based retrieval experiments: `evaluate_test_dataset_milvus.py`, `milvus/`, `query_nih_zilliz.py`, `ingest_embeddings.py`.
+- Multi-dataset analysis: `retrieval_analysis/` and `fusion_eval/`.
+- Anomaly-style training: the `anomaly/` directory.
+
+If you use one of these workflows, check the script help output first, because several of them have dataset-specific flags and local-path assumptions.
+
+## Reproducibility Notes
+
+- Use the same dataset split files when comparing results.
+- Keep the same checkpoint and embedding dimension when re-running evaluation.
+- Set the random seed with `--seed` when training.
+- Record the exact command line, dataset paths, and model checkpoint for every experiment.
+
+## Outputs
+
+- Training checkpoints are written to `./checkpoints` unless you change `--save-dir`.
+- Evaluation outputs are written to `./results` unless you change `--save-dir`.
+- Saliency scripts often write `.npy`, `.json`, or image overlays depending on the command.
+- Milvus and retrieval-analysis workflows may create additional files under `./results`, `./covid_results`, or the output directory you pass on the command line.
+
+## Citation
+
+If you use this repository in your research, please cite the thesis, paper, or report that introduced this codebase, along with the specific datasets and pretrained models you relied on.
+
+Suggested citation text:
+
+```text
+Please cite the original explainable medical image retrieval work associated with this repository, together with the relevant dataset publications and any pretrained model sources used in your experiment.
 ```
 
+## Contact
 
-Push something
+Questions about this thesis and source code can be directed to the authors:
+
+- Nguyen Van Tu - nvtu22@clc.fitus.edu.vn
+- Pham Nguyen Hai Long - pnhlong22@clc.fitus.edu.vn
+
+For citation guidance, use the note above and adapt it to the exact paper, thesis, or report you are referencing.
