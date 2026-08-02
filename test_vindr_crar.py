@@ -545,28 +545,104 @@ def extract_patch_tokens(
     return result
 
 
-def concept_heatmap(
-    patch_tokens: torch.Tensor,
-    concept_embedding: torch.Tensor,
-    output_size: tuple[int, int],
-) -> np.ndarray:
-    """Upsample patch-to-text cosine alignment into a robust [0, 1] heatmap."""
-    alignment = patch_tokens @ F.normalize(concept_embedding.float(), dim=0)
-    # Robust percentile normalization suppresses isolated numerical outliers
-    # while retaining the spatial ordering of patch-text cosine alignment.
-    lower = torch.quantile(alignment, 0.05)
-    upper = torch.quantile(alignment, 0.95)
-    normalized = ((alignment - lower) / (upper - lower).clamp_min(1e-8)).clamp(0.0, 1.0)
-    grid_h, grid_w = patch_grid(len(normalized))
-    heatmap = normalized.reshape(1, 1, grid_h, grid_w)
+def anatomy_roi_mask(
+    output_size: tuple[int, int], edge_softness: float = 0.08
+) -> torch.Tensor:
+    """Soft union of neck/shoulder, thorax and upper-abdomen regions.
+
+    This geometric prior removes corners, borders and acquisition artifacts
+    without pretending to be a pathology or lung segmentation model.
+    """
     height, width = output_size
-    heatmap = F.interpolate(
-        heatmap,
-        size=(height, width),
-        mode="bicubic",
-        align_corners=False,
-    ).clamp(0.0, 1.0)
-    return heatmap[0, 0].numpy()
+    y = torch.linspace(0.0, 1.0, height).view(height, 1)
+    x = torch.linspace(0.0, 1.0, width).view(1, width)
+
+    def soft_ellipse(cx: float, cy: float, rx: float, ry: float) -> torch.Tensor:
+        distance = ((x - cx) / rx).square() + ((y - cy) / ry).square()
+        return torch.sigmoid((1.0 - distance) / edge_softness)
+
+    shoulder_neck = soft_ellipse(0.50, 0.19, 0.48, 0.20)
+    thorax = soft_ellipse(0.50, 0.50, 0.44, 0.40)
+    upper_abdomen = soft_ellipse(0.50, 0.87, 0.40, 0.24)
+    mask = torch.maximum(torch.maximum(shoulder_neck, thorax), upper_abdomen)
+
+    # Smoothly suppress the extreme top/bottom strips where burned-in markers,
+    # collimation borders and table hardware commonly appear.
+    vertical_window = torch.sigmoid((y - 0.025) / 0.015) * torch.sigmoid((0.99 - y) / 0.015)
+    return (mask * vertical_window).clamp(0.0, 1.0)
+
+
+def calibrated_concept_heatmaps(
+    patch_tokens: torch.Tensor,
+    all_concept_embeddings: torch.Tensor,
+    selected_concept_indices: Sequence[int],
+    output_size: tuple[int, int],
+    args: argparse.Namespace,
+) -> list[np.ndarray]:
+    """Build concept-specific maps calibrated jointly within the same image.
+
+    Independent min-max normalization makes weak/shared maps look equally
+    salient. Here we remove the response shared by other concepts at each patch,
+    robustly standardize across the concept dictionary, and use a softmax to
+    make concepts compete for spatial evidence before applying a sparse ROI.
+    """
+    concept_embeddings = F.normalize(all_concept_embeddings.float(), dim=1)
+    raw_alignment = patch_tokens.float() @ concept_embeddings.t()  # [patch, concept]
+    concept_count = raw_alignment.shape[1]
+
+    if args.heatmap_calibration == "competitive" and concept_count > 1:
+        other_mean = (
+            raw_alignment.sum(dim=1, keepdim=True) - raw_alignment
+        ) / (concept_count - 1)
+        specific_alignment = (
+            raw_alignment
+            - args.heatmap_common_mode_strength * other_mean
+        )
+
+        # Per-patch robust z-score across concepts: patches activated for nearly
+        # every label receive little discriminative evidence.
+        center = specific_alignment.median(dim=1, keepdim=True).values
+        absolute_deviation = (specific_alignment - center).abs()
+        scale = 1.4826 * absolute_deviation.median(dim=1, keepdim=True).values
+        discriminative = (specific_alignment - center) / scale.clamp_min(1e-4)
+        competition = torch.softmax(
+            discriminative / args.heatmap_calibration_temperature,
+            dim=1,
+        )
+        patch_scores = F.relu(discriminative) * competition
+    else:
+        # Diagnostic fallback matching the original independent cosine maps.
+        patch_scores = raw_alignment
+
+    height, width = output_size
+    roi = (
+        anatomy_roi_mask(output_size)
+        if not args.no_anatomy_mask
+        else torch.ones((height, width))
+    )
+    heatmaps: list[np.ndarray] = []
+    for concept_index in selected_concept_indices:
+        values = patch_scores[:, concept_index]
+        # Keep only the most discriminative patches. This is performed after
+        # cross-concept calibration, not independently on raw cosine values.
+        cutoff = torch.quantile(values, args.heatmap_activation_quantile)
+        values = F.relu(values - cutoff)
+        upper = torch.quantile(values, 0.99)
+        if float(upper) > 1e-8:
+            values = (values / upper).clamp(0.0, 1.0)
+        else:
+            values = torch.zeros_like(values)
+
+        grid_h, grid_w = patch_grid(len(values))
+        heatmap = values.reshape(1, 1, grid_h, grid_w)
+        heatmap = F.interpolate(
+            heatmap,
+            size=(height, width),
+            mode="bicubic",
+            align_corners=False,
+        ).clamp(0.0, 1.0)[0, 0]
+        heatmaps.append((heatmap * roi).clamp(0.0, 1.0).numpy())
+    return heatmaps
 
 
 def resolve_query_index(
@@ -670,19 +746,44 @@ def visualize_ranking(
         )
 
         # Only the two highest-confidence concepts receive spatial heatmaps.
+        selected_heatmap_indices = [int(index) for index in top_indices[:2]]
+        selected_heatmaps = calibrated_concept_heatmaps(
+            tokens,
+            prompt_embeddings,
+            selected_heatmap_indices,
+            output_size=(image.height, image.width),
+            args=args,
+        )
+        if len(selected_heatmaps) == 2:
+            overlap_numerator = np.minimum(
+                selected_heatmaps[0], selected_heatmaps[1]
+            ).sum()
+            overlap_denominator = np.maximum(
+                selected_heatmaps[0], selected_heatmaps[1]
+            ).sum()
+            soft_iou = float(overlap_numerator / max(overlap_denominator, 1e-8))
+            print(
+                f"[heatmap] {image_ids[index]} | "
+                f"{concepts[selected_heatmap_indices[0]]} vs "
+                f"{concepts[selected_heatmap_indices[1]]} | soft-IoU={soft_iou:.3f}"
+            )
         for heatmap_column in range(2):
             axis = axes[row, heatmap_column + 2]
             if heatmap_column >= len(top_indices):
                 axis.axis("off")
                 continue
             concept_index = int(top_indices[heatmap_column])
-            heatmap = concept_heatmap(
-                tokens,
-                prompt_embeddings[concept_index],
-                output_size=(image.height, image.width),
-            )
+            heatmap = selected_heatmaps[heatmap_column]
             axis.imshow(image, cmap="gray")
-            axis.imshow(heatmap, cmap="jet", alpha=args.heatmap_alpha, vmin=0.0, vmax=1.0)
+            # Dynamic alpha leaves low-score and out-of-ROI pixels untouched,
+            # rather than painting the entire radiograph blue.
+            axis.imshow(
+                heatmap,
+                cmap="jet",
+                alpha=args.heatmap_alpha * np.power(heatmap, 0.7),
+                vmin=0.0,
+                vmax=1.0,
+            )
             axis.set_title(
                 f"{concepts[concept_index]} ({float(confidence[concept_index]):.3f})",
                 fontsize=10,
@@ -876,6 +977,12 @@ def main(args: argparse.Namespace) -> None:
         raise ValueError("--visualize-top-concepts must be at least 2")
     if not 0.0 <= args.heatmap_alpha <= 1.0:
         raise ValueError("--heatmap-alpha must be in [0, 1]")
+    if args.heatmap_calibration_temperature <= 0.0:
+        raise ValueError("--heatmap-calibration-temperature must be greater than zero")
+    if not 0.0 <= args.heatmap_activation_quantile < 1.0:
+        raise ValueError("--heatmap-activation-quantile must be in [0, 1)")
+    if args.heatmap_common_mode_strength < 0.0:
+        raise ValueError("--heatmap-common-mode-strength must be non-negative")
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -1013,6 +1120,13 @@ def main(args: argparse.Namespace) -> None:
         "delta": delta,
         "visualizations": visualizations,
         "visualization_error": visualization_error,
+        "heatmap_configuration": {
+            "calibration": args.heatmap_calibration,
+            "common_mode_strength": args.heatmap_common_mode_strength,
+            "calibration_temperature": args.heatmap_calibration_temperature,
+            "activation_quantile": args.heatmap_activation_quantile,
+            "anatomy_mask": not args.no_anatomy_mask,
+        },
     }
     report_path = output_dir / "vindr_crar_report.json"
     with report_path.open("w", encoding="utf-8") as handle:
@@ -1093,6 +1207,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Concept confidences listed per image; heatmaps are always limited to top 2",
     )
     parser.add_argument("--heatmap-alpha", default=0.50, type=float)
+    parser.add_argument(
+        "--heatmap-calibration",
+        choices=["competitive", "independent"],
+        default="competitive",
+        help="Joint within-image concept calibration or raw independent cosine maps",
+    )
+    parser.add_argument("--heatmap-common-mode-strength", default=1.0, type=float)
+    parser.add_argument("--heatmap-calibration-temperature", default=0.75, type=float)
+    parser.add_argument(
+        "--heatmap-activation-quantile",
+        default=0.75,
+        type=float,
+        help="Suppress patch scores below this within-map quantile",
+    )
+    parser.add_argument(
+        "--no-anatomy-mask",
+        action="store_true",
+        help="Disable the soft neck/shoulder, thorax and upper-abdomen ROI",
+    )
     parser.add_argument("--visualize-dpi", default=150, type=int)
     parser.add_argument("--no-visualize", action="store_true")
     parser.add_argument(
