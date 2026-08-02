@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 from pathlib import Path
@@ -26,6 +27,10 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 import torchvision.transforms as transforms
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Subset
 from transformers import AutoModel, AutoProcessor, PreTrainedModel
@@ -465,6 +470,318 @@ def crar_rerank(
     return base_ranks, reranked, stats
 
 
+def crar_pair_scores(
+    query_index: int,
+    candidate_indices: torch.Tensor,
+    visual_embeddings: torch.Tensor,
+    concept_confidences: torch.Tensor,
+    concept_weights: torch.Tensor,
+    gamma: float,
+    threshold: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return Svis, Sconcept and Stotal for selected query-candidate pairs."""
+    visual_embeddings = F.normalize(visual_embeddings.float(), dim=1)
+    cosine = visual_embeddings[candidate_indices] @ visual_embeddings[query_index]
+    visual_score = (1.0 + cosine) / 2.0
+
+    query_active = concept_confidences[query_index] >= threshold
+    candidate_active = concept_confidences[candidate_indices] >= threshold
+    shared = candidate_active & query_active.unsqueeze(0)
+    alignment = torch.minimum(
+        concept_confidences[candidate_indices],
+        concept_confidences[query_index].unsqueeze(0),
+    )
+    weighted_shared = shared.float() * concept_weights.unsqueeze(0)
+    normalization = weighted_shared.sum(dim=1)
+    concept_score = (weighted_shared * alignment).sum(dim=1) / normalization.clamp_min(1e-12)
+    concept_score = torch.where(normalization > 0, concept_score, torch.zeros_like(concept_score))
+    total_score = (1.0 - gamma) * visual_score + gamma * concept_score
+    return visual_score, concept_score, total_score
+
+
+def patch_grid(token_count: int) -> tuple[int, int]:
+    """Find a near-square patch grid for the number of spatial tokens."""
+    height = int(math.sqrt(token_count))
+    while height > 1 and token_count % height != 0:
+        height -= 1
+    return height, token_count // height
+
+
+def remove_cls_token_if_present(tokens: torch.Tensor) -> torch.Tensor:
+    """Remove a leading CLS token only when N-1 forms a cleaner square grid."""
+    token_count = tokens.shape[0]
+    side = int(math.sqrt(token_count))
+    if side * side == token_count:
+        return tokens
+    side_without_cls = int(math.sqrt(token_count - 1))
+    if side_without_cls * side_without_cls == token_count - 1:
+        return tokens[1:]
+    # ConceptCLIP normally returns 27x27 tokens (or CLS + 27x27). For an
+    # unusual rectangular grid, prefer keeping all tokens over dropping data.
+    return tokens
+
+
+@torch.inference_mode()
+def extract_patch_tokens(
+    model,
+    processor,
+    images: Sequence[Image.Image],
+    device: torch.device,
+    use_amp: bool,
+) -> list[torch.Tensor]:
+    """Extract normalized ConceptCLIP spatial tokens for a small image list."""
+    result: list[torch.Tensor] = []
+    for image in images:
+        inputs = processor(images=[image], return_tensors="pt")
+        pixel_values = inputs["pixel_values"].to(device)
+        with torch.autocast(device_type=device.type, enabled=use_amp and device.type == "cuda"):
+            outputs = model(pixel_values=pixel_values)
+        try:
+            tokens = output_value(outputs, "image_token_features")
+        except KeyError:
+            tokens = output_value(outputs, "last_hidden_state")
+        tokens = remove_cls_token_if_present(tokens[0].float())
+        result.append(F.normalize(tokens, dim=-1).cpu())
+    return result
+
+
+def concept_heatmap(
+    patch_tokens: torch.Tensor,
+    concept_embedding: torch.Tensor,
+    output_size: tuple[int, int],
+) -> np.ndarray:
+    """Upsample patch-to-text cosine alignment into a robust [0, 1] heatmap."""
+    alignment = patch_tokens @ F.normalize(concept_embedding.float(), dim=0)
+    # Robust percentile normalization suppresses isolated numerical outliers
+    # while retaining the spatial ordering of patch-text cosine alignment.
+    lower = torch.quantile(alignment, 0.05)
+    upper = torch.quantile(alignment, 0.95)
+    normalized = ((alignment - lower) / (upper - lower).clamp_min(1e-8)).clamp(0.0, 1.0)
+    grid_h, grid_w = patch_grid(len(normalized))
+    heatmap = normalized.reshape(1, 1, grid_h, grid_w)
+    height, width = output_size
+    heatmap = F.interpolate(
+        heatmap,
+        size=(height, width),
+        mode="bicubic",
+        align_corners=False,
+    ).clamp(0.0, 1.0)
+    return heatmap[0, 0].numpy()
+
+
+def resolve_query_index(
+    image_ids: Sequence[str], query_id: str | None, query_index: int
+) -> int:
+    if query_id:
+        normalized = Path(query_id).stem
+        try:
+            return list(image_ids).index(normalized)
+        except ValueError as exc:
+            raise ValueError(f"--visualize-query-id was not found: {query_id}") from exc
+    if not 0 <= query_index < len(image_ids):
+        raise IndexError(
+            f"--visualize-query-index must be in [0, {len(image_ids) - 1}], got {query_index}"
+        )
+    return query_index
+
+
+def visualize_ranking(
+    *,
+    output_path: Path,
+    ranking_name: str,
+    query_index: int,
+    candidate_indices: torch.Tensor,
+    candidate_scores: torch.Tensor,
+    score_name: str,
+    image_ids: Sequence[str],
+    image_path_by_id: dict[str, Path],
+    concept_confidences: torch.Tensor,
+    concepts: Sequence[str],
+    positive_text: torch.Tensor,
+    conceptclip_model,
+    processor,
+    device: torch.device,
+    args: argparse.Namespace,
+) -> None:
+    """Create one baseline/CRAR explanation plot for a single query."""
+    row_indices = [query_index] + candidate_indices.tolist()
+    images: list[Image.Image] = []
+    for index in row_indices:
+        image_id = image_ids[index]
+        with Image.open(image_path_by_id[image_id]) as handle:
+            images.append(handle.convert("RGB"))
+    patch_tokens = extract_patch_tokens(
+        conceptclip_model,
+        processor,
+        images,
+        device,
+        use_amp=args.amp,
+    )
+
+    rows = len(row_indices)
+    figure, axes = plt.subplots(rows, 4, figsize=(18, 4.4 * rows), squeeze=False)
+    query_active = concept_confidences[query_index] >= args.concept_threshold
+    prompt_embeddings = positive_text.detach().cpu()
+
+    for row, (index, image, tokens) in enumerate(zip(row_indices, images, patch_tokens)):
+        confidence = concept_confidences[index]
+        top_count = min(args.visualize_top_concepts, len(concepts))
+        top_scores, top_indices = torch.topk(confidence, k=top_count)
+
+        image_axis = axes[row, 0]
+        image_axis.imshow(image, cmap="gray")
+        if row == 0:
+            title = f"Query: {image_ids[index][:16]}..."
+        else:
+            title = (
+                f"#{row}: {image_ids[index][:16]}...\n"
+                f"{score_name}: {float(candidate_scores[row - 1]):.4f}"
+            )
+        image_axis.set_title(title, fontsize=11, fontweight="bold")
+        image_axis.axis("off")
+
+        text_axis = axes[row, 1]
+        text_axis.axis("off")
+        heading = "Top detected concepts" if row == 0 else "Concepts"
+        lines = [heading + ":"]
+        for order, (concept_index, score) in enumerate(zip(top_indices, top_scores), start=1):
+            concept_index_int = int(concept_index)
+            shared_marker = "* " if row > 0 and bool(query_active[concept_index_int]) else ""
+            lines.append(
+                f"{shared_marker}{order}. {concepts[concept_index_int]} "
+                f"{{{float(score):.3f}}}"
+            )
+        face_color = "#FDE5C5" if row == 0 else "#DCE9FA"
+        edge_color = "#D99100" if row == 0 else "#6B93C9"
+        text_axis.text(
+            0.5,
+            0.5,
+            "\n".join(lines),
+            ha="center",
+            va="center",
+            fontsize=10,
+            fontweight="bold",
+            bbox={
+                "boxstyle": "round,pad=1.1",
+                "facecolor": face_color,
+                "edgecolor": edge_color,
+                "linewidth": 1.3,
+            },
+        )
+
+        # Only the two highest-confidence concepts receive spatial heatmaps.
+        for heatmap_column in range(2):
+            axis = axes[row, heatmap_column + 2]
+            if heatmap_column >= len(top_indices):
+                axis.axis("off")
+                continue
+            concept_index = int(top_indices[heatmap_column])
+            heatmap = concept_heatmap(
+                tokens,
+                prompt_embeddings[concept_index],
+                output_size=(image.height, image.width),
+            )
+            axis.imshow(image, cmap="gray")
+            axis.imshow(heatmap, cmap="jet", alpha=args.heatmap_alpha, vmin=0.0, vmax=1.0)
+            axis.set_title(
+                f"{concepts[concept_index]} ({float(confidence[concept_index]):.3f})",
+                fontsize=10,
+                fontweight="bold",
+            )
+            axis.axis("off")
+
+    figure.suptitle(
+        f"{ranking_name} | Query {image_ids[query_index]}",
+        fontsize=15,
+        fontweight="bold",
+    )
+    figure.tight_layout(rect=(0, 0, 1, 0.98))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_path, dpi=args.visualize_dpi, bbox_inches="tight")
+    plt.close(figure)
+    print(f"Saved visualization: {output_path}")
+
+
+def create_query_visualizations(
+    *,
+    base_ranks: torch.Tensor,
+    crar_ranks: torch.Tensor,
+    visual_embeddings: torch.Tensor,
+    concept_confidences: torch.Tensor,
+    concept_weights: torch.Tensor,
+    concepts: Sequence[str],
+    positive_text: torch.Tensor,
+    image_ids: Sequence[str],
+    image_path_by_id: dict[str, Path],
+    conceptclip_model,
+    processor,
+    device: torch.device,
+    output_dir: Path,
+    args: argparse.Namespace,
+) -> dict[str, str]:
+    query_index = resolve_query_index(
+        image_ids, args.visualize_query_id, args.visualize_query_index
+    )
+    top_k = min(args.visualize_top_k, len(image_ids) - 1)
+    baseline_candidates = base_ranks[query_index, :top_k]
+    crar_candidates = crar_ranks[query_index, :top_k]
+
+    baseline_svis, _, _ = crar_pair_scores(
+        query_index,
+        baseline_candidates,
+        visual_embeddings,
+        concept_confidences,
+        concept_weights,
+        args.gamma,
+        args.concept_threshold,
+    )
+    _, _, crar_total = crar_pair_scores(
+        query_index,
+        crar_candidates,
+        visual_embeddings,
+        concept_confidences,
+        concept_weights,
+        args.gamma,
+        args.concept_threshold,
+    )
+
+    safe_query_id = "".join(
+        character if character.isalnum() or character in "-_" else "_"
+        for character in image_ids[query_index]
+    )
+    baseline_path = output_dir / f"query_{safe_query_id}_baseline.png"
+    crar_path = output_dir / f"query_{safe_query_id}_crar.png"
+    common = {
+        "query_index": query_index,
+        "image_ids": image_ids,
+        "image_path_by_id": image_path_by_id,
+        "concept_confidences": concept_confidences,
+        "concepts": concepts,
+        "positive_text": positive_text,
+        "conceptclip_model": conceptclip_model,
+        "processor": processor,
+        "device": device,
+        "args": args,
+    }
+    visualize_ranking(
+        output_path=baseline_path,
+        ranking_name="Baseline ConvNeXtV2-SRA",
+        candidate_indices=baseline_candidates,
+        candidate_scores=baseline_svis,
+        score_name="Svis",
+        **common,
+    )
+    visualize_ranking(
+        output_path=crar_path,
+        ranking_name="After CRAR reranking",
+        candidate_indices=crar_candidates,
+        candidate_scores=crar_total,
+        score_name="Stotal",
+        **common,
+    )
+    return {"baseline": str(baseline_path), "crar": str(crar_path)}
+
+
 def retrieval_metrics(
     ranks: torch.Tensor,
     labels: torch.Tensor,
@@ -553,6 +870,12 @@ def main(args: argparse.Namespace) -> None:
         raise ValueError("--concept-threshold must be in [0, 1]")
     if args.rerank_top_k < 1:
         raise ValueError("--rerank-top-k must be at least 1")
+    if args.visualize_top_k < 1:
+        raise ValueError("--visualize-top-k must be at least 1")
+    if args.visualize_top_concepts < 2:
+        raise ValueError("--visualize-top-concepts must be at least 2")
+    if not 0.0 <= args.heatmap_alpha <= 1.0:
+        raise ValueError("--heatmap-alpha must be in [0, 1]")
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -579,6 +902,7 @@ def main(args: argparse.Namespace) -> None:
     # keeps concept prompts and evaluation labels independently configurable.
     dataset_columns = list(dict.fromkeys(concepts + evaluation_labels))
     dataset = VinDrCRARDataset(args.test_dir, args.labels_csv, transform, dataset_columns)
+    image_path_by_id = dict(zip(dataset.image_ids, dataset.image_paths))
     if args.max_samples is not None and 1 < args.max_samples < len(dataset):
         dataset = Subset(dataset, range(args.max_samples))
     if len(dataset) < 2:
@@ -630,6 +954,40 @@ def main(args: argparse.Namespace) -> None:
     reranked = retrieval_metrics(crar_ranks, labels, thresholds, k_values)
     print_comparison(baseline, reranked)
 
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    visualizations: dict[str, str] = {}
+    visualization_error: str | None = None
+    pending_visualization_error: Exception | None = None
+    # The base model is no longer needed. Free it before requesting patch tokens
+    # from the much larger ConceptCLIP model for visualization.
+    del base_model
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    if not args.no_visualize:
+        try:
+            visualizations = create_query_visualizations(
+                base_ranks=base_ranks,
+                crar_ranks=crar_ranks,
+                visual_embeddings=base_embeddings,
+                concept_confidences=confidences,
+                concept_weights=weights,
+                concepts=concepts,
+                positive_text=positive_text,
+                image_ids=image_ids,
+                image_path_by_id=image_path_by_id,
+                conceptclip_model=conceptclip_model,
+                processor=processor,
+                device=device,
+                output_dir=output_dir,
+                args=args,
+            )
+        except Exception as exc:  # Preserve the expensive evaluation outputs.
+            visualization_error = f"{type(exc).__name__}: {exc}"
+            pending_visualization_error = exc
+            print(f"[visualization warning] {visualization_error}")
+            print("Metrics and rankings will still be saved.")
+
     delta = {
         key: {"mAP": reranked[key]["mAP"] - baseline[key]["mAP"]}
         for key in baseline
@@ -653,9 +1011,9 @@ def main(args: argparse.Namespace) -> None:
         "baseline": baseline,
         "after_crar": reranked,
         "delta": delta,
+        "visualizations": visualizations,
+        "visualization_error": visualization_error,
     }
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
     report_path = output_dir / "vindr_crar_report.json"
     with report_path.open("w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2, ensure_ascii=False)
@@ -672,6 +1030,8 @@ def main(args: argparse.Namespace) -> None:
     )
     print(f"\nSaved report: {report_path}")
     print(f"Saved rankings: {output_dir / 'vindr_crar_rankings.npz'}")
+    if pending_visualization_error is not None and args.strict_visualize:
+        raise RuntimeError("Visualization failed; evaluation outputs were saved") from pending_visualization_error
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -709,6 +1069,37 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", default=42, type=int)
     parser.add_argument("--print-freq", default=10, type=int)
     parser.add_argument("--output-dir", default="./results/vindr_crar")
+    parser.add_argument(
+        "--visualize-query-id",
+        default=None,
+        help="VinDr image_id to visualize; overrides --visualize-query-index",
+    )
+    parser.add_argument(
+        "--visualize-query-index",
+        default=0,
+        type=int,
+        help="Zero-based query index used when --visualize-query-id is omitted",
+    )
+    parser.add_argument(
+        "--visualize-top-k",
+        default=2,
+        type=int,
+        help="Number of retrieved candidates shown in each baseline/CRAR plot",
+    )
+    parser.add_argument(
+        "--visualize-top-concepts",
+        default=5,
+        type=int,
+        help="Concept confidences listed per image; heatmaps are always limited to top 2",
+    )
+    parser.add_argument("--heatmap-alpha", default=0.50, type=float)
+    parser.add_argument("--visualize-dpi", default=150, type=int)
+    parser.add_argument("--no-visualize", action="store_true")
+    parser.add_argument(
+        "--strict-visualize",
+        action="store_true",
+        help="Return a non-zero exit status if plotting fails (metrics are still saved)",
+    )
     return parser
 
 
