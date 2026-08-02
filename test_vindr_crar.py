@@ -28,7 +28,7 @@ import torch.nn.functional as F
 import torchvision.transforms as transforms
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Subset
-from transformers import AutoModel, AutoProcessor
+from transformers import AutoModel, AutoProcessor, PreTrainedModel
 
 from model import ConvNeXtV2_SRA
 
@@ -262,8 +262,36 @@ def load_base_model(args: argparse.Namespace, device: torch.device) -> ConvNeXtV
 
 
 def load_conceptclip(args: argparse.Namespace, device: torch.device):
-    processor = AutoProcessor.from_pretrained(args.conceptclip_model, trust_remote_code=True)
-    model = AutoModel.from_pretrained(args.conceptclip_model, trust_remote_code=True)
+    processor = AutoProcessor.from_pretrained(
+        args.conceptclip_model,
+        trust_remote_code=True,
+        revision=args.conceptclip_revision,
+        # Transformers recently changed SigLIP to the fast processor by default.
+        # Keep the preprocessing used by the released ConceptCLIP checkpoint.
+        use_fast=False,
+    )
+
+    # Some recent Transformers releases assume every custom PreTrainedModel ran
+    # the new post_init(), which creates all_tied_weights_keys. The released
+    # ConceptCLIP remote class predates that API and does not create the field.
+    # Add an empty per-instance mapping before Transformers finalizes loading.
+    original_mark_tied = getattr(PreTrainedModel, "mark_tied_weights_as_initialized", None)
+    if original_mark_tied is not None:
+        def mark_tied_weights_compat(model_self, *method_args, **method_kwargs):
+            if not hasattr(model_self, "all_tied_weights_keys"):
+                model_self.all_tied_weights_keys = {}
+            return original_mark_tied(model_self, *method_args, **method_kwargs)
+
+        PreTrainedModel.mark_tied_weights_as_initialized = mark_tied_weights_compat
+    try:
+        model = AutoModel.from_pretrained(
+            args.conceptclip_model,
+            trust_remote_code=True,
+            revision=args.conceptclip_revision,
+        )
+    finally:
+        if original_mark_tied is not None:
+            PreTrainedModel.mark_tied_weights_as_initialized = original_mark_tied
     if args.conceptclip_checkpoint:
         path = Path(args.conceptclip_checkpoint)
         if not path.is_file():
@@ -612,6 +640,7 @@ def main(args: argparse.Namespace) -> None:
         "base_model": "convnextv2_sra",
         "base_checkpoint": str(Path(args.base_checkpoint)),
         "conceptclip_model": args.conceptclip_model,
+        "conceptclip_revision": args.conceptclip_revision,
         "conceptclip_checkpoint": args.conceptclip_checkpoint,
         "concept_space": args.concept_space,
         "evaluation_label_space": args.evaluation_label_space,
@@ -656,6 +685,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sra-num-heads", default=8, type=int)
     parser.add_argument("--sra-lam", default=0.1, type=float)
     parser.add_argument("--conceptclip-model", default="JerrryNie/ConceptCLIP")
+    parser.add_argument(
+        "--conceptclip-revision",
+        default="8120d7f1e07b590a7dce35bd2a01126b0e42b6c3",
+        help="Pinned Hugging Face revision for reproducible remote code and weights",
+    )
     parser.add_argument("--conceptclip-checkpoint", default=None, help="Optional fine-tuned ConceptCLIP checkpoint")
     parser.add_argument("--concept-space", choices=["all", "lesions", "diseases"], default="all")
     parser.add_argument("--evaluation-label-space", choices=["all", "lesions", "diseases"], default="all")
