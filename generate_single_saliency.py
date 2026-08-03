@@ -101,8 +101,9 @@ def main():
     print(f"\nSetting up {args.explainer} explainer...")
     if args.explainer == 'simatt':
         if args.model_type == 'densenet121':
-            # Hook into the densenet121 features module where relu is located
-            explainer = SimAtt(model, model.densenet121[0], target_layers=["relu"])
+            # Use forward hook on the DenseNet features module (target_layers=None
+            # triggers hook-based extraction, which works for nested submodules).
+            explainer = SimAtt(model, model.densenet121[0], target_layers=None)
         elif args.model_type == 'resnet50':
             # Hook the full layer4 block to keep a meaningful spatial map.
             target_layer = model.resnet50[7]
