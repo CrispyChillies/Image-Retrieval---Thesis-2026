@@ -115,8 +115,9 @@ def main():
     
     elif args.explainer == 'simcam':
         if args.model_type == 'densenet121':
-            model_seq = nn.Sequential(*list(model.children())[0], *list(model.children())[1:])
-            explainer = SimCAM(model_seq, model_seq[0], fc=model_seq[2] if args.embedding_dim else None)
+            # Use the full model (its forward() handles flatten correctly).
+            # Hook into the features module for spatial maps; fc projects per-token.
+            explainer = SimCAM(model, model.densenet121[0], fc=model.fc if args.embedding_dim else None)
         elif args.model_type in ['convnextv2', 'convnextv2_sra']:
             target_layer = model.convnext.stages[-1]
             explainer = SimCAM(model, target_layer, fc=None)
