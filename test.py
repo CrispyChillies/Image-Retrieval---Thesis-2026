@@ -36,21 +36,40 @@ except ImportError:
 
 
 def retrieval_accuracy(output, target, topk=(1,)):
-    """Computes the accuracy over the k top predictions for the specified values of k"""
+    """Computes Recall@K (Definition 2): for each query, the fraction of ALL relevant
+    images in the dataset that appear in the top-K results, averaged over all queries.
+
+        Recall@K = (1/N) * sum_i ( |relevant in top-K_i| / |total relevant_i| )
+    """
     with torch.no_grad():
         maxk = max(topk)
-        batch_size = target.size(0)
+        target = target.cpu()
 
+        # Top-maxk retrieved indices for each query: [N, maxk]
         _, pred = output.topk(maxk, 1, True, True)
         pred = pred.cpu()
-        target = target.cpu()
-        pred = target[pred].t()
-        correct = pred.eq(target[None])
+
+        # Labels of top-maxk retrieved images: [N, maxk]
+        retrieved_labels = target[pred]
+
+        # Total relevant images per query (same label, excluding self): [N]
+        same_label = target.unsqueeze(0).eq(target.unsqueeze(1))  # [N, N]
+        same_label.fill_diagonal_(False)
+        relevant_counts = same_label.sum(dim=1).float()  # [N]
 
         res = []
         for k in topk:
-            correct_k = correct[:k].any(dim=0).sum(dtype=torch.float32)
-            res.append(correct_k * (100.0 / batch_size))
+            # Number of relevant images found in top-k for each query: [N]
+            matches = retrieved_labels[:, :k].eq(target.unsqueeze(1))  # [N, k]
+            num_matches = matches.sum(dim=1).float()  # [N]
+
+            # Recall@K per query; skip queries with no relevant images
+            recall_per_query = torch.where(
+                relevant_counts > 0,
+                num_matches / relevant_counts,
+                torch.zeros_like(num_matches)
+            )
+            res.append(recall_per_query.mean() * 100.0)
     return res
 
 
@@ -1034,21 +1053,19 @@ def evaluate_multilabels(model, loader, device, args):
             # Lấy nhãn của top K ảnh được truy vấn
             top_k_labels = labels_np[ranks_np[i, :k]]
             
-            # Trong đa nhãn:
-            # - Precision@K: Tỉ lệ ảnh trong top K có ít nhất 1 nhãn trùng với Query
-            # - Recall@K: Khả năng tìm thấy ít nhất 1 ảnh trùng nhãn trong top K (như code cũ)
-            
             # Kiểm tra từng ảnh trong top K xem có "liên quan" không (chung ít nhất 1 nhãn)
-            # (top_k_labels * query_label).sum(axis=1) > 0 trả về mảng Boolean [k]
             matches = (top_k_labels * query_label).sum(axis=1) > 0
             num_matches = np.sum(matches)
             
-            # Precision@K cho query i
+            # Precision@K: fraction of top-K that are relevant
             total_precision += (num_matches / k)
             
-            # Recall@K cho query i: 1 nếu có ít nhất 1 match, 0 nếu không
-            if num_matches > 0:
-                total_recall += 1
+            # Recall@K: fraction of ALL relevant images found in top-K
+            all_relevant = (labels_np * query_label).sum(axis=1) > 0
+            all_relevant[i] = False  # exclude self
+            total_relevant = np.sum(all_relevant)
+            if total_relevant > 0:
+                total_recall += num_matches / total_relevant
 
         avg_precision = (total_precision / num_queries) * 100
         avg_recall = (total_recall / num_queries) * 100
