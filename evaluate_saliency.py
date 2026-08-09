@@ -19,7 +19,7 @@ def get_transforms_medsiglip(img_size=224):
         transforms.RandomResizedCrop(img_size, scale=(0.9, 1.0), interpolation=InterpolationMode.BICUBIC),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.ToTensor(),
-        normalize,
+        normalize,  
     ])
     val_transform = transforms.Compose([
         transforms.Resize(img_size + 32, interpolation=InterpolationMode.BICUBIC),
