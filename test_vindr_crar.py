@@ -15,6 +15,7 @@ evaluation and never by CRAR.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 import os
@@ -586,7 +587,9 @@ def calibrated_concept_heatmaps(
     robustly standardize across the concept dictionary, and use a softmax to
     make concepts compete for spatial evidence before applying a sparse ROI.
     """
-    concept_embeddings = F.normalize(all_concept_embeddings.float(), dim=1)
+    # Patch tokens are deliberately returned on CPU to keep visualization and
+    # full-dataset PGHit memory bounded after the 2.17 GB model forward pass.
+    concept_embeddings = F.normalize(all_concept_embeddings.detach().float().cpu(), dim=1)
     raw_alignment = patch_tokens.float() @ concept_embeddings.t()  # [patch, concept]
     concept_count = raw_alignment.shape[1]
 
@@ -643,6 +646,239 @@ def calibrated_concept_heatmaps(
         ).clamp(0.0, 1.0)[0, 0]
         heatmaps.append((heatmap * roi).clamp(0.0, 1.0).numpy())
     return heatmaps
+
+
+def canonical_concept_name(name: str, concepts: Sequence[str]) -> str | None:
+    """Map harmless CSV spelling/case variants to the configured concept name."""
+    normalized = " ".join(str(name).strip().split()).casefold()
+    aliases = {
+        "other disease": "other diseases",
+        "lung opacity": "lung opacity",
+        "nodule/mass": "nodule/mass",
+    }
+    normalized = aliases.get(normalized, normalized)
+    return next(
+        (concept for concept in concepts if concept.casefold() == normalized),
+        None,
+    )
+
+
+def load_vindr_bboxes(
+    csv_path: str | os.PathLike[str],
+    concepts: Sequence[str],
+) -> tuple[dict[str, dict[str, list[tuple[float, float, float, float]]]], dict[str, int]]:
+    """Load VinDr boxes as image -> concept -> [(xmin, ymin, xmax, ymax)]."""
+    path = Path(csv_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"VinDr bbox CSV does not exist: {path}")
+
+    grouped: dict[str, dict[str, list[tuple[float, float, float, float]]]] = {}
+    skipped_classes: dict[str, int] = {}
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        normalized_columns = {
+            str(column).strip().lstrip("\ufeff").casefold(): column
+            for column in (reader.fieldnames or [])
+        }
+        required = ("image_id", "class_name", "x_min", "y_min", "x_max", "y_max")
+        missing = [column for column in required if column not in normalized_columns]
+        if missing:
+            raise ValueError(
+                "VinDr bbox CSV must contain image_id,class_name,x_min,y_min,x_max,y_max; "
+                f"missing {missing}"
+            )
+
+        keys = {column: normalized_columns[column] for column in required}
+        for row_number, row in enumerate(reader, start=2):
+            image_id = str(row.get(keys["image_id"], "")).strip()
+            raw_class = str(row.get(keys["class_name"], "")).strip()
+            if not image_id or not raw_class:
+                continue
+            concept = canonical_concept_name(raw_class, concepts)
+            if concept is None:
+                skipped_classes[raw_class] = skipped_classes.get(raw_class, 0) + 1
+                continue
+            try:
+                box = tuple(
+                    float(row[keys[column]])
+                    for column in ("x_min", "y_min", "x_max", "y_max")
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid bbox coordinates on CSV row {row_number}") from exc
+            if not all(math.isfinite(value) for value in box):
+                raise ValueError(f"Non-finite bbox coordinates on CSV row {row_number}")
+            x_min, y_min, x_max, y_max = box
+            if x_max <= x_min or y_max <= y_min:
+                continue
+            grouped.setdefault(image_id, {}).setdefault(concept, []).append(box)
+    return grouped, skipped_classes
+
+
+def pointing_game_peak(
+    heatmap: np.ndarray,
+    image_width: int,
+    image_height: int,
+) -> tuple[float, float, int, int, float]:
+    """Return the max-saliency pixel centre in original-image coordinates."""
+    saliency = np.nan_to_num(np.asarray(heatmap, dtype=np.float32))
+    if saliency.ndim != 2 or saliency.size == 0:
+        raise ValueError(f"PGHit expects a non-empty 2D heatmap, got {saliency.shape}")
+    map_height, map_width = saliency.shape
+    y_map, x_map = np.unravel_index(int(np.argmax(saliency)), saliency.shape)
+    x_image = (float(x_map) + 0.5) * float(image_width) / float(map_width)
+    y_image = (float(y_map) + 0.5) * float(image_height) / float(map_height)
+    return x_image, y_image, int(x_map), int(y_map), float(saliency[y_map, x_map])
+
+
+def scale_and_clip_boxes(
+    boxes: Sequence[tuple[float, float, float, float]],
+    image_width: int,
+    image_height: int,
+    coordinate_size: float | None,
+) -> list[tuple[float, float, float, float]]:
+    """Convert fixed-square bbox coordinates to image space and clip safely."""
+    scale_x = float(image_width) / coordinate_size if coordinate_size else 1.0
+    scale_y = float(image_height) / coordinate_size if coordinate_size else 1.0
+    result = []
+    for x_min, y_min, x_max, y_max in boxes:
+        scaled = (
+            max(0.0, min(float(image_width), x_min * scale_x)),
+            max(0.0, min(float(image_height), y_min * scale_y)),
+            max(0.0, min(float(image_width), x_max * scale_x)),
+            max(0.0, min(float(image_height), y_max * scale_y)),
+        )
+        if scaled[2] > scaled[0] and scaled[3] > scaled[1]:
+            result.append(scaled)
+    return result
+
+
+def summarize_pghit(rows: Sequence[dict[str, Any]], variant: str) -> dict[str, Any]:
+    selected = [row for row in rows if row["variant"] == variant]
+    per_concept: dict[str, dict[str, Any]] = {}
+    for concept in sorted({row["class_name"] for row in selected}):
+        concept_rows = [row for row in selected if row["class_name"] == concept]
+        hits = sum(bool(row["pg_hit"]) for row in concept_rows)
+        per_concept[concept] = {
+            "samples": len(concept_rows),
+            "hits": hits,
+            "pg_hit_rate": hits / len(concept_rows),
+            "empty_heatmaps": sum(bool(row["empty_heatmap"]) for row in concept_rows),
+        }
+    hits = sum(bool(row["pg_hit"]) for row in selected)
+    rates = [item["pg_hit_rate"] for item in per_concept.values()]
+    return {
+        "samples": len(selected),
+        "hits": hits,
+        "pg_hit_rate": hits / len(selected) if selected else None,
+        "macro_pg_hit_rate": float(np.mean(rates)) if rates else None,
+        "empty_heatmaps": sum(bool(row["empty_heatmap"]) for row in selected),
+        "per_concept": per_concept,
+    }
+
+
+def evaluate_vindr_pghit(
+    bbox_csv: str | os.PathLike[str],
+    image_ids: Sequence[str],
+    image_path_by_id: dict[str, Path],
+    concepts: Sequence[str],
+    positive_text: torch.Tensor,
+    conceptclip_model,
+    processor,
+    device: torch.device,
+    args: argparse.Namespace,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Evaluate class-aware PGHit before and after within-image calibration."""
+    grouped, skipped_classes = load_vindr_bboxes(bbox_csv, concepts)
+    evaluated_ids = set(image_ids)
+    eligible_ids = [image_id for image_id in image_ids if image_id in grouped]
+    if args.pghit_max_images is not None:
+        eligible_ids = eligible_ids[: args.pghit_max_images]
+    if not eligible_ids:
+        raise ValueError(
+            "No bbox image_id matches the evaluated VinDr images and configured concept space"
+        )
+
+    independent_args = argparse.Namespace(**vars(args))
+    independent_args.heatmap_calibration = "independent"
+    calibrated_args = argparse.Namespace(**vars(args))
+    calibrated_args.heatmap_calibration = "competitive"
+    concept_to_index = {name: index for index, name in enumerate(concepts)}
+    concept_text = positive_text.detach().float().cpu()
+    rows: list[dict[str, Any]] = []
+
+    for position, image_id in enumerate(eligible_ids, start=1):
+        image_path = image_path_by_id[image_id]
+        with Image.open(image_path) as handle:
+            image = handle.convert("RGB")
+        width, height = image.size
+        annotated = grouped[image_id]
+        selected_concepts = [name for name in concepts if name in annotated]
+        selected_indices = [concept_to_index[name] for name in selected_concepts]
+        patch_tokens = extract_patch_tokens(
+            conceptclip_model, processor, [image], device, args.amp
+        )[0]
+
+        variants = {
+            "before_calibration": calibrated_concept_heatmaps(
+                patch_tokens, concept_text, selected_indices, (height, width), independent_args
+            ),
+            "after_calibration": calibrated_concept_heatmaps(
+                patch_tokens, concept_text, selected_indices, (height, width), calibrated_args
+            ),
+        }
+        for variant, heatmaps in variants.items():
+            for concept, heatmap in zip(selected_concepts, heatmaps):
+                boxes = scale_and_clip_boxes(
+                    annotated[concept], width, height, args.bbox_coord_size
+                )
+                if not boxes:
+                    continue
+                peak_x, peak_y, peak_map_x, peak_map_y, peak_value = pointing_game_peak(
+                    heatmap, width, height
+                )
+                hit = any(
+                    x_min <= peak_x <= x_max and y_min <= peak_y <= y_max
+                    for x_min, y_min, x_max, y_max in boxes
+                )
+                rows.append(
+                    {
+                        "variant": variant,
+                        "image_id": image_id,
+                        "class_name": concept,
+                        "pg_hit": bool(hit),
+                        "peak_x": peak_x,
+                        "peak_y": peak_y,
+                        "peak_map_x": peak_map_x,
+                        "peak_map_y": peak_map_y,
+                        "peak_saliency": peak_value,
+                        "empty_heatmap": bool(float(np.max(heatmap)) <= 1e-12),
+                        "image_width": width,
+                        "image_height": height,
+                        "bbox_count": len(boxes),
+                        "bboxes": json.dumps(boxes),
+                    }
+                )
+        if position % args.pghit_print_freq == 0 or position == len(eligible_ids):
+            print(f"[PGHit] {position}/{len(eligible_ids)} bbox images")
+
+    summary = {
+        "definition": "max-point PGHit; hit iff the class-specific heatmap peak is inside any same-class bbox",
+        "sample_unit": "one image_id-class_name pair",
+        "bbox_csv": str(Path(bbox_csv)),
+        "bbox_coordinate_size": args.bbox_coord_size,
+        "bbox_images_in_csv": len(grouped),
+        "bbox_images_in_evaluation": len(eligible_ids),
+        "bbox_images_not_in_evaluation": len(set(grouped) - evaluated_ids),
+        "skipped_bbox_classes": skipped_classes,
+        "before_calibration": summarize_pghit(rows, "before_calibration"),
+        "after_calibration": summarize_pghit(rows, "after_calibration"),
+    }
+    before = summary["before_calibration"]["pg_hit_rate"]
+    after = summary["after_calibration"]["pg_hit_rate"]
+    summary["delta_pg_hit_rate"] = (
+        after - before if before is not None and after is not None else None
+    )
+    return summary, rows
 
 
 def resolve_query_index(
@@ -983,6 +1219,12 @@ def main(args: argparse.Namespace) -> None:
         raise ValueError("--heatmap-activation-quantile must be in [0, 1)")
     if args.heatmap_common_mode_strength < 0.0:
         raise ValueError("--heatmap-common-mode-strength must be non-negative")
+    if args.bbox_coord_size is not None and args.bbox_coord_size <= 0.0:
+        raise ValueError("--bbox-coord-size must be greater than zero")
+    if args.pghit_max_images is not None and args.pghit_max_images < 1:
+        raise ValueError("--pghit-max-images must be at least 1")
+    if args.pghit_print_freq < 1:
+        raise ValueError("--pghit-print-freq must be at least 1")
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -1071,6 +1313,28 @@ def main(args: argparse.Namespace) -> None:
     del base_model
     if device.type == "cuda":
         torch.cuda.empty_cache()
+
+    pghit: dict[str, Any] | None = None
+    pghit_rows: list[dict[str, Any]] = []
+    if args.bbox_csv:
+        print("\nEvaluating class-aware VinDr PGHit before/after heatmap calibration...")
+        pghit, pghit_rows = evaluate_vindr_pghit(
+            bbox_csv=args.bbox_csv,
+            image_ids=image_ids,
+            image_path_by_id=image_path_by_id,
+            concepts=concepts,
+            positive_text=positive_text,
+            conceptclip_model=conceptclip_model,
+            processor=processor,
+            device=device,
+            args=args,
+        )
+        before_pg = pghit["before_calibration"]["pg_hit_rate"]
+        after_pg = pghit["after_calibration"]["pg_hit_rate"]
+        print(f"PGHit before calibration: {before_pg:.4f}")
+        print(f"PGHit after calibration:  {after_pg:.4f}")
+        print(f"PGHit delta:              {pghit['delta_pg_hit_rate']:+.4f}")
+
     if not args.no_visualize:
         try:
             visualizations = create_query_visualizations(
@@ -1118,6 +1382,7 @@ def main(args: argparse.Namespace) -> None:
         "baseline": baseline,
         "after_crar": reranked,
         "delta": delta,
+        "pghit": pghit,
         "visualizations": visualizations,
         "visualization_error": visualization_error,
         "heatmap_configuration": {
@@ -1131,6 +1396,14 @@ def main(args: argparse.Namespace) -> None:
     report_path = output_dir / "vindr_crar_report.json"
     with report_path.open("w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2, ensure_ascii=False)
+    if pghit is not None:
+        pghit_summary_path = output_dir / "vindr_pghit_summary.json"
+        with pghit_summary_path.open("w", encoding="utf-8") as handle:
+            json.dump(pghit, handle, indent=2, ensure_ascii=False)
+        pghit_csv_path = output_dir / "vindr_pghit_per_sample.csv"
+        pd.DataFrame(pghit_rows).to_csv(pghit_csv_path, index=False)
+        print(f"Saved PGHit summary: {pghit_summary_path}")
+        print(f"Saved PGHit samples: {pghit_csv_path}")
     np.savez_compressed(
         output_dir / "vindr_crar_rankings.npz",
         image_ids=np.asarray(image_ids),
@@ -1154,6 +1427,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--test-dir", required=True, help="Directory containing VinDr <image_id>.png test images")
     parser.add_argument("--labels-csv", default="vindr/image_labels_test.csv", help="VinDr multi-label test CSV")
+    parser.add_argument(
+        "--bbox-csv",
+        default=None,
+        help=(
+            "Optional VinDr bbox CSV with image_id,class_name,x_min,y_min,x_max,y_max; "
+            "enables class-aware PGHit"
+        ),
+    )
+    parser.add_argument(
+        "--bbox-coord-size",
+        default=None,
+        type=float,
+        help=(
+            "Fixed square coordinate size used by the bbox CSV (for example 384). "
+            "Omit when boxes already use each original image's pixel coordinates"
+        ),
+    )
+    parser.add_argument(
+        "--pghit-max-images",
+        default=None,
+        type=int,
+        help="Optional development limit on bbox-annotated images used for PGHit",
+    )
+    parser.add_argument("--pghit-print-freq", default=25, type=int)
     parser.add_argument("--base-checkpoint", required=True, help="ConvNeXtV2-SRA checkpoint path")
     parser.add_argument("--model", default="convnextv2_sra", choices=["convnextv2_sra"], help="Base retrieval model")
     parser.add_argument("--sra-num-heads", default=8, type=int)
