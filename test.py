@@ -315,10 +315,11 @@ def evaluate_biomedclip_zeroshot(model, tokenizer, preprocess, loader, device, a
     dists = embeds @ embeds.t()
     dists.fill_diagonal_(float('-inf'))
 
+    recall_kappas = [1, 5, 10, 20, 50, 100]
     kappas = [1, 5, 10]
-    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = retrieval_accuracy(dists, labels, topk=recall_kappas)
     accuracy = torch.stack(accuracy).cpu().numpy()
-    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+    print('>> R@K{}: {}%'.format(recall_kappas, np.around(accuracy, 2)))
 
     ranks = torch.argsort(dists, dim=0, descending=True)
     mAP, _, pr, _ = compute_map(ranks.cpu().numpy(), labels.cpu().numpy(), kappas)
@@ -468,10 +469,11 @@ def evaluate_conceptclip_concept_retrieval(model, processor, loader, device, arg
     
     print("\n=== Evaluation Results ===")
     # top-k accuracy (i.e. R@K)
+    recall_kappas = [1, 5, 10, 20, 50, 100]
     kappas = [1, 5, 10]
-    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = retrieval_accuracy(dists, labels, topk=recall_kappas)
     accuracy = torch.stack(accuracy).cpu().numpy()
-    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+    print('>> R@K{}: {}%'.format(recall_kappas, np.around(accuracy, 2)))
 
     # mean average precision and mean precision (i.e. mAP and pr)
     ranks = torch.argsort(dists, dim=0, descending=True)
@@ -643,10 +645,11 @@ def evaluate_with_text_reranking(img_model, text_model, text_processor, loader, 
     
     print("\n=== Evaluation Results ===")
     # top-k accuracy (i.e. R@K)
+    recall_kappas = [1, 5, 10, 20, 50, 100]
     kappas = [1, 5, 10]
-    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = retrieval_accuracy(dists, labels, topk=recall_kappas)
     accuracy = torch.stack(accuracy).cpu().numpy()
-    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+    print('>> R@K{}: {}%'.format(recall_kappas, np.around(accuracy, 2)))
 
     # mean average precision and mean precision (i.e. mAP and pr)
     ranks = torch.argsort(dists, dim=0, descending=True)
@@ -820,10 +823,11 @@ def evaluate_conceptclip_with_text(model, processor, loader, device, args, label
     dists.fill_diagonal_(float('-inf'))
     
     # top-k accuracy (i.e. R@K)
+    recall_kappas = [1, 5, 10, 20, 50, 100]
     kappas = [1, 5, 10]
-    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = retrieval_accuracy(dists, labels, topk=recall_kappas)
     accuracy = torch.stack(accuracy).cpu().numpy()
-    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+    print('>> R@K{}: {}%'.format(recall_kappas, np.around(accuracy, 2)))
 
     # mean average precision and mean precision (i.e. mAP and pr)
     ranks = torch.argsort(dists, dim=0, descending=True)
@@ -913,10 +917,11 @@ def evaluate_conceptclip(model, processor, loader, device, args):
     dists.fill_diagonal_(float('-inf'))
     
     # top-k accuracy (i.e. R@K)
+    recall_kappas = [1, 5, 10, 20, 50, 100]
     kappas = [1, 5, 10]
-    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = retrieval_accuracy(dists, labels, topk=recall_kappas)
     accuracy = torch.stack(accuracy).cpu().numpy()
-    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+    print('>> R@K{}: {}%'.format(recall_kappas, np.around(accuracy, 2)))
 
     # mean average precision and mean precision (i.e. mAP and pr)
     ranks = torch.argsort(dists, dim=0, descending=True)
@@ -1106,10 +1111,11 @@ def evaluate(model, loader, device, args):
     dists.fill_diagonal_(float('-inf'))
 
     # top-k accuracy (i.e. R@K)
+    recall_kappas = [1, 5, 10, 20, 50, 100]
     kappas = [1, 5, 10]
-    accuracy = retrieval_accuracy(dists, labels, topk=kappas)
+    accuracy = retrieval_accuracy(dists, labels, topk=recall_kappas)
     accuracy = torch.stack(accuracy).cpu().numpy()
-    print('>> R@K{}: {}%'.format(kappas, np.around(accuracy, 2)))
+    print('>> R@K{}: {}%'.format(recall_kappas, np.around(accuracy, 2)))
 
     # mean average precision and mean precision (i.e. mAP and pr)
     ranks = torch.argsort(dists, dim=0, descending=True)
