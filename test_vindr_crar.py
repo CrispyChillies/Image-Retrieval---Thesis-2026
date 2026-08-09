@@ -666,7 +666,11 @@ def canonical_concept_name(name: str, concepts: Sequence[str]) -> str | None:
 def load_vindr_bboxes(
     csv_path: str | os.PathLike[str],
     concepts: Sequence[str],
-) -> tuple[dict[str, dict[str, list[tuple[float, float, float, float]]]], dict[str, int]]:
+) -> tuple[
+    dict[str, dict[str, list[tuple[float, float, float, float]]]],
+    dict[str, int],
+    dict[str, Any],
+]:
     """Load VinDr boxes as image -> concept -> [(xmin, ymin, xmax, ymax)]."""
     path = Path(csv_path)
     if not path.is_file():
@@ -674,6 +678,14 @@ def load_vindr_bboxes(
 
     grouped: dict[str, dict[str, list[tuple[float, float, float, float]]]] = {}
     skipped_classes: dict[str, int] = {}
+    loader_stats: dict[str, Any] = {
+        "total_rows": 0,
+        "valid_bbox_rows": 0,
+        "blank_coordinate_rows": 0,
+        "invalid_numeric_rows": 0,
+        "degenerate_bbox_rows": 0,
+        "rows_without_bbox_by_class": {},
+    }
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         normalized_columns = {
@@ -689,7 +701,8 @@ def load_vindr_bboxes(
             )
 
         keys = {column: normalized_columns[column] for column in required}
-        for row_number, row in enumerate(reader, start=2):
+        for row in reader:
+            loader_stats["total_rows"] += 1
             image_id = str(row.get(keys["image_id"], "")).strip()
             raw_class = str(row.get(keys["class_name"], "")).strip()
             if not image_id or not raw_class:
@@ -698,20 +711,33 @@ def load_vindr_bboxes(
             if concept is None:
                 skipped_classes[raw_class] = skipped_classes.get(raw_class, 0) + 1
                 continue
+            coordinate_values = [
+                str(row.get(keys[column], "") or "").strip()
+                for column in ("x_min", "y_min", "x_max", "y_max")
+            ]
+            if any(not value for value in coordinate_values):
+                # VinDr represents No finding as an image-level row with four
+                # empty coordinates. It has no localization target and must be
+                # excluded from PGHit rather than counted as a miss.
+                loader_stats["blank_coordinate_rows"] += 1
+                by_class = loader_stats["rows_without_bbox_by_class"]
+                by_class[raw_class] = by_class.get(raw_class, 0) + 1
+                continue
             try:
-                box = tuple(
-                    float(row[keys[column]])
-                    for column in ("x_min", "y_min", "x_max", "y_max")
-                )
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"Invalid bbox coordinates on CSV row {row_number}") from exc
+                box = tuple(float(value) for value in coordinate_values)
+            except (TypeError, ValueError):
+                loader_stats["invalid_numeric_rows"] += 1
+                continue
             if not all(math.isfinite(value) for value in box):
-                raise ValueError(f"Non-finite bbox coordinates on CSV row {row_number}")
+                loader_stats["invalid_numeric_rows"] += 1
+                continue
             x_min, y_min, x_max, y_max = box
             if x_max <= x_min or y_max <= y_min:
+                loader_stats["degenerate_bbox_rows"] += 1
                 continue
             grouped.setdefault(image_id, {}).setdefault(concept, []).append(box)
-    return grouped, skipped_classes
+            loader_stats["valid_bbox_rows"] += 1
+    return grouped, skipped_classes, loader_stats
 
 
 def pointing_game_peak(
@@ -788,7 +814,13 @@ def evaluate_vindr_pghit(
     args: argparse.Namespace,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Evaluate class-aware PGHit before and after within-image calibration."""
-    grouped, skipped_classes = load_vindr_bboxes(bbox_csv, concepts)
+    grouped, skipped_classes, bbox_loader_stats = load_vindr_bboxes(bbox_csv, concepts)
+    if bbox_loader_stats["blank_coordinate_rows"]:
+        print(
+            "[PGHit] skipped "
+            f"{bbox_loader_stats['blank_coordinate_rows']} rows without bounding boxes: "
+            f"{bbox_loader_stats['rows_without_bbox_by_class']}"
+        )
     evaluated_ids = set(image_ids)
     eligible_ids = [image_id for image_id in image_ids if image_id in grouped]
     if args.pghit_max_images is not None:
@@ -869,6 +901,7 @@ def evaluate_vindr_pghit(
         "bbox_images_in_csv": len(grouped),
         "bbox_images_in_evaluation": len(eligible_ids),
         "bbox_images_not_in_evaluation": len(set(grouped) - evaluated_ids),
+        "bbox_loader": bbox_loader_stats,
         "skipped_bbox_classes": skipped_classes,
         "before_calibration": summarize_pghit(rows, "before_calibration"),
         "after_calibration": summarize_pghit(rows, "after_calibration"),
