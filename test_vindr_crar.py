@@ -33,6 +33,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from PIL import Image
+from sklearn.metrics import average_precision_score, roc_auc_score
 from torch.utils.data import DataLoader, Dataset, Subset
 from transformers import AutoModel, AutoProcessor, PreTrainedModel
 
@@ -631,6 +632,12 @@ def calibrated_concept_heatmaps(
         cutoff = torch.quantile(values, args.heatmap_activation_quantile)
         values = F.relu(values - cutoff)
         upper = torch.quantile(values, 0.99)
+        # A highly specific map may activate fewer than 1% of patches. In that
+        # case q99 is exactly zero even though a valid positive peak exists;
+        # falling back to max preserves the sparse localization instead of
+        # turning the entire map into zeros (whose argmax is the top-left).
+        if float(upper) <= 1e-8:
+            upper = values.max()
         if float(upper) > 1e-8:
             values = (values / upper).clamp(0.0, 1.0)
         else:
@@ -1215,6 +1222,217 @@ def print_comparison(baseline: dict, reranked: dict) -> None:
                 print(f"  {key:<10}    : {base_metrics[key]:.3f}% -> {crar_metrics[key]:.3f}%")
 
 
+def safe_divide(numerator: np.ndarray | float, denominator: np.ndarray | float):
+    numerator_array = np.asarray(numerator, dtype=np.float64)
+    denominator_array = np.asarray(denominator, dtype=np.float64)
+    return np.divide(
+        numerator_array,
+        denominator_array,
+        out=np.zeros_like(numerator_array, dtype=np.float64),
+        where=denominator_array != 0,
+    )
+
+
+def multilabel_metrics_at_threshold(
+    probabilities: np.ndarray,
+    ground_truth: np.ndarray,
+    concepts: Sequence[str],
+    threshold: float,
+) -> dict[str, Any]:
+    """Compute image-level multi-label metrics for ConceptCLIP predictions."""
+    targets = np.asarray(ground_truth >= 0.5, dtype=bool)
+    predictions = np.asarray(probabilities >= threshold, dtype=bool)
+    true_positive = np.logical_and(predictions, targets).sum(axis=0)
+    false_positive = np.logical_and(predictions, ~targets).sum(axis=0)
+    false_negative = np.logical_and(~predictions, targets).sum(axis=0)
+    true_negative = np.logical_and(~predictions, ~targets).sum(axis=0)
+
+    precision = safe_divide(true_positive, true_positive + false_positive)
+    recall = safe_divide(true_positive, true_positive + false_negative)
+    f1 = safe_divide(2.0 * precision * recall, precision + recall)
+    support = targets.sum(axis=0)
+    micro_tp = float(true_positive.sum())
+    micro_fp = float(false_positive.sum())
+    micro_fn = float(false_negative.sum())
+    micro_precision = float(safe_divide(micro_tp, micro_tp + micro_fp))
+    micro_recall = float(safe_divide(micro_tp, micro_tp + micro_fn))
+    micro_f1 = float(
+        safe_divide(
+            2.0 * micro_precision * micro_recall,
+            micro_precision + micro_recall,
+        )
+    )
+    total_support = float(support.sum())
+
+    return {
+        "threshold": float(threshold),
+        "micro_precision": micro_precision,
+        "micro_recall": micro_recall,
+        "micro_f1": micro_f1,
+        "macro_precision": float(precision.mean()),
+        "macro_recall": float(recall.mean()),
+        "macro_f1": float(f1.mean()),
+        "weighted_f1": float(
+            safe_divide(float((f1 * support).sum()), total_support)
+        ),
+        "exact_match_accuracy": float(np.all(predictions == targets, axis=1).mean()),
+        "hamming_accuracy": float((predictions == targets).mean()),
+        "predicted_positive_rate": float(predictions.mean()),
+        "ground_truth_positive_rate": float(targets.mean()),
+        "per_concept": {
+            concept: {
+                "support": int(support[index]),
+                "predicted_positives": int(predictions[:, index].sum()),
+                "true_positive": int(true_positive[index]),
+                "false_positive": int(false_positive[index]),
+                "false_negative": int(false_negative[index]),
+                "true_negative": int(true_negative[index]),
+                "precision": float(precision[index]),
+                "recall": float(recall[index]),
+                "f1": float(f1[index]),
+            }
+            for index, concept in enumerate(concepts)
+        },
+    }
+
+
+def threshold_free_classification_metrics(
+    probabilities: np.ndarray,
+    ground_truth: np.ndarray,
+    concepts: Sequence[str],
+) -> dict[str, Any]:
+    targets = np.asarray(ground_truth >= 0.5, dtype=np.int32)
+    per_concept: dict[str, dict[str, float | int | None]] = {}
+    average_precisions: list[float] = []
+    roc_aucs: list[float] = []
+    for index, concept in enumerate(concepts):
+        target = targets[:, index]
+        probability = probabilities[:, index]
+        positive_count = int(target.sum())
+        negative_count = int(len(target) - positive_count)
+        average_precision = (
+            float(average_precision_score(target, probability))
+            if positive_count > 0
+            else None
+        )
+        roc_auc = (
+            float(roc_auc_score(target, probability))
+            if positive_count > 0 and negative_count > 0
+            else None
+        )
+        if average_precision is not None:
+            average_precisions.append(average_precision)
+        if roc_auc is not None:
+            roc_aucs.append(roc_auc)
+        per_concept[concept] = {
+            "support": positive_count,
+            "average_precision": average_precision,
+            "roc_auc": roc_auc,
+        }
+
+    flattened_targets = targets.reshape(-1)
+    flattened_probabilities = probabilities.reshape(-1)
+    return {
+        "macro_average_precision": float(np.mean(average_precisions))
+        if average_precisions
+        else None,
+        "micro_average_precision": float(
+            average_precision_score(flattened_targets, flattened_probabilities)
+        ) if flattened_targets.sum() > 0 else None,
+        "macro_roc_auc": float(np.mean(roc_aucs)) if roc_aucs else None,
+        "per_concept": per_concept,
+    }
+
+
+def evaluate_concept_classification(
+    confidences: torch.Tensor,
+    ground_truth: torch.Tensor,
+    concepts: Sequence[str],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    """Evaluate ConceptCLIP labels and find a diagnostic global F1 threshold."""
+    probabilities = confidences.float().numpy()
+    targets = ground_truth.float().numpy()
+    fixed = multilabel_metrics_at_threshold(
+        probabilities, targets, concepts, args.concept_threshold
+    )
+    threshold_free = threshold_free_classification_metrics(
+        probabilities, targets, concepts
+    )
+    thresholds = np.arange(
+        args.classification_threshold_min,
+        args.classification_threshold_max + args.classification_threshold_step * 0.5,
+        args.classification_threshold_step,
+    )
+    thresholds = np.clip(thresholds, 0.0, 1.0)
+    curve: list[dict[str, float]] = []
+    candidates: list[dict[str, Any]] = []
+    for threshold in thresholds:
+        metrics = multilabel_metrics_at_threshold(
+            probabilities, targets, concepts, float(threshold)
+        )
+        candidates.append(metrics)
+        curve.append(
+            {
+                "threshold": float(threshold),
+                "micro_f1": metrics["micro_f1"],
+                "macro_f1": metrics["macro_f1"],
+                "weighted_f1": metrics["weighted_f1"],
+            }
+        )
+    objective = args.classification_sweep_objective
+    best = max(
+        candidates,
+        key=lambda metrics: (
+            metrics[objective],
+            -abs(metrics["threshold"] - args.concept_threshold),
+        ),
+    )
+    return {
+        "concepts": list(concepts),
+        "num_images": len(targets),
+        "threshold_free": threshold_free,
+        "at_crar_threshold": fixed,
+        "threshold_sweep": {
+            "objective": objective,
+            "minimum": args.classification_threshold_min,
+            "maximum": args.classification_threshold_max,
+            "step": args.classification_threshold_step,
+            "best_threshold": best["threshold"],
+            "best_metrics": best,
+            "curve": curve,
+            "selection_warning": (
+                "This threshold was selected on the current evaluation labels. "
+                "Treat it as post-hoc diagnostic only; select on validation data "
+                "before reporting an unbiased test result."
+            ),
+        },
+    }
+
+
+def print_concept_classification(metrics: dict[str, Any]) -> None:
+    fixed = metrics["at_crar_threshold"]
+    sweep = metrics["threshold_sweep"]
+    best = sweep["best_metrics"]
+    threshold_free = metrics["threshold_free"]
+    macro_ap = threshold_free["macro_average_precision"]
+    micro_ap = threshold_free["micro_average_precision"]
+    macro_ap_text = f"{macro_ap:.4f}" if macro_ap is not None else "N/A"
+    micro_ap_text = f"{micro_ap:.4f}" if micro_ap is not None else "N/A"
+    print("\n============= CONCEPT CLASSIFICATION REPORT =============")
+    print(
+        f"At CRAR threshold {fixed['threshold']:.3f}: "
+        f"micro-F1={fixed['micro_f1']:.4f}, macro-F1={fixed['macro_f1']:.4f}, "
+        f"P={fixed['micro_precision']:.4f}, R={fixed['micro_recall']:.4f}"
+    )
+    print(
+        f"Best global threshold by {sweep['objective']}: {best['threshold']:.3f} | "
+        f"micro-F1={best['micro_f1']:.4f}, macro-F1={best['macro_f1']:.4f}"
+    )
+    print(f"Threshold-free: macro-mAP={macro_ap_text}, micro-AP={micro_ap_text}")
+    print("Note: the swept test threshold is diagnostic and is not applied to CRAR.")
+
+
 def parse_float_list(value: str) -> list[float]:
     return [float(item.strip()) for item in value.split(",") if item.strip()]
 
@@ -1252,6 +1470,14 @@ def main(args: argparse.Namespace) -> None:
         raise ValueError("--heatmap-activation-quantile must be in [0, 1)")
     if args.heatmap_common_mode_strength < 0.0:
         raise ValueError("--heatmap-common-mode-strength must be non-negative")
+    if not 0.0 <= args.classification_threshold_min <= 1.0:
+        raise ValueError("--classification-threshold-min must be in [0, 1]")
+    if not 0.0 <= args.classification_threshold_max <= 1.0:
+        raise ValueError("--classification-threshold-max must be in [0, 1]")
+    if args.classification_threshold_min > args.classification_threshold_max:
+        raise ValueError("Classification threshold minimum cannot exceed maximum")
+    if args.classification_threshold_step <= 0.0:
+        raise ValueError("--classification-threshold-step must be greater than zero")
     if args.bbox_coord_size is not None and args.bbox_coord_size <= 0.0:
         raise ValueError("--bbox-coord-size must be greater than zero")
     if args.pghit_max_images is not None and args.pghit_max_images < 1:
@@ -1319,7 +1545,16 @@ def main(args: argparse.Namespace) -> None:
     )
     column_to_index = {name: index for index, name in enumerate(dataset_columns)}
     eval_indices = [column_to_index[name] for name in evaluation_labels]
+    concept_label_indices = [column_to_index[name] for name in concepts]
     labels = dataset_labels[:, eval_indices]
+    concept_ground_truth = dataset_labels[:, concept_label_indices]
+
+    concept_classification: dict[str, Any] | None = None
+    if args.evaluate_concept_classification:
+        concept_classification = evaluate_concept_classification(
+            confidences, concept_ground_truth, concepts, args
+        )
+        print_concept_classification(concept_classification)
 
     weights = load_concept_weights(args, concepts, confidences)
     base_ranks, crar_ranks, crar_stats = crar_rerank(
@@ -1415,6 +1650,7 @@ def main(args: argparse.Namespace) -> None:
         "baseline": baseline,
         "after_crar": reranked,
         "delta": delta,
+        "concept_classification": concept_classification,
         "pghit": pghit,
         "visualizations": visualizations,
         "visualization_error": visualization_error,
@@ -1437,10 +1673,33 @@ def main(args: argparse.Namespace) -> None:
         pd.DataFrame(pghit_rows).to_csv(pghit_csv_path, index=False)
         print(f"Saved PGHit summary: {pghit_summary_path}")
         print(f"Saved PGHit samples: {pghit_csv_path}")
+    if concept_classification is not None:
+        classification_path = output_dir / "vindr_concept_classification.json"
+        with classification_path.open("w", encoding="utf-8") as handle:
+            json.dump(concept_classification, handle, indent=2, ensure_ascii=False)
+        per_concept_rows = []
+        fixed_per_concept = concept_classification["at_crar_threshold"]["per_concept"]
+        best_per_concept = concept_classification["threshold_sweep"]["best_metrics"]["per_concept"]
+        threshold_free_per_concept = concept_classification["threshold_free"]["per_concept"]
+        for concept in concepts:
+            per_concept_rows.append(
+                {
+                    "concept": concept,
+                    **fixed_per_concept[concept],
+                    "average_precision": threshold_free_per_concept[concept]["average_precision"],
+                    "roc_auc": threshold_free_per_concept[concept]["roc_auc"],
+                    "best_global_threshold_f1": best_per_concept[concept]["f1"],
+                }
+            )
+        classification_csv_path = output_dir / "vindr_concept_classification_per_class.csv"
+        pd.DataFrame(per_concept_rows).to_csv(classification_csv_path, index=False)
+        print(f"Saved concept classification: {classification_path}")
+        print(f"Saved per-concept metrics: {classification_csv_path}")
     np.savez_compressed(
         output_dir / "vindr_crar_rankings.npz",
         image_ids=np.asarray(image_ids),
         labels=labels.numpy(),
+        concept_labels=concept_ground_truth.numpy(),
         concept_confidences=confidences.numpy(),
         concept_weights=weights.numpy(),
         baseline_ranks=base_ranks.numpy(),
@@ -1499,6 +1758,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evaluation-label-space", choices=["all", "lesions", "diseases"], default="all")
     parser.add_argument("--gamma", default=0.30, type=float, help="CRAR semantic balancing factor")
     parser.add_argument("--concept-threshold", default=0.50, type=float, help="Confidence threshold defining Cq and Cn")
+    parser.add_argument(
+        "--evaluate-concept-classification",
+        action="store_true",
+        help=(
+            "Evaluate ConceptCLIP multi-label predictions against labels CSV and "
+            "sweep a diagnostic global F1 threshold"
+        ),
+    )
+    parser.add_argument("--classification-threshold-min", default=0.05, type=float)
+    parser.add_argument("--classification-threshold-max", default=0.95, type=float)
+    parser.add_argument("--classification-threshold-step", default=0.01, type=float)
+    parser.add_argument(
+        "--classification-sweep-objective",
+        choices=["micro_f1", "macro_f1", "weighted_f1"],
+        default="macro_f1",
+        help="F1 statistic maximized by the diagnostic global threshold sweep",
+    )
     parser.add_argument("--prompt-temperature", default=0.07, type=float, help="Positive/negative prompt softmax temperature")
     parser.add_argument("--concept-weighting", choices=["uniform", "idf"], default="uniform")
     parser.add_argument("--concept-weights-json", default=None, help="Optional JSON object mapping concept names to omega_j")
