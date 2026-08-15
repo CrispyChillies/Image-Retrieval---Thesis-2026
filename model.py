@@ -364,6 +364,107 @@ class ConvNeXtV2_LoFi(nn.Module):
         return embedding
 
 
+class RRAContextBlock(nn.Module):
+    """Self-/cross-attentive context block adapted from RRA-VL's CAA module."""
+
+    def __init__(self, dim=256, num_heads=8):
+        super().__init__()
+        self.self_attention = nn.MultiheadAttention(dim, num_heads, batch_first=True)
+        self.cross_attention = nn.MultiheadAttention(dim, num_heads, batch_first=True)
+        self.norm1 = nn.LayerNorm(dim)
+        self.norm2 = nn.LayerNorm(dim)
+        self.norm3 = nn.LayerNorm(dim)
+        self.ffn = nn.Sequential(
+            nn.Linear(dim, dim * 4),
+            nn.GELU(),
+            nn.Linear(dim * 4, dim),
+        )
+
+    def forward(self, queries, patches):
+        attended, _ = self.self_attention(queries, queries, queries, need_weights=False)
+        queries = self.norm1(queries + attended)
+        attended, _ = self.cross_attention(queries, patches, patches, need_weights=False)
+        queries = self.norm2(queries + attended)
+        return self.norm3(queries + self.ffn(queries))
+
+
+class ConvNeXtV2_RRAVL(nn.Module):
+    """Image-only RRA-VL idea adaptation with weak anatomical queries.
+
+    COVIDx lacks paired reports and anatomical descriptions. Learned query
+    tokens therefore replace report region tokens, while disease supervision
+    mines region-conditioned triplets during training. The final image-only
+    descriptor is 1024-D to match ConvNeXtV2-SRA.
+    """
+
+    def __init__(
+        self,
+        pretrained=True,
+        num_classes=3,
+        num_regions=8,
+        context_dim=64,
+        num_heads=8,
+        depth=3,
+        lam=0.1,
+    ):
+        super().__init__()
+        if context_dim % num_heads != 0:
+            raise ValueError("rra context_dim must be divisible by num_heads")
+        if num_regions <= 0 or depth <= 0:
+            raise ValueError("rra num_regions and depth must be positive")
+        self.num_regions = num_regions
+        self.lam = lam
+        self.convnext = timm.create_model(
+            "convnextv2_base.fcmae_ft_in22k_in1k_384",
+            pretrained=pretrained,
+            num_classes=0,
+        )
+        feature_dim = self.convnext.num_features
+        self.patch_projection = nn.Linear(feature_dim, context_dim)
+        self.anatomical_queries = nn.Parameter(torch.empty(num_regions, context_dim))
+        self.context_blocks = nn.ModuleList(
+            [RRAContextBlock(context_dim, num_heads) for _ in range(depth)]
+        )
+        self.local_projection = nn.Linear(context_dim, feature_dim)
+        self.region_classifier = nn.Linear(context_dim, num_classes)
+        nn.init.normal_(self.anatomical_queries, std=0.02)
+        nn.init.xavier_normal_(self.patch_projection.weight)
+        nn.init.zeros_(self.patch_projection.bias)
+        nn.init.xavier_normal_(self.local_projection.weight)
+        nn.init.zeros_(self.local_projection.bias)
+        nn.init.xavier_normal_(self.region_classifier.weight)
+        nn.init.zeros_(self.region_classifier.bias)
+
+    def forward(self, x):
+        feature_map = self.convnext.forward_features(x)
+        feature_map = self.convnext.head.norm(feature_map)
+        batch_size = feature_map.shape[0]
+        global_feature = feature_map.mean(dim=(2, 3))
+        patches = feature_map.flatten(2).transpose(1, 2)
+        patches = self.patch_projection(patches)
+
+        regions = self.anatomical_queries.unsqueeze(0).expand(batch_size, -1, -1)
+        for block in self.context_blocks:
+            regions = block(regions, patches)
+
+        region_logits = self.region_classifier(regions)
+        class_logits = torch.logsumexp(region_logits, dim=1) - math.log(self.num_regions)
+        evidence = region_logits.max(dim=2).values
+        region_weights = F.softmax(evidence, dim=1).unsqueeze(2)
+        projected_regions = self.local_projection(regions)
+        local_feature = torch.sum(region_weights * projected_regions, dim=1)
+        embedding = F.normalize(global_feature + self.lam * local_feature, dim=1)
+
+        if self.training:
+            return {
+                "embedding": embedding,
+                "region_embeddings": F.normalize(projected_regions, dim=2),
+                "region_logits": region_logits,
+                "class_logits": class_logits,
+            }
+        return embedding
+
+
 class PCAMPool(nn.Module):
     """Probabilistic-CAM pooling adapted for retrieval embeddings."""
 

@@ -202,6 +202,62 @@ class PCAMRetrievalLoss(nn.Module):
         }
 
 
+class RRAVLCOVIDLoss(nn.Module):
+    """Image-only, label-supervised adaptation of RRA-VL for COVIDx.
+
+    The original method mines location/disease-conditioned triplets from paired
+    reports. Here learned anatomical queries supply weak regions and COVIDx
+    class equality supplies positive/negative relations. The evaluator remains
+    image-only; no label enters the model forward pass at validation or test.
+    """
+
+    def __init__(self, margin=0.2, local_weight=0.1, classification_weight=1.0):
+        super().__init__()
+        self.margin = margin
+        self.local_weight = local_weight
+        self.classification_weight = classification_weight
+
+    def forward(self, outputs, labels):
+        if not isinstance(outputs, dict):
+            raise TypeError("RRA-VL loss expects a model output dictionary.")
+        required = {"embedding", "region_embeddings", "region_logits", "class_logits"}
+        missing = required.difference(outputs)
+        if missing:
+            raise KeyError(f"RRA-VL model output is missing keys: {sorted(missing)}")
+        if labels.ndim != 1:
+            raise ValueError("RRA-VL COVIDx adaptation requires single-class labels.")
+        labels = labels.long()
+
+        global_loss, global_active = batch_all_triplet_loss(
+            labels, outputs["embedding"], self.margin, 2.0
+        )
+
+        region_count = outputs["region_logits"].shape[1]
+        target_scores = outputs["region_logits"].gather(
+            2, labels[:, None, None].expand(-1, region_count, 1)
+        ).squeeze(2)
+        selected_region = target_scores.argmax(dim=1)
+        batch_index = torch.arange(len(labels), device=labels.device)
+        local_embeddings = outputs["region_embeddings"][batch_index, selected_region]
+        local_loss, local_active = batch_all_triplet_loss(
+            labels, local_embeddings, self.margin, 2.0
+        )
+        classification_loss = F.cross_entropy(outputs["class_logits"], labels)
+
+        total = (
+            global_loss
+            + self.local_weight * local_loss
+            + self.classification_weight * classification_loss
+        )
+        return total, {
+            "rra_global": global_loss.detach(),
+            "rra_local": local_loss.detach(),
+            "rra_ce": classification_loss.detach(),
+            "rra_global_active": global_active.detach(),
+            "rra_local_active": local_active.detach(),
+        }
+
+
 class SupervisedContrastiveLoss(nn.Module):
     def __init__(self, temperature=0.07, eps=1e-8):
         super().__init__()
