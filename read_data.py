@@ -586,6 +586,35 @@ class ChestXrayDataSet(Dataset):
 
 
 # TBX11k Dataset for retrieval (classification/retrieval only, no bbox)
+def _resolve_tbx11k_image_path(data_dir, fname):
+    """Accept both split-relative and image-relative TBX11K manifests.
+
+    Examples when ``data_dir=/dataset/data/test``:
+      - ``s4610.png``      -> ``data_dir/s4610.png``
+      - ``test/s4610.png`` -> ``data_dir.parent/test/s4610.png``
+    The same logic applies to the train split.
+    """
+    raw_path = Path(fname.replace("\\", "/"))
+    if raw_path.is_absolute():
+        return str(raw_path)
+
+    data_path = Path(data_dir)
+    candidates = [
+        data_path / raw_path,
+        data_path.parent / raw_path,
+        data_path / raw_path.name,
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+
+    # Produce the structurally correct path even when files are not mounted
+    # yet, avoiding accidental ``train/train`` or ``test/test`` paths.
+    if raw_path.parts and raw_path.parts[0].lower() == data_path.name.lower():
+        return str(data_path.parent / raw_path)
+    return str(data_path / raw_path)
+
+
 class TBX11kDataSet(Dataset):
     def __init__(self, data_dir, csv_file, transform=None):
         """
@@ -632,7 +661,7 @@ class TBX11kDataSet(Dataset):
                 # Only use images with valid image_type
                 if image_type not in self.type_map:
                     continue
-                img_path = os.path.join(data_dir, fname)
+                img_path = _resolve_tbx11k_image_path(data_dir, fname)
                 self.image_names.append(img_path)
                 self.labels.append(self.type_map[image_type])
 
