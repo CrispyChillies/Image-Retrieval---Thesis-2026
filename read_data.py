@@ -331,7 +331,7 @@ class ChestXrayDataSet(Dataset):
         return len(self.image_names)
 
 
-# TBX11k Dataset for retrieval (classification/retrieval only, no bbox)
+# TBX11k Dataset for retrieval (classification/retrieval + TB bbox annotation)
 class TBX11kDataSet(Dataset):
     def __init__(self, data_dir, csv_file, transform=None):
         """
@@ -342,12 +342,14 @@ class TBX11kDataSet(Dataset):
         """
         self.image_names = []
         self.labels = []
+        self.bboxes = []  # None, or {"xmin","ymin","width","height"} as fractions of image size
         self.transform = transform
 
         # Map image_type to integer label
         # image_type: tb, healthy, sick_but_no_tb
         self.type_map = {"tb": 0, "healthy": 1, "sick_but_no_tb": 2}
 
+        import ast
         import csv
 
         with open(csv_file, newline="", encoding="utf-8-sig") as f:
@@ -363,6 +365,9 @@ class TBX11kDataSet(Dataset):
             }
             fname_key = normalized_field_map.get("fname")
             image_type_key = normalized_field_map.get("image_type")
+            bbox_key = normalized_field_map.get("bbox")
+            width_key = normalized_field_map.get("image_width")
+            height_key = normalized_field_map.get("image_height")
 
             if fname_key is None or image_type_key is None:
                 raise ValueError(
@@ -381,6 +386,26 @@ class TBX11kDataSet(Dataset):
                 img_path = os.path.join(data_dir, fname)
                 self.image_names.append(img_path)
                 self.labels.append(self.type_map[image_type])
+
+                # Parse bbox (stored as a python-dict literal string, or "none")
+                bbox_frac = None
+                if bbox_key is not None and width_key is not None and height_key is not None:
+                    raw_bbox = row.get(bbox_key, "").strip()
+                    if raw_bbox and raw_bbox.lower() != "none":
+                        try:
+                            box = ast.literal_eval(raw_bbox)
+                            img_w = float(row.get(width_key, 0))
+                            img_h = float(row.get(height_key, 0))
+                            if img_w > 0 and img_h > 0:
+                                bbox_frac = {
+                                    "xmin": box["xmin"] / img_w,
+                                    "ymin": box["ymin"] / img_h,
+                                    "width": box["width"] / img_w,
+                                    "height": box["height"] / img_h,
+                                }
+                        except (ValueError, SyntaxError, KeyError, TypeError):
+                            bbox_frac = None
+                self.bboxes.append(bbox_frac)
 
     def __getitem__(self, index):
         image_name = self.image_names[index]

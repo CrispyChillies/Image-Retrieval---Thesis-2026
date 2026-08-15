@@ -195,6 +195,7 @@ def load_dataset(dataset: str, data_dir: str, image_list: str, transform):
         image_paths = ds.image_names
         labels = ds.labels
         label_names = DATASET_LABEL_NAMES["covid"]
+        bboxes = [None] * len(image_paths)
 
     elif dataset == "tbx11k":
         ds = TBX11kDataSet(
@@ -205,6 +206,8 @@ def load_dataset(dataset: str, data_dir: str, image_list: str, transform):
         image_paths = ds.image_names
         labels = ds.labels
         label_names = DATASET_LABEL_NAMES["tbx11k"]
+        # Fractional {xmin, ymin, width, height} per image, or None if no TB bbox
+        bboxes = ds.bboxes
 
     elif dataset == "vindr":
         import pandas as pd
@@ -228,11 +231,12 @@ def load_dataset(dataset: str, data_dir: str, image_list: str, transform):
                     break
             labels.append(lbl)
         label_names = DATASET_LABEL_NAMES["vindr"]
+        bboxes = [None] * len(image_paths)
 
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
 
-    return image_paths, labels, label_names
+    return image_paths, labels, label_names, bboxes
 
 
 def select_query_indices(labels, num_queries: int = -1):
@@ -395,6 +399,31 @@ def _add_border(ax, match: bool, lw: float = 5):
         spine.set_linewidth(lw)
 
 
+def draw_bbox(ax, bbox_frac: dict, img_size: tuple, color: str = "#ffdc00", lw: float = 2.5):
+    """
+    Draw a TB bounding box on an Axes.
+
+    Args:
+        ax: matplotlib Axes the image was already imshow()'n on.
+        bbox_frac: dict with xmin/ymin/width/height as fractions of image
+            size (in [0, 1]), or None to draw nothing.
+        img_size: (width, height) in pixels of the image currently shown on
+            `ax` (e.g. a PIL Image's `.size`) — used to convert fractions to
+            pixel coordinates matching the Axes' data space.
+    """
+    if bbox_frac is None:
+        return
+    width_px, height_px = img_size
+    x = bbox_frac["xmin"] * width_px
+    y = bbox_frac["ymin"] * height_px
+    w = bbox_frac["width"] * width_px
+    h = bbox_frac["height"] * height_px
+    rect = mpatches.Rectangle(
+        (x, y), w, h, linewidth=lw, edgecolor=color, facecolor="none"
+    )
+    ax.add_patch(rect)
+
+
 # ---------------------------------------------------------------------------
 # Core plotting
 # ---------------------------------------------------------------------------
@@ -409,6 +438,8 @@ def plot_retrieval_figure(
     out_path: str,
     dataset: str,
     query_rank: int,
+    query_bbox: dict = None,
+    ret_bboxes: list = None,
 ):
     """
     Figure 1: query image (left) + 5 retrieved images.
@@ -423,7 +454,9 @@ def plot_retrieval_figure(
 
     # --- Query ---
     ax = axes[0]
-    ax.imshow(load_display_image(query_path))
+    q_img = load_display_image(query_path)
+    ax.imshow(q_img)
+    draw_bbox(ax, query_bbox, q_img.size)
     ax.set_title(
         f"QUERY\n• {label_str(query_label, label_names)}",
         fontsize=9, fontweight="bold",
@@ -451,7 +484,9 @@ def plot_retrieval_figure(
         label_color = "#2ecc40" if match else "#ff4136"
 
         ax = axes[i + 1]
-        ax.imshow(load_display_image(rp))
+        r_img = load_display_image(rp)
+        ax.imshow(r_img)
+        draw_bbox(ax, ret_bboxes[i] if ret_bboxes else None, r_img.size)
         ax.set_title(
             f"Rank {i + 1}  {marker}\n• {label_str(rl, label_names)}\nsim={rs:.3f}",
             fontsize=9,
@@ -469,15 +504,20 @@ def plot_retrieval_figure(
             bbox=dict(boxstyle="round,pad=0.3", facecolor=border_color, alpha=0.85),
         )
 
-    # Legend: match / mismatch
+    # Legend: match / mismatch (+ bbox, if any TB bounding boxes were drawn)
     legend_patches = [
         mpatches.Patch(color="#2ecc40", label="Correct retrieval (same class)"),
         mpatches.Patch(color="#ff4136", label="Incorrect retrieval (different class)"),
         mpatches.Patch(color="#0074d9", label="Query image"),
     ]
+    has_any_bbox = query_bbox is not None or (ret_bboxes and any(b is not None for b in ret_bboxes))
+    if has_any_bbox:
+        legend_patches.append(
+            mpatches.Patch(facecolor="none", edgecolor="#ffdc00", linewidth=2, label="TB bounding box")
+        )
     fig.legend(
         handles=legend_patches, loc="lower center",
-        ncol=3, fontsize=8, framealpha=0.9,
+        ncol=len(legend_patches), fontsize=8, framealpha=0.9,
         bbox_to_anchor=(0.5, -0.02),
     )
 
@@ -502,6 +542,8 @@ def plot_saliency_figure(
     query_rank: int,
     model_type: str = "convnextv2",
     explainer_name: str = "SimCAM",
+    query_bbox: dict = None,
+    ret_bboxes: list = None,
 ):
     """
     Figure 2: saliency overlay on query (left) + saliency overlay on each retrieved image.
@@ -524,6 +566,7 @@ def plot_saliency_figure(
     # --- Query saliency ---
     ax = axes[0]
     ax.imshow(overlay_saliency(q_img, q_sal_resized))
+    draw_bbox(ax, query_bbox, q_img.size)
     ax.set_title(
         f"QUERY (saliency)\n• {label_str(query_label, label_names)}",
         fontsize=9, fontweight="bold",
@@ -554,6 +597,7 @@ def plot_saliency_figure(
         ) / 255.0
         ax = axes[i + 1]
         ax.imshow(overlay_saliency(r_img, r_sal_resized))
+        draw_bbox(ax, ret_bboxes[i] if ret_bboxes else None, r_img.size)
         ax.set_title(
             f"Rank {i + 1}  {marker}  (saliency)\n• {label_str(rl, label_names)}\nsim={rs:.3f}",
             fontsize=9, color=border_color, fontweight="bold",
@@ -567,11 +611,10 @@ def plot_saliency_figure(
             bbox=dict(boxstyle="round,pad=0.3", facecolor=border_color, alpha=0.85),
         )
 
-    # Colour-bar legend for jet scale
-    sm = plt.cm.ScalarMappable(cmap="jet", norm=plt.Normalize(vmin=0, vmax=1))
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=axes, orientation="vertical", fraction=0.01, pad=0.01)
-    cbar.set_label("Saliency", fontsize=8)
+    has_any_bbox = query_bbox is not None or (ret_bboxes and any(b is not None for b in ret_bboxes))
+    if has_any_bbox:
+        bbox_patch = mpatches.Patch(facecolor="none", edgecolor="#ffdc00", linewidth=2, label="TB bounding box")
+        fig.legend(handles=[bbox_patch], loc="lower center", fontsize=8, framealpha=0.9, bbox_to_anchor=(0.5, -0.02))
 
     fig.tight_layout()
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -598,7 +641,7 @@ def run_inference(args):
 
     # ---- Dataset ----
     print(f"Loading dataset '{args.dataset}' ...")
-    image_paths, labels, label_names = load_dataset(
+    image_paths, labels, label_names, bboxes = load_dataset(
         args.dataset, args.data_dir, args.image_list, transform
     )
     print(f"  {len(image_paths)} images found.")
@@ -633,6 +676,8 @@ def run_inference(args):
         )
         ret_paths = [image_paths[i] for i in top_indices]
         ret_labels = [labels[i] for i in top_indices]
+        q_bbox = bboxes[q_idx]
+        ret_bboxes = [bboxes[i] for i in top_indices]
 
         print(f"  Retrieved: {[os.path.basename(p) for p in ret_paths]}")
 
@@ -669,6 +714,8 @@ def run_inference(args):
             out_path=os.path.join(args.output_dir, f"{base}_retrieval.png"),
             dataset=args.dataset,
             query_rank=q_rank,
+            query_bbox=q_bbox,
+            ret_bboxes=ret_bboxes,
         )
 
         # Figure 2 — saliency grid
@@ -686,6 +733,8 @@ def run_inference(args):
             query_rank=q_rank,
             model_type=args.model_type,
             explainer_name=args.explainer.upper(),
+            query_bbox=q_bbox,
+            ret_bboxes=ret_bboxes,
         )
 
     print(f"\nDone. All results saved to: {args.output_dir}")
