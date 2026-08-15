@@ -26,6 +26,7 @@ from loss import (
     ATHTripletCrossEntropyLoss,
     RadIRImageRankingLoss,
     LoFiCOVIDLoss,
+    PCAMRetrievalLoss,
     ConceptCLIPLoss,
     JaccardSupConLoss,
 )
@@ -40,6 +41,7 @@ from model import (
     ConvNeXtV2_SRA,
     ConvNeXtV2_ATH,
     ConvNeXtV2_LoFi,
+    ConvNeXtV2_PCAM,
     SwinV2,
     DinoV2,
     conceptCLIP,
@@ -736,6 +738,8 @@ def main(args):
             args.loss_name = "ath_triplet_ce"
         elif args.model == "convnextv2_lofi":
             args.loss_name = "lofi"
+        elif args.model == "convnextv2_pcam":
+            args.loss_name = "pcam"
         elif args.dataset == "nih":
             args.loss_name = "jaccard_supcon"
         elif args.dataset == "vindr":
@@ -823,6 +827,14 @@ def main(args):
             num_regions=args.lofi_num_regions,
             lam=args.lofi_lam,
         )
+    elif args.model == "convnextv2_pcam":
+        if args.dataset != "covid":
+            raise ValueError("ConvNeXtV2-PCAM training currently supports COVIDx only.")
+        model = ConvNeXtV2_PCAM(
+            num_classes=args.pcam_num_classes,
+            lam=args.pcam_lam,
+            embedding_dim=args.embedding_dim,
+        )
     elif args.model == "swinv2":
         model = SwinV2(embedding_dim=args.embedding_dim)
     elif args.model == "dinov2":
@@ -905,6 +917,15 @@ def main(args):
             focus_weight=args.lofi_focus_weight,
             diversity_weight=args.lofi_diversity_weight,
         )
+    elif args.loss_name == "pcam":
+        if args.dataset != "covid" or args.model != "convnextv2_pcam":
+            raise ValueError(
+                "pcam loss requires --dataset covid --model convnextv2_pcam"
+            )
+        criterion = PCAMRetrievalLoss(
+            margin=args.margin,
+            ce_weight=args.pcam_ce_weight,
+        )
     elif args.loss_name == "supcon":
         criterion = SupervisedContrastiveLoss(temperature=args.supcon_temperature)
     elif args.loss_name == "jaccard_supcon":
@@ -970,7 +991,7 @@ def main(args):
                 {"params": model_without_ddp.fc.parameters(), "lr": args.lr},
             ]
         )
-    elif args.model in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "hybrid_convnext_vit"]:
+    elif args.model in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "convnextv2_pcam", "hybrid_convnext_vit"]:
         # ConvNeXt or Hybrid model - use different LR for backbone vs head
         model_without_ddp = model.module if args.use_ddp else model
         backbone_params = []
@@ -987,6 +1008,7 @@ def main(args):
                 or "region_attention" in name
                 or "region_classifier" in name
                 or "logit_" in name
+                or "pcam" in name
             ):
                 head_params.append(param)
             else:
@@ -1052,7 +1074,7 @@ def main(args):
         default_img_size = (
             384
             if args.model
-            in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "swinv2", "hybrid_convnext_vit"]
+            in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "convnextv2_pcam", "swinv2", "hybrid_convnext_vit"]
             else 224
         )
         img_size = args.image_size or default_img_size
@@ -1463,7 +1485,7 @@ def parse_args():
     parser.add_argument(
         "--model",
         default="densenet121",
-        help="Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, convnextv2_ath, convnextv2_lofi, swinv2, dinov2, hybrid_convnext_vit, conceptclip, or resnet50_attention)",
+        help="Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, convnextv2_ath, convnextv2_lofi, convnextv2_pcam, swinv2, dinov2, hybrid_convnext_vit, conceptclip, or resnet50_attention)",
     )
     parser.add_argument(
         "--embedding-dim", default=None, type=int, help="Embedding dimension of model"
@@ -1527,6 +1549,15 @@ def parse_args():
     parser.add_argument("--lofi-classification-weight", default=1.0, type=float)
     parser.add_argument("--lofi-focus-weight", default=0.05, type=float)
     parser.add_argument("--lofi-diversity-weight", default=0.01, type=float)
+    parser.add_argument("--pcam-num-classes", default=3, type=int)
+    parser.add_argument(
+        "--pcam-lam", default=0.1, type=float,
+        help="Residual probability-CAM feature weight.",
+    )
+    parser.add_argument(
+        "--pcam-ce-weight", default=1.0, type=float,
+        help="Class-supervision weight used to learn the probability CAMs.",
+    )
     parser.add_argument(
         "--freeze-backbone",
         action="store_true",
@@ -1596,6 +1627,7 @@ def parse_args():
             "ath_triplet_ce",
             "radir_cxr",
             "lofi",
+            "pcam",
         ],
         help="Metric loss to use. Defaults to a dataset-appropriate choice when omitted.",
     )

@@ -171,6 +171,37 @@ class LoFiCOVIDLoss(nn.Module):
         }
 
 
+class PCAMRetrievalLoss(nn.Module):
+    """Triplet retrieval plus class supervision for probabilistic CAM pooling."""
+
+    def __init__(self, margin=0.2, ce_weight=1.0, p=2.0):
+        super().__init__()
+        self.margin = margin
+        self.ce_weight = ce_weight
+        self.p = p
+
+    def forward(self, outputs, labels):
+        if not isinstance(outputs, dict):
+            raise TypeError("PCAM loss expects a model output dictionary.")
+        required = {"embedding", "class_logits", "pcam_maps"}
+        missing = required.difference(outputs)
+        if missing:
+            raise KeyError(f"PCAM model output is missing keys: {sorted(missing)}")
+        if labels.ndim != 1:
+            raise ValueError("PCAM COVIDx training requires single-class labels.")
+
+        triplet_loss, active_fraction = batch_all_triplet_loss(
+            labels, outputs["embedding"], self.margin, self.p
+        )
+        classification_loss = F.cross_entropy(outputs["class_logits"], labels.long())
+        total = triplet_loss + self.ce_weight * classification_loss
+        return total, {
+            "pcam_triplet": triplet_loss.detach(),
+            "pcam_ce": classification_loss.detach(),
+            "pcam_active": active_fraction.detach(),
+        }
+
+
 class SupervisedContrastiveLoss(nn.Module):
     def __init__(self, temperature=0.07, eps=1e-8):
         super().__init__()
