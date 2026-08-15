@@ -27,6 +27,7 @@ from model import (
     ConvNeXtV2_PCAM,
     ConvNeXtV2_LoFi,
     ConvNeXtV2_RRAVL,
+    ConvNeXtV2_MSAtt,
     SwinV2,
     DinoV2,
     MedSigLIP,
@@ -1442,6 +1443,7 @@ def main(args):
             'radir_cxr': 'convnextv2',
             'lofi': 'convnextv2_lofi',
             'rra_vl': 'convnextv2_rra_vl',
+            'msatt': 'convnextv2_msatt',
         }
         expected_model = expected_models.get(args.fair_i2i_method)
         if expected_model is not None and args.model != expected_model:
@@ -1631,6 +1633,12 @@ def main(args):
                 lam=args.rra_lam,
             )
             is_conceptclip = False
+        elif args.model == 'convnextv2_msatt':
+            model = ConvNeXtV2_MSAtt(
+                bottleneck_reduction=args.msatt_bottleneck_reduction,
+                se_reduction=args.msatt_se_reduction,
+            )
+            is_conceptclip = False
         elif args.model == 'convnextv2_ath':
             model = ConvNeXtV2_ATH(
                 hash_bits=args.ath_hash_bits,
@@ -1695,12 +1703,12 @@ def main(args):
             # Use 384x384 for ConvNeXtV2 and SwinV2, 448x448 for MedSigLIP, 224x224 for other models
             if args.model == 'medsiglip':
                 img_size = 448
-            elif args.model in ['convnextv2', 'convnextv2_sra', 'convnextv2_ath', 'convnextv2_pcam', 'convnextv2_lofi', 'convnextv2_rra_vl', 'swinv2']:
+            elif args.model in ['convnextv2', 'convnextv2_sra', 'convnextv2_ath', 'convnextv2_pcam', 'convnextv2_lofi', 'convnextv2_rra_vl', 'convnextv2_msatt', 'swinv2']:
                 img_size = 384
             else:
                 img_size = 224
 
-            if args.dataset == 'nih' and args.model in ['convnextv2', 'convnextv2_sra', 'convnextv2_ath', 'convnextv2_pcam', 'convnextv2_lofi', 'convnextv2_rra_vl', 'swinv2']:
+            if args.dataset == 'nih' and args.model in ['convnextv2', 'convnextv2_sra', 'convnextv2_ath', 'convnextv2_pcam', 'convnextv2_lofi', 'convnextv2_rra_vl', 'convnextv2_msatt', 'swinv2']:
                 test_transform = transforms.Compose([
                     transforms.Lambda(lambda img: img.convert('RGB')),
                     transforms.Resize(432),
@@ -1708,7 +1716,7 @@ def main(args):
                     transforms.ToTensor(),
                     normalize
                 ])
-            elif args.model in ['convnextv2', 'convnextv2_sra', 'convnextv2_ath', 'convnextv2_pcam', 'convnextv2_lofi', 'convnextv2_rra_vl', 'swinv2', 'medsiglip']:
+            elif args.model in ['convnextv2', 'convnextv2_sra', 'convnextv2_ath', 'convnextv2_pcam', 'convnextv2_lofi', 'convnextv2_rra_vl', 'convnextv2_msatt', 'swinv2', 'medsiglip']:
                 test_transform = transforms.Compose([
                     transforms.Lambda(lambda img: img.convert('RGB')),
                     transforms.Resize((img_size, img_size)),
@@ -1892,7 +1900,7 @@ def parse_args():
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, convnextv2_ath, convnextv2_pcam, convnextv2_lofi, convnextv2_rra_vl, swinv2, medsiglip, conceptclip, biomedclip, or dinov2)')
+                        help='Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, convnextv2_ath, convnextv2_pcam, convnextv2_lofi, convnextv2_rra_vl, convnextv2_msatt, swinv2, medsiglip, conceptclip, biomedclip, or dinov2)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
     parser.add_argument('--dinov2-model-name', default='vit_base_patch14_dinov2.lvd142m', type=str,
@@ -1917,6 +1925,8 @@ def parse_args():
     parser.add_argument('--rra-num-heads', default=8, type=int)
     parser.add_argument('--rra-depth', default=3, type=int)
     parser.add_argument('--rra-lam', default=0.1, type=float)
+    parser.add_argument('--msatt-bottleneck-reduction', default=4, type=int)
+    parser.add_argument('--msatt-se-reduction', default=16, type=int)
     parser.add_argument('--ath-hash-bits', default=1024, type=int,
                         help='ATH hash dimension; 1024 is capacity-matched to SRA, paper default is 36')
     parser.add_argument('--ath-num-classes', default=3, type=int,
@@ -1927,12 +1937,12 @@ def parse_args():
     # deliberately identical to SRA (image embedding + exhaustive cosine).
     parser.add_argument(
         '--fair-i2i-method', default='standard',
-        choices=['standard', 'baseline', 'sra', 'ath', 'pcam', 'radir_cxr', 'lofi', 'rra_vl'],
+        choices=['standard', 'baseline', 'sra', 'ath', 'pcam', 'radir_cxr', 'lofi', 'rra_vl', 'msatt'],
         help=(
             'Enable the shared exact image-to-image protocol and tag the checkpoint method. '
             'Use convnextv2 for baseline/radir_cxr, convnextv2_lofi for lofi, '
             'convnextv2_rra_vl for rra_vl, convnextv2_sra for sra, '
-            'convnextv2_ath for ath, and convnextv2_pcam for pcam.'
+            'convnextv2_msatt for msatt, convnextv2_ath for ath, and convnextv2_pcam for pcam.'
         ),
     )
     parser.add_argument(

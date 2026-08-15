@@ -465,6 +465,94 @@ class ConvNeXtV2_RRAVL(nn.Module):
         return embedding
 
 
+class MSAttentionBottleneck(nn.Module):
+    def __init__(self, channels, reduction=4):
+        super().__init__()
+        hidden = max(channels // reduction, 16)
+        self.block = nn.Sequential(
+            nn.Conv2d(channels, hidden, kernel_size=1, bias=False),
+            nn.GELU(),
+            nn.Conv2d(hidden, hidden, kernel_size=3, padding=1, bias=False),
+            nn.GELU(),
+            nn.Conv2d(hidden, channels, kernel_size=1, bias=False),
+        )
+        self.norm = nn.GroupNorm(1, channels)
+
+    def forward(self, x):
+        return F.gelu(self.norm(x + self.block(x)))
+
+
+class MSAttentionModule(nn.Module):
+    """Three bottlenecks, squeeze-excitation and spatial sigmoid attention."""
+
+    def __init__(self, channels, bottleneck_reduction=4, se_reduction=16):
+        super().__init__()
+        self.bottlenecks = nn.Sequential(
+            *[
+                MSAttentionBottleneck(channels, bottleneck_reduction)
+                for _ in range(3)
+            ]
+        )
+        se_hidden = max(channels // se_reduction, 16)
+        self.se = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(channels, se_hidden, kernel_size=1),
+            nn.GELU(),
+            nn.Conv2d(se_hidden, channels, kernel_size=1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x):
+        x = self.bottlenecks(x)
+        x = x * self.se(x)
+        return torch.sigmoid(x.mean(dim=1, keepdim=True))
+
+
+class ConvNeXtV2_MSAtt(nn.Module):
+    """ConvNeXtV2 adaptation of Multi-Similarity Attention retrieval.
+
+    The spatial mask is predicted from the penultimate ConvNeXtV2 stage and
+    applied to the final feature map, mirroring the paper's intermediate-to-
+    later-stage attention route. No projection is used so the output remains
+    the same 1024-D capacity as ConvNeXtV2-SRA.
+    """
+
+    def __init__(
+        self,
+        pretrained=True,
+        bottleneck_reduction=4,
+        se_reduction=16,
+    ):
+        super().__init__()
+        self.convnext = timm.create_model(
+            "convnextv2_base.fcmae_ft_in22k_in1k_384",
+            pretrained=pretrained,
+            num_classes=0,
+        )
+        mid_channels = self.convnext.num_features // 2
+        self.attention = MSAttentionModule(
+            mid_channels,
+            bottleneck_reduction=bottleneck_reduction,
+            se_reduction=se_reduction,
+        )
+
+    def forward(self, x):
+        x = self.convnext.stem(x)
+        for stage in self.convnext.stages[:3]:
+            x = stage(x)
+        attention = self.attention(x)
+        x = self.convnext.stages[3](x)
+        attention = F.interpolate(
+            attention, size=x.shape[-2:], mode="bilinear", align_corners=False
+        )
+        x = x * attention
+        x = self.convnext.head.norm(x)
+        embedding = F.normalize(x.mean(dim=(2, 3)), dim=1)
+        if self.training:
+            return {"embedding": embedding, "attention": attention}
+        return embedding
+
+
 class PCAMPool(nn.Module):
     """Probabilistic-CAM pooling adapted for retrieval embeddings."""
 

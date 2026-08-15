@@ -258,6 +258,72 @@ class RRAVLCOVIDLoss(nn.Module):
         }
 
 
+class MultiSimilarityHardMiningLoss(nn.Module):
+    """Multi-similarity loss with the paper's informative-pair mining rule.
+
+    Positive pairs are retained when they are not clearly easier than the
+    hardest negative; negative pairs are retained when they are not clearly
+    easier than the hardest positive. Defaults follow Zhong et al. for COVIDx:
+    alpha=2, beta=20 and base=lambda=0.5. The mining epsilon follows the
+    original multi-similarity implementation.
+    """
+
+    def __init__(self, alpha=2.0, beta=20.0, base=0.5, epsilon=0.1):
+        super().__init__()
+        if alpha <= 0 or beta <= 0:
+            raise ValueError("Multi-similarity alpha and beta must be positive.")
+        self.alpha = alpha
+        self.beta = beta
+        self.base = base
+        self.epsilon = epsilon
+
+    def forward(self, outputs, labels):
+        embeddings = outputs["embedding"] if isinstance(outputs, dict) else outputs
+        if labels.ndim != 1:
+            raise ValueError("MSAtt currently requires single-class labels.")
+        embeddings = F.normalize(embeddings, p=2, dim=1)
+        similarity = embeddings @ embeddings.t()
+        diagonal = torch.eye(len(labels), dtype=torch.bool, device=labels.device)
+        same_class = labels[:, None].eq(labels[None, :])
+
+        losses = []
+        selected_pairs = 0
+        available_pairs = 0
+        for anchor in range(len(labels)):
+            positive = similarity[anchor][same_class[anchor] & ~diagonal[anchor]]
+            negative = similarity[anchor][~same_class[anchor]]
+            if positive.numel() == 0 or negative.numel() == 0:
+                continue
+            available_pairs += positive.numel() + negative.numel()
+
+            hard_positive = positive[positive < negative.max() + self.epsilon]
+            hard_negative = negative[negative > positive.min() - self.epsilon]
+            if hard_positive.numel() == 0 and hard_negative.numel() == 0:
+                continue
+            selected_pairs += hard_positive.numel() + hard_negative.numel()
+
+            positive_loss = embeddings.new_zeros(())
+            negative_loss = embeddings.new_zeros(())
+            if hard_positive.numel() > 0:
+                positive_loss = torch.log1p(
+                    torch.exp(-self.alpha * (hard_positive - self.base)).sum()
+                ) / self.alpha
+            if hard_negative.numel() > 0:
+                negative_loss = torch.log1p(
+                    torch.exp(self.beta * (hard_negative - self.base)).sum()
+                ) / self.beta
+            losses.append(positive_loss + negative_loss)
+
+        if not losses:
+            loss = embeddings.sum() * 0.0
+        else:
+            loss = torch.stack(losses).mean()
+        selected_fraction = embeddings.new_tensor(float(selected_pairs)) / max(
+            float(available_pairs), 1.0
+        )
+        return loss, {"ms_selected_fraction": selected_fraction.detach()}
+
+
 class SupervisedContrastiveLoss(nn.Module):
     def __init__(self, temperature=0.07, eps=1e-8):
         super().__init__()

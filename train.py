@@ -28,6 +28,7 @@ from loss import (
     LoFiCOVIDLoss,
     PCAMRetrievalLoss,
     RRAVLCOVIDLoss,
+    MultiSimilarityHardMiningLoss,
     ConceptCLIPLoss,
     JaccardSupConLoss,
 )
@@ -44,6 +45,7 @@ from model import (
     ConvNeXtV2_LoFi,
     ConvNeXtV2_PCAM,
     ConvNeXtV2_RRAVL,
+    ConvNeXtV2_MSAtt,
     SwinV2,
     DinoV2,
     conceptCLIP,
@@ -452,7 +454,11 @@ def train_epoch_conceptclip(
 @torch.no_grad()
 def _compute_single_label_retrieval_metrics(embeds, labels, topk=(1, 5, 10)):
     if len(labels) <= 1:
-        return {"mAP": 0.0, **{f"R@{k}": 0.0 for k in topk}}
+        return {
+            "mAP": 0.0,
+            **{f"R@{k}": 0.0 for k in topk},
+            **{f"mP@{k}": 0.0 for k in topk},
+        }
 
     embeds_norm = F.normalize(embeds, p=2, dim=1)
     sim_matrix = torch.mm(embeds_norm, embeds_norm.t())
@@ -491,6 +497,11 @@ def _compute_single_label_retrieval_metrics(embeds, labels, topk=(1, 5, 10)):
             if actual_k > 0
             else 0.0
         )
+        metrics[f"mP@{k}"] = (
+            relevant[:, :actual_k].float().mean(dim=1).mean().item() * 100.0
+            if actual_k > 0
+            else 0.0
+        )
     return metrics
 
 
@@ -498,7 +509,11 @@ def _compute_multilabel_retrieval_metrics(
     embeds, labels, topk=(1, 5, 10), relevance_threshold=0.4
 ):
     if len(labels) <= 1:
-        return {"mAP": 0.0, **{f"R@{k}": 0.0 for k in topk}}
+        return {
+            "mAP": 0.0,
+            **{f"R@{k}": 0.0 for k in topk},
+            **{f"mP@{k}": 0.0 for k in topk},
+        }
 
     embeds_norm = F.normalize(embeds, p=2, dim=1)
     sim_matrix = torch.mm(embeds_norm, embeds_norm.t())
@@ -510,6 +525,7 @@ def _compute_multilabel_retrieval_metrics(
     metrics = {}
     aps = []
     recalls = {k: [] for k in topk}
+    precisions_at_k = {k: [] for k in topk}
 
     for i in range(len(embeds)):
         intersect = (labels[i] * labels).sum(dim=1)
@@ -533,10 +549,20 @@ def _compute_multilabel_retrieval_metrics(
             recalls[k].append(
                 float(ranked_relevance[:actual_k].any().item()) if actual_k > 0 else 0.0
             )
+            precisions_at_k[k].append(
+                float(ranked_relevance[:actual_k].mean().item())
+                if actual_k > 0
+                else 0.0
+            )
 
     metrics["mAP"] = float(np.mean(aps) * 100.0) if len(aps) > 0 else 0.0
     for k in topk:
         metrics[f"R@{k}"] = float(np.mean(recalls[k]) * 100.0) if recalls[k] else 0.0
+        metrics[f"mP@{k}"] = (
+            float(np.mean(precisions_at_k[k]) * 100.0)
+            if precisions_at_k[k]
+            else 0.0
+        )
     return metrics
 
 
@@ -548,6 +574,12 @@ def _print_retrieval_metrics(prefix, metrics, rank):
             f"R@1={metrics['R@1']:.3f}%, "
             f"R@5={metrics['R@5']:.3f}%, "
             f"R@10={metrics['R@10']:.3f}%"
+        )
+        print(
+            f">> {prefix} mean Precision@K: "
+            f"mP@1={metrics['mP@1']:.3f}%, "
+            f"mP@5={metrics['mP@5']:.3f}%, "
+            f"mP@10={metrics['mP@10']:.3f}%"
         )
 
 
@@ -744,6 +776,8 @@ def main(args):
             args.loss_name = "pcam"
         elif args.model == "convnextv2_rra_vl":
             args.loss_name = "rra_vl"
+        elif args.model == "convnextv2_msatt":
+            args.loss_name = "multi_similarity"
         elif args.dataset == "nih":
             args.loss_name = "jaccard_supcon"
         elif args.dataset == "vindr":
@@ -850,6 +884,13 @@ def main(args):
             depth=args.rra_depth,
             lam=args.rra_lam,
         )
+    elif args.model == "convnextv2_msatt":
+        if args.dataset != "covid":
+            raise ValueError("ConvNeXtV2-MSAtt currently supports COVIDx only.")
+        model = ConvNeXtV2_MSAtt(
+            bottleneck_reduction=args.msatt_bottleneck_reduction,
+            se_reduction=args.msatt_se_reduction,
+        )
     elif args.model == "swinv2":
         model = SwinV2(embedding_dim=args.embedding_dim)
     elif args.model == "dinov2":
@@ -951,6 +992,17 @@ def main(args):
             local_weight=args.rra_local_weight,
             classification_weight=args.rra_classification_weight,
         )
+    elif args.loss_name == "multi_similarity":
+        if args.dataset != "covid" or args.model != "convnextv2_msatt":
+            raise ValueError(
+                "multi_similarity loss requires --dataset covid --model convnextv2_msatt"
+            )
+        criterion = MultiSimilarityHardMiningLoss(
+            alpha=args.ms_alpha,
+            beta=args.ms_beta,
+            base=args.ms_lambda,
+            epsilon=args.ms_epsilon,
+        )
     elif args.loss_name == "supcon":
         criterion = SupervisedContrastiveLoss(temperature=args.supcon_temperature)
     elif args.loss_name == "jaccard_supcon":
@@ -1016,7 +1068,7 @@ def main(args):
                 {"params": model_without_ddp.fc.parameters(), "lr": args.lr},
             ]
         )
-    elif args.model in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "convnextv2_pcam", "convnextv2_rra_vl", "hybrid_convnext_vit"]:
+    elif args.model in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "convnextv2_pcam", "convnextv2_rra_vl", "convnextv2_msatt", "hybrid_convnext_vit"]:
         # ConvNeXt or Hybrid model - use different LR for backbone vs head
         model_without_ddp = model.module if args.use_ddp else model
         backbone_params = []
@@ -1103,7 +1155,7 @@ def main(args):
         default_img_size = (
             384
             if args.model
-            in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "convnextv2_pcam", "convnextv2_rra_vl", "swinv2", "hybrid_convnext_vit"]
+            in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "convnextv2_pcam", "convnextv2_rra_vl", "convnextv2_msatt", "swinv2", "hybrid_convnext_vit"]
             else 224
         )
         img_size = args.image_size or default_img_size
@@ -1514,7 +1566,7 @@ def parse_args():
     parser.add_argument(
         "--model",
         default="densenet121",
-        help="Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, convnextv2_ath, convnextv2_lofi, convnextv2_pcam, convnextv2_rra_vl, swinv2, dinov2, hybrid_convnext_vit, conceptclip, or resnet50_attention)",
+        help="Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, convnextv2_ath, convnextv2_lofi, convnextv2_pcam, convnextv2_rra_vl, convnextv2_msatt, swinv2, dinov2, hybrid_convnext_vit, conceptclip, or resnet50_attention)",
     )
     parser.add_argument(
         "--embedding-dim", default=None, type=int, help="Embedding dimension of model"
@@ -1604,6 +1656,15 @@ def parse_args():
         help="Weight of region-conditioned triplet loss (paper local beta=0.1).",
     )
     parser.add_argument("--rra-classification-weight", default=1.0, type=float)
+    parser.add_argument("--ms-alpha", default=2.0, type=float)
+    parser.add_argument("--ms-beta", default=20.0, type=float)
+    parser.add_argument(
+        "--ms-lambda", default=0.5, type=float,
+        help="Multi-similarity decision boundary (lambda in the paper).",
+    )
+    parser.add_argument("--ms-epsilon", default=0.1, type=float)
+    parser.add_argument("--msatt-bottleneck-reduction", default=4, type=int)
+    parser.add_argument("--msatt-se-reduction", default=16, type=int)
     parser.add_argument(
         "--freeze-backbone",
         action="store_true",
@@ -1675,6 +1736,7 @@ def parse_args():
             "lofi",
             "pcam",
             "rra_vl",
+            "multi_similarity",
         ],
         help="Metric loss to use. Defaults to a dataset-appropriate choice when omitted.",
     )
