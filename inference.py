@@ -1,35 +1,45 @@
 """
-inference.py — ConvNeXtV2 retrieval + saliency inference
+inference.py — Multi-model retrieval + XAI saliency inference
 
-For each dataset (covid, tbx11k, vindr):
+Supported models  : convnextv2 | convnextv2_sra | densenet121 | resnet50
+Supported XAI     : simcam | simatt
+Supported datasets: covid | tbx11k | vindr
+
+For each run:
   - Selects 3 query images (one per class when possible)
   - Retrieves top-5 similar images via embedding cosine similarity
-  - Generates SimCAM saliency maps for the query and each retrieved image
+  - Generates saliency maps (query + each retrieved image) with the chosen XAI method
   - Produces two output figures per query:
-      Figure 1: 1 query + 5 retrieved images (with labels/similarity)
+      Figure 1: 1 query + 5 retrieved images (labels, similarity, match/mismatch borders)
       Figure 2: saliency overlay on query + saliency overlay on 5 retrieved images
 
-Usage:
+Usage examples:
+    # ConvNeXtV2 + SimCAM on COVID CXR
     python inference.py \
+      --model_type convnextv2 --explainer simcam \
       --dataset covid \
       --data_dir /path/to/covid/images \
       --image_list /path/to/test_split.txt \
       --model_weights /path/to/convnextv2.pth \
-      --output_dir ./inference_results
+      --output_dir ./results/covid_convnextv2_simcam
 
+    # DenseNet121 + SimAtt on TBX11k
     python inference.py \
+      --model_type densenet121 --explainer simatt \
       --dataset tbx11k \
       --data_dir /path/to/tbx11k/images \
       --image_list /path/to/test.csv \
-      --model_weights /path/to/convnextv2.pth \
-      --output_dir ./inference_results
+      --model_weights /path/to/densenet121.pth \
+      --output_dir ./results/tbx11k_densenet121_simatt
 
+    # ConvNeXtV2-SRA + SimAtt on VinDR
     python inference.py \
+      --model_type convnextv2_sra --explainer simatt \
       --dataset vindr \
       --data_dir /path/to/vindr/images \
       --image_list /path/to/image_labels_test_vindr.csv \
-      --model_weights /path/to/convnextv2.pth \
-      --output_dir ./inference_results
+      --model_weights /path/to/convnextv2_sra.pth \
+      --output_dir ./results/vindr_convnextv2sra_simatt
 """
 
 import argparse
@@ -47,8 +57,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
-from model import ConvNeXtV2
-from explanations import SimCAM
+from model import ConvNeXtV2, ConvNeXtV2_SRA, DenseNet121, ResNet50
+from explanations import SimCAM, SimAtt
 from read_data import ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
 
 # ---------------------------------------------------------------------------
@@ -71,13 +81,33 @@ VINDR_DISEASE_COLS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Model + transform
+# Model + transform + explainer builders
 # ---------------------------------------------------------------------------
 
-def build_model(weights_path: str, embedding_dim, device):
-    model = ConvNeXtV2(embedding_dim=embedding_dim)
+# Input resolution for each model family
+MODEL_INPUT_SIZES = {
+    "convnextv2":     384,
+    "convnextv2_sra": 384,
+    "densenet121":    224,
+    "resnet50":       224,
+}
+
+
+def build_model(model_type: str, weights_path: str, embedding_dim, device):
+    """Instantiate and load a model from checkpoint."""
+    if model_type == "convnextv2":
+        model = ConvNeXtV2(embedding_dim=embedding_dim)
+    elif model_type == "convnextv2_sra":
+        model = ConvNeXtV2_SRA(embedding_dim=embedding_dim)
+    elif model_type == "densenet121":
+        model = DenseNet121(embedding_dim=embedding_dim)
+    elif model_type == "resnet50":
+        model = ResNet50(embedding_dim=embedding_dim)
+    else:
+        raise ValueError(f"Unsupported model_type: {model_type}. "
+                         "Choose: convnextv2, convnextv2_sra, densenet121, resnet50")
+
     checkpoint = torch.load(weights_path, map_location=device)
-    # Handle various checkpoint formats
     if isinstance(checkpoint, dict):
         state = (checkpoint.get("state-dict")
                  or checkpoint.get("state_dict")
@@ -91,21 +121,63 @@ def build_model(weights_path: str, embedding_dim, device):
     return model
 
 
-def build_transform():
+def build_transform(img_size: int):
     normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    resize_size = 432 if img_size == 384 else 256
     return transforms.Compose([
         transforms.Lambda(lambda img: img.convert("RGB")),
-        transforms.Resize(432),
-        transforms.CenterCrop(384),
+        transforms.Resize(resize_size),
+        transforms.CenterCrop(img_size),
         transforms.ToTensor(),
         normalize,
     ])
 
 
-def build_simcam(model: ConvNeXtV2):
-    """Attach SimCAM to the last block of the last ConvNeXtV2 stage."""
-    target_layer = model.convnext.stages[3].blocks[2]
-    return SimCAM(model=model.convnext, target_layer=target_layer, fc=None)
+def _simcam_target(model, model_type: str):
+    """Return (backbone, target_layer) for SimCAM per model type."""
+    if model_type in ("convnextv2", "convnextv2_sra"):
+        backbone = model.convnext
+        target_layer = model.convnext.stages[3].blocks[2]
+    elif model_type == "densenet121":
+        # features block (Sequential); hook on last dense block before norm
+        backbone = model.densenet121[0]
+        target_layer = model.densenet121[0].denseblock4
+    elif model_type == "resnet50":
+        # model.resnet50 is nn.Sequential ending at avgpool; index 7 = layer4
+        backbone = model.resnet50
+        target_layer = model.resnet50[7]
+    else:
+        raise ValueError(f"SimCAM not configured for model_type: {model_type}")
+    return backbone, target_layer
+
+
+def _simatt_target(model, model_type: str):
+    """Return the feature_module (target layer) for SimAtt per model type."""
+    if model_type in ("convnextv2", "convnextv2_sra"):
+        return model.convnext.stages[-1]
+    elif model_type == "densenet121":
+        return model.densenet121[0]          # entire DenseNet features block
+    elif model_type == "resnet50":
+        return model.resnet50[7]             # layer4
+    else:
+        raise ValueError(f"SimAtt not configured for model_type: {model_type}")
+
+
+def build_explainer(model, model_type: str, explainer_type: str):
+    """Build the XAI explainer for the given model and explainer type."""
+    if explainer_type == "simcam":
+        backbone, target_layer = _simcam_target(model, model_type)
+        explainer = SimCAM(model=backbone, target_layer=target_layer, fc=None)
+        explainer.eval()
+        return explainer
+    elif explainer_type == "simatt":
+        target_layer = _simatt_target(model, model_type)
+        # target_layers=None → use forward hook (supports nested backbone layers)
+        explainer = SimAtt(model=model, feature_module=target_layer, target_layers=None)
+        explainer.eval()
+        return explainer
+    else:
+        raise ValueError(f"Unsupported explainer: {explainer_type}. Choose: simcam, simatt")
 
 
 # ---------------------------------------------------------------------------
@@ -249,27 +321,49 @@ def normalize_sal(sal: np.ndarray) -> np.ndarray:
 def compute_simcam(simcam, query_tensor, retrieved_tensors, device):
     """
     Run SimCAM for one query vs. a batch of retrieved images.
+    SimCAM processes all K retrievals in a single forward pass.
 
     Returns:
-        query_sals:     np.ndarray [H, W]  — averaged over all retrievals
-        ret_sals:       list[np.ndarray]   — per-retrieved-image saliency [H, W]
+        query_sal:  np.ndarray [H, W]  — averaged query map across all K pairs
+        ret_sals:   list[np.ndarray]   — per-retrieved saliency [H, W]
     """
     simcam.eval()
-    x_q = query_tensor.unsqueeze(0).to(device)   # [1, 3, H, W]
-    x_r = torch.stack(retrieved_tensors).to(device)  # [K, 3, H, W]
+    x_q = query_tensor.unsqueeze(0).to(device)        # [1, 3, H, W]
+    x_r = torch.stack(retrieved_tensors).to(device)   # [K, 3, H, W]
 
-    # SimCAM returns [K, 2, H, W]: dim-1 channel 0 = query map, channel 1 = retrieval map
+    # SimCAM returns [K, 2, H, W]: ch-0 = query map, ch-1 = retrieval map
     with torch.set_grad_enabled(False):
         maps = simcam(x_q, x_r)  # [K, 2, H, W]
 
-    maps = maps.cpu().numpy()  # [K, 2, H, W]
-
-    # query saliency: average of the query-perspective maps across all retrievals
-    query_sals_raw = maps[:, 0, :, :]  # [K, H, W]
-    query_sal = normalize_sal(query_sals_raw.mean(axis=0))
-
+    maps = maps.cpu().numpy()
+    query_sal = normalize_sal(maps[:, 0, :, :].mean(axis=0))
     ret_sals = [normalize_sal(maps[i, 1, :, :]) for i in range(maps.shape[0])]
+    return query_sal, ret_sals
 
+
+def compute_simatt(simatt, query_tensor, retrieved_tensors, device):
+    """
+    Run SimAtt for one query vs each retrieved image (pairwise loop).
+    SimAtt is gradient-based — requires grad enabled and eval mode.
+
+    Returns:
+        query_sal:  np.ndarray [H, W]  — averaged query map across all K pairs
+        ret_sals:   list[np.ndarray]   — per-retrieved saliency [H, W]
+    """
+    simatt.eval()
+    x_q = query_tensor.unsqueeze(0).to(device)  # [1, 3, H, W]
+
+    query_sal_list, ret_sals = [], []
+    for r_tensor in retrieved_tensors:
+        x_r = r_tensor.unsqueeze(0).to(device)  # [1, 3, H, W]
+        # SimAtt(x_q, x_p) returns M: [2, H, W]  — index 0=query, 1=retrieved
+        with torch.set_grad_enabled(True):
+            M = simatt(x_q, x_r)
+        M_np = M.detach().cpu().numpy()
+        query_sal_list.append(normalize_sal(M_np[0]))
+        ret_sals.append(normalize_sal(M_np[1]))
+
+    query_sal = normalize_sal(np.stack(query_sal_list).mean(axis=0))
     return query_sal, ret_sals
 
 
@@ -418,6 +512,8 @@ def plot_saliency_figure(
     out_path: str,
     dataset: str,
     query_rank: int,
+    model_type: str = "convnextv2",
+    explainer_name: str = "SimCAM",
 ):
     """
     Figure 2: saliency overlay on query (left) + saliency overlay on each retrieved image.
@@ -426,7 +522,7 @@ def plot_saliency_figure(
     n_ret = len(ret_paths)
     fig, axes = plt.subplots(1, n_ret + 1, figsize=(4 * (n_ret + 1), 5.5))
     fig.suptitle(
-        f"[{dataset.upper()}]  Query #{query_rank + 1} — SimCAM Saliency",
+        f"[{dataset.upper()}]  Query #{query_rank + 1} — {explainer_name} Saliency  [{model_type}]",
         fontsize=13, fontweight="bold",
     )
 
@@ -505,10 +601,12 @@ def run_inference(args):
     print(f"Device: {device}")
 
     # ---- Model ----
-    print(f"Loading ConvNeXtV2 from {args.model_weights} ...")
-    model = build_model(args.model_weights, args.embedding_dim, device)
-    transform = build_transform()
-    simcam = build_simcam(model)
+    img_size = MODEL_INPUT_SIZES[args.model_type]
+    print(f"Loading {args.model_type} from {args.model_weights}  (input={img_size}x{img_size}) ...")
+    model = build_model(args.model_type, args.model_weights, args.embedding_dim, device)
+    transform = build_transform(img_size)
+    print(f"Building {args.explainer.upper()} explainer ...")
+    explainer = build_explainer(model, args.model_type, args.explainer)
 
     # ---- Dataset ----
     print(f"Loading dataset '{args.dataset}' ...")
@@ -558,14 +656,17 @@ def run_inference(args):
                 ret_tensors.append(transform(Image.open(rp).convert("RGB")))
             except Exception as exc:
                 print(f"  [WARN] {rp}: {exc}")
-                ret_tensors.append(torch.zeros(3, 384, 384))
+                ret_tensors.append(torch.zeros(3, img_size, img_size))
 
         # Saliency
-        print("  Computing SimCAM saliency ...")
-        query_sal, ret_sals = compute_simcam(simcam, q_tensor, ret_tensors, device)
+        print(f"  Computing {args.explainer.upper()} saliency ...")
+        if args.explainer == "simcam":
+            query_sal, ret_sals = compute_simcam(explainer, q_tensor, ret_tensors, device)
+        else:
+            query_sal, ret_sals = compute_simatt(explainer, q_tensor, ret_tensors, device)
 
-        # Figure base name
-        base = f"{args.dataset}_query{q_rank + 1:02d}"
+        # Figure base name includes model + explainer so runs don't overwrite each other
+        base = f"{args.dataset}_{args.model_type}_{args.explainer}_query{q_rank + 1:02d}"
 
         # Figure 1 — retrieval grid
         plot_retrieval_figure(
@@ -593,6 +694,8 @@ def run_inference(args):
             out_path=os.path.join(args.output_dir, f"{base}_saliency.png"),
             dataset=args.dataset,
             query_rank=q_rank,
+            model_type=args.model_type,
+            explainer_name=args.explainer.upper(),
         )
 
     print(f"\nDone. All results saved to: {args.output_dir}")
@@ -604,7 +707,17 @@ def run_inference(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="ConvNeXtV2 retrieval + SimCAM saliency inference"
+        description="Multi-model retrieval + XAI saliency inference"
+    )
+    parser.add_argument(
+        "--model_type", default="convnextv2",
+        choices=["convnextv2", "convnextv2_sra", "densenet121", "resnet50"],
+        help="Model architecture (default: convnextv2)",
+    )
+    parser.add_argument(
+        "--explainer", default="simcam",
+        choices=["simcam", "simatt"],
+        help="XAI method: simcam (no-grad, batch) or simatt (gradient-based, pairwise).",
     )
     parser.add_argument(
         "--dataset", required=True,
@@ -625,7 +738,7 @@ def parse_args():
     )
     parser.add_argument(
         "--model_weights", required=True,
-        help="Path to the ConvNeXtV2 .pth checkpoint",
+        help="Path to the model .pth checkpoint",
     )
     parser.add_argument(
         "--output_dir", default="./inference_results",
@@ -633,7 +746,7 @@ def parse_args():
     )
     parser.add_argument(
         "--embedding_dim", type=int, default=None,
-        help="Optional projection embedding dimension (None = 1024 base features)",
+        help="Optional projection embedding dimension (None = backbone default)",
     )
     parser.add_argument(
         "--num_queries", type=int, default=3,
