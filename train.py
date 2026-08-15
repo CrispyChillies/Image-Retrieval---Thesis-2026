@@ -23,6 +23,9 @@ from loss import (
     WeightedMultiLabelTripletLoss,
     SupervisedContrastiveLoss,
     DualBranchMultiLabelLoss,
+    ATHTripletCrossEntropyLoss,
+    RadIRImageRankingLoss,
+    LoFiCOVIDLoss,
     ConceptCLIPLoss,
     JaccardSupConLoss,
 )
@@ -35,6 +38,8 @@ from model import (
     DenseNet121,
     ConvNeXtV2,
     ConvNeXtV2_SRA,
+    ConvNeXtV2_ATH,
+    ConvNeXtV2_LoFi,
     SwinV2,
     DinoV2,
     conceptCLIP,
@@ -55,6 +60,31 @@ def has_npy_files(data_dir):
     return False
 
 
+def stratified_train_val_indices(labels, val_fraction, seed):
+    """Deterministically split every single-label class into train/validation."""
+    if not 0.0 < val_fraction < 1.0:
+        raise ValueError("--val-fraction must be strictly between 0 and 1")
+    labels = list(labels)
+    by_class = {}
+    for index, label in enumerate(labels):
+        by_class.setdefault(int(label), []).append(index)
+
+    rng = random.Random(seed)
+    train_indices, val_indices = [], []
+    for label, indices in sorted(by_class.items()):
+        if len(indices) < 2:
+            raise ValueError(
+                f"Class {label} has only {len(indices)} sample(s); stratified split needs at least 2."
+            )
+        indices = indices.copy()
+        rng.shuffle(indices)
+        val_count = max(1, int(round(len(indices) * val_fraction)))
+        val_count = min(val_count, len(indices) - 1)
+        val_indices.extend(indices[:val_count])
+        train_indices.extend(indices[val_count:])
+    return sorted(train_indices), sorted(val_indices)
+
+
 def train_epoch(
     model,
     optimizer,
@@ -66,6 +96,7 @@ def train_epoch(
     rank=0,
     lambda_area=0.1,
     lambda_sparse=0.01,
+    scaler=None,
 ):
     model.train()
     running_loss = 0
@@ -75,41 +106,48 @@ def train_epoch(
         optimizer.zero_grad()
         samples, targets = data[0].to(device), data[1].to(device)
 
-        output = model(samples)
-        if isinstance(output, dict):
-            embeddings = output
-            has_attention = False
-        elif isinstance(output, tuple) and len(output) == 2:
-            embeddings, attn = output
-            has_attention = True
-        else:
-            embeddings = output
-            has_attention = False
-
-        criterion_output = criterion(embeddings, targets)
-        if isinstance(criterion_output, tuple):
-            loss, aux_metric = criterion_output
-            if isinstance(
-                criterion, (TripletMarginLoss, WeightedMultiLabelTripletLoss)
-            ):
-                aux_metric_name = "% avg hard triplets"
+        with autocast(device_type=device.type, enabled=scaler is not None):
+            output = model(samples)
+            if isinstance(output, dict):
+                embeddings = output
+                has_attention = False
+            elif isinstance(output, tuple) and len(output) == 2:
+                embeddings, attn = output
+                has_attention = True
             else:
-                aux_metric_name = "aux"
+                embeddings = output
+                has_attention = False
+
+            criterion_output = criterion(embeddings, targets)
+            if isinstance(criterion_output, tuple):
+                loss, aux_metric = criterion_output
+                if isinstance(
+                    criterion, (TripletMarginLoss, WeightedMultiLabelTripletLoss)
+                ):
+                    aux_metric_name = "% avg hard triplets"
+                else:
+                    aux_metric_name = "aux"
+            else:
+                loss = criterion_output
+                aux_metric = None
+                aux_metric_name = None
+
+            # Attention Loss (only if model supports it)
+            if has_attention:
+                loss_area = attn.mean()
+                loss_sparse = torch.mean(attn * torch.log(attn + 1e-8))
+                loss = loss + lambda_area * loss_area + lambda_sparse * loss_sparse
+
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            scaler.step(optimizer)
+            scaler.update()
         else:
-            loss = criterion_output
-            aux_metric = None
-            aux_metric_name = None
-
-        # Attention Loss (only if model supports it)
-        if has_attention:
-            loss_area = attn.mean()
-            loss_sparse = torch.mean(attn * torch.log(attn + 1e-8))
-            loss = loss + lambda_area * loss_area + lambda_sparse * loss_sparse
-
-        loss.backward()
-
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
-        optimizer.step()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            optimizer.step()
 
         running_loss += loss.item()
         if aux_metric is not None:
@@ -634,6 +672,8 @@ def save(model, epoch, save_dir, args, is_best=False):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     file_name = args.dataset + "_" + args.model
+    if args.loss_name == "radir_cxr":
+        file_name += "_radir_cxr"
     if args.embedding_dim:
         file_name += "_embed_" + str(args.embedding_dim)
     if args.anomaly:
@@ -692,6 +732,10 @@ def main(args):
     if args.loss_name is None:
         if args.model == "conceptclip" and args.dataset == "vindr":
             args.loss_name = "conceptclip"
+        elif args.model == "convnextv2_ath":
+            args.loss_name = "ath_triplet_ce"
+        elif args.model == "convnextv2_lofi":
+            args.loss_name = "lofi"
         elif args.dataset == "nih":
             args.loss_name = "jaccard_supcon"
         elif args.dataset == "vindr":
@@ -761,6 +805,24 @@ def main(args):
             lam=args.sra_lam,
             num_labels=dual_branch_num_labels,
         )
+    elif args.model == "convnextv2_ath":
+        if args.dataset != "covid":
+            raise ValueError(
+                "ConvNeXtV2-ATH currently expects single-class COVIDx labels. "
+                "Set up an explicit class mapping before using another dataset."
+            )
+        model = ConvNeXtV2_ATH(
+            hash_bits=args.ath_hash_bits,
+            num_classes=args.ath_num_classes,
+        )
+    elif args.model == "convnextv2_lofi":
+        if args.dataset != "covid":
+            raise ValueError("ConvNeXtV2-LoFi adaptation currently supports COVIDx only.")
+        model = ConvNeXtV2_LoFi(
+            num_classes=args.lofi_num_classes,
+            num_regions=args.lofi_num_regions,
+            lam=args.lofi_lam,
+        )
     elif args.model == "swinv2":
         model = SwinV2(embedding_dim=args.embedding_dim)
     elif args.model == "dinov2":
@@ -818,6 +880,30 @@ def main(args):
             gamma_pos=args.asl_gamma_pos,
             gamma_neg=args.asl_gamma_neg,
             clip=args.asl_clip,
+        )
+    elif args.loss_name == "ath_triplet_ce":
+        if args.model != "convnextv2_ath":
+            raise ValueError("ath_triplet_ce requires --model convnextv2_ath")
+        criterion = ATHTripletCrossEntropyLoss(
+            margin=args.ath_margin,
+            ce_weight=args.ath_ce_weight,
+        )
+    elif args.loss_name == "radir_cxr":
+        if args.dataset != "covid" or args.model != "convnextv2":
+            raise ValueError(
+                "radir_cxr adaptation requires --dataset covid --model convnextv2"
+            )
+        criterion = RadIRImageRankingLoss(margin=args.radir_margin)
+    elif args.loss_name == "lofi":
+        if args.dataset != "covid" or args.model != "convnextv2_lofi":
+            raise ValueError(
+                "lofi adaptation requires --dataset covid --model convnextv2_lofi"
+            )
+        criterion = LoFiCOVIDLoss(
+            local_weight=args.lofi_local_weight,
+            classification_weight=args.lofi_classification_weight,
+            focus_weight=args.lofi_focus_weight,
+            diversity_weight=args.lofi_diversity_weight,
         )
     elif args.loss_name == "supcon":
         criterion = SupervisedContrastiveLoss(temperature=args.supcon_temperature)
@@ -884,7 +970,7 @@ def main(args):
                 {"params": model_without_ddp.fc.parameters(), "lr": args.lr},
             ]
         )
-    elif args.model in ["convnextv2", "convnextv2_sra", "hybrid_convnext_vit"]:
+    elif args.model in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "hybrid_convnext_vit"]:
         # ConvNeXt or Hybrid model - use different LR for backbone vs head
         model_without_ddp = model.module if args.use_ddp else model
         backbone_params = []
@@ -895,7 +981,12 @@ def main(args):
                 "fc" in name
                 or "fusion" in name
                 or "sra" in name
+                or "attention" in name
+                or "hash_layer" in name
                 or "classification_head" in name
+                or "region_attention" in name
+                or "region_classifier" in name
+                or "logit_" in name
             ):
                 head_params.append(param)
             else:
@@ -961,7 +1052,7 @@ def main(args):
         default_img_size = (
             384
             if args.model
-            in ["convnextv2", "convnextv2_sra", "swinv2", "hybrid_convnext_vit"]
+            in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "swinv2", "hybrid_convnext_vit"]
             else 224
         )
         img_size = args.image_size or default_img_size
@@ -1013,20 +1104,40 @@ def main(args):
 
     # Set up dataset and dataloader for embedding learning using triplet loss
     if args.dataset == "covid":
-        train_dataset = ChestXrayDataSet(
+        full_train_dataset = ChestXrayDataSet(
             data_dir=os.path.join(args.dataset_dir, "train"),
             image_list_file=args.train_image_list,
             use_covid=not args.anomaly,  # whether or not to use COVID in training
             mask_dir=os.path.join(args.mask_dir, "train") if args.mask_dir else None,
             transform=train_transform,
         )
-        val_dataset = ChestXrayDataSet(
-            # COVID validation split points to images under data/test.
-            data_dir=os.path.join(args.val_dataset_dir, "test"),
-            image_list_file=args.val_image_list,
-            mask_dir=os.path.join(args.mask_dir, "test") if args.mask_dir else None,
-            transform=val_transform,
-        )
+        if args.val_fraction > 0.0:
+            full_val_dataset = ChestXrayDataSet(
+                data_dir=os.path.join(args.dataset_dir, "train"),
+                image_list_file=args.train_image_list,
+                use_covid=not args.anomaly,
+                mask_dir=os.path.join(args.mask_dir, "train") if args.mask_dir else None,
+                transform=val_transform,
+            )
+            train_indices, val_indices = stratified_train_val_indices(
+                full_train_dataset.labels, args.val_fraction, args.seed
+            )
+            train_dataset = Subset(full_train_dataset, train_indices)
+            val_dataset = Subset(full_val_dataset, val_indices)
+            if rank == 0:
+                print(
+                    f"Stratified COVIDx train/validation split: "
+                    f"{len(train_dataset)}/{len(val_dataset)} (seed={args.seed})"
+                )
+        else:
+            train_dataset = full_train_dataset
+            val_dataset = ChestXrayDataSet(
+                # Only use this mode with a genuine validation manifest.
+                data_dir=os.path.join(args.val_dataset_dir, "test"),
+                image_list_file=args.val_image_list,
+                mask_dir=os.path.join(args.mask_dir, "test") if args.mask_dir else None,
+                transform=val_transform,
+            )
     elif args.dataset == "isic":
         train_dataset = ISICDataSet(
             data_dir=os.path.join(
@@ -1109,7 +1220,10 @@ def main(args):
     # This is required for PKSampler to randomly sample from exactly p classes. You will need to
     # construct targets while building your dataset. Some datasets (such as ImageFolder) have a
     # targets attribute with the same format.
-    targets = train_dataset.labels
+    if isinstance(train_dataset, Subset):
+        targets = [train_dataset.dataset.labels[index] for index in train_dataset.indices]
+    else:
+        targets = train_dataset.labels
 
     # Override batch_size if explicitly provided
     if args.batch_size:
@@ -1185,8 +1299,8 @@ def main(args):
             collate_fn=collate_fn,
         )
 
-    # Mixed precision scaler for ConceptCLIP
-    scaler = GradScaler("cuda") if (use_conceptclip_collate and args.amp) else None
+    # The same AMP policy is available to every method in a fair comparison.
+    scaler = GradScaler("cuda") if (args.amp and device.type == "cuda") else None
     if scaler is not None and rank == 0:
         print("Using mixed precision training (AMP)")
 
@@ -1225,6 +1339,7 @@ def main(args):
                 epoch,
                 args.print_freq,
                 rank=rank,
+                scaler=scaler,
             )
 
         # Evaluate every N epochs
@@ -1326,6 +1441,15 @@ def parse_args():
         help="Validation dataset directory path. Defaults to --dataset-dir when omitted",
     )
     parser.add_argument(
+        "--val-fraction",
+        default=0.0,
+        type=float,
+        help=(
+            "For COVIDx, make a deterministic class-stratified validation split "
+            "from --train-image-list. Recommended when no separate validation set exists."
+        ),
+    )
+    parser.add_argument(
         "--mask-dir", default=None, help="Segmentation masks path (if used)"
     )
     parser.add_argument(
@@ -1339,7 +1463,7 @@ def parse_args():
     parser.add_argument(
         "--model",
         default="densenet121",
-        help="Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, swinv2, dinov2, hybrid_convnext_vit, conceptclip, or resnet50_attention)",
+        help="Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, convnextv2_ath, convnextv2_lofi, swinv2, dinov2, hybrid_convnext_vit, conceptclip, or resnet50_attention)",
     )
     parser.add_argument(
         "--embedding-dim", default=None, type=int, help="Embedding dimension of model"
@@ -1362,6 +1486,47 @@ def parse_args():
         type=float,
         help="Lambda for residual attention in SRA (ConvNeXtV2_SRA)",
     )
+    parser.add_argument(
+        "--ath-hash-bits",
+        default=1024,
+        type=int,
+        help="ATH hash dimension; 1024 matches SRA capacity, while the paper uses 36.",
+    )
+    parser.add_argument(
+        "--ath-num-classes",
+        default=3,
+        type=int,
+        help="Number of COVIDx classes used by ATH cross-entropy.",
+    )
+    parser.add_argument(
+        "--ath-margin",
+        default=0.5,
+        type=float,
+        help="Per-dimension normalized margin for ATH triplet loss.",
+    )
+    parser.add_argument(
+        "--ath-ce-weight",
+        default=1.0,
+        type=float,
+        help="Cross-entropy weight in ATH triplet cross-entropy loss.",
+    )
+    parser.add_argument(
+        "--radir-margin", default=0.2, type=float,
+        help="Cosine ranking margin for the image-only RadIR COVIDx adaptation.",
+    )
+    parser.add_argument("--lofi-num-classes", default=3, type=int)
+    parser.add_argument(
+        "--lofi-num-regions", default=64, type=int,
+        help="Number of learned fine-grained attention pools (LoFi paper uses 64).",
+    )
+    parser.add_argument(
+        "--lofi-lam", default=0.1, type=float,
+        help="Residual weight of the weakly localized feature in the final descriptor.",
+    )
+    parser.add_argument("--lofi-local-weight", default=1.0, type=float)
+    parser.add_argument("--lofi-classification-weight", default=1.0, type=float)
+    parser.add_argument("--lofi-focus-weight", default=0.05, type=float)
+    parser.add_argument("--lofi-diversity-weight", default=0.01, type=float)
     parser.add_argument(
         "--freeze-backbone",
         action="store_true",
@@ -1428,6 +1593,9 @@ def parse_args():
             "jaccard_supcon",
             "supcon",
             "dual_branch",
+            "ath_triplet_ce",
+            "radir_cxr",
+            "lofi",
         ],
         help="Metric loss to use. Defaults to a dataset-appropriate choice when omitted.",
     )
@@ -1510,7 +1678,7 @@ def parse_args():
     parser.add_argument(
         "--amp",
         action="store_true",
-        help="Use mixed precision training (recommended for ConceptCLIP)",
+        help="Use CUDA automatic mixed precision training for any supported model.",
     )
 
     return parser.parse_args()

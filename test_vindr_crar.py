@@ -12,7 +12,7 @@ ensembles supply concept confidences. Ground-truth labels are used only for
 evaluation and never by CRAR.
 """
 
-from __future__ import annotations
+from __future__ import annotationsz 
 
 import argparse
 import csv

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 from PIL import Image
@@ -36,9 +37,12 @@ from test_vindr_crar import (
     anatomy_roi_mask,
     load_conceptclip,
     load_vindr_bboxes,
+    multilabel_metrics_at_threshold,
+    negative_prompts,
     output_value,
     patch_grid,
     positive_prompts,
+    threshold_free_classification_metrics,
 )
 
 
@@ -47,6 +51,8 @@ class LocalizationRecord:
     image_id: str
     image_path: Path
     boxes: dict[int, list[tuple[float, float, float, float]]]
+    labels: np.ndarray | None = None
+    teacher_embedding: torch.Tensor | None = None
 
 
 def resolve_image(image_dir: Path, image_id: str) -> Path | None:
@@ -61,6 +67,7 @@ def build_records(
     image_dir: str | os.PathLike[str],
     bbox_csv: str | os.PathLike[str],
     bbox_coord_size: float | None,
+    labels_csv: str | os.PathLike[str] | None = None,
 ) -> tuple[list[LocalizationRecord], dict[str, Any]]:
     root = Path(image_dir)
     if not root.is_dir():
@@ -69,11 +76,35 @@ def build_records(
         bbox_csv, LESION_CONCEPTS
     )
     concept_to_index = {name: index for index, name in enumerate(LESION_CONCEPTS)}
+    label_by_id: dict[str, np.ndarray] = {}
+    if labels_csv:
+        labels_path = Path(labels_csv)
+        if not labels_path.is_file():
+            raise FileNotFoundError(f"VinDr labels CSV does not exist: {labels_path}")
+        label_frame = pd.read_csv(labels_path)
+        if "Other disease" in label_frame.columns and "Other diseases" not in label_frame.columns:
+            label_frame = label_frame.rename(columns={"Other disease": "Other diseases"})
+        missing_columns = [
+            column for column in ["image_id", *ALL_CONCEPTS] if column not in label_frame.columns
+        ]
+        if missing_columns:
+            raise ValueError(f"VinDr labels CSV is missing columns: {missing_columns}")
+        label_frame[ALL_CONCEPTS] = (
+            label_frame[ALL_CONCEPTS].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+        )
+        label_frame = label_frame.groupby("image_id", as_index=False)[ALL_CONCEPTS].max()
+        label_by_id = {
+            str(row["image_id"]): row[ALL_CONCEPTS].to_numpy(dtype=np.float32)
+            for _, row in label_frame.iterrows()
+        }
+
     records: list[LocalizationRecord] = []
     missing_images: list[str] = []
     clipped_boxes = 0
 
-    for image_id, image_annotations in grouped.items():
+    candidate_ids = list(label_by_id) if label_by_id else list(grouped)
+    for image_id in candidate_ids:
+        image_annotations = grouped.get(image_id, {})
         image_path = resolve_image(root, image_id)
         if image_path is None:
             missing_images.append(image_id)
@@ -96,13 +127,22 @@ def build_records(
                     clipped_boxes += 1
                     continue
                 normalized.setdefault(concept_index, []).append(box)
-        if normalized:
-            records.append(LocalizationRecord(image_id, image_path, normalized))
+        if normalized or image_id in label_by_id:
+            records.append(
+                LocalizationRecord(
+                    image_id,
+                    image_path,
+                    normalized,
+                    label_by_id.get(image_id),
+                )
+            )
 
     stats = {
         "bbox_loader": loader_stats,
         "skipped_classes": skipped_classes,
-        "localization_images": len(records),
+        "total_images": len(records),
+        "localization_images": sum(bool(record.boxes) for record in records),
+        "classification_images": sum(record.labels is not None for record in records),
         "missing_images": len(missing_images),
         "missing_image_examples": missing_images[:10],
         "boxes_removed_after_clipping": clipped_boxes,
@@ -132,14 +172,28 @@ class VinDrLocalizationDataset(Dataset):
                           for x_min, y_min, x_max, y_max in concept_boxes]
                 for concept, concept_boxes in boxes.items()
             }
-        return {"image_id": record.image_id, "image": image, "boxes": boxes}
+        return {
+            "image_id": record.image_id,
+            "image": image,
+            "boxes": boxes,
+            "labels": torch.from_numpy(record.labels.copy())
+            if record.labels is not None
+            else None,
+            "teacher_embedding": record.teacher_embedding,
+        }
 
 
 def collate_samples(batch: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    labels = [item["labels"] for item in batch]
+    teacher_embeddings = [item["teacher_embedding"] for item in batch]
     return {
         "image_ids": [item["image_id"] for item in batch],
         "images": [item["image"] for item in batch],
         "boxes": [item["boxes"] for item in batch],
+        "labels": torch.stack(labels) if all(label is not None for label in labels) else None,
+        "teacher_embeddings": torch.stack(teacher_embeddings)
+        if all(embedding is not None for embedding in teacher_embeddings)
+        else None,
     }
 
 
@@ -166,8 +220,13 @@ def concept_counts(records: Sequence[LocalizationRecord]) -> dict[str, int]:
 
 
 @torch.inference_mode()
-def encode_prompt_ensemble(model, processor, device: torch.device) -> torch.Tensor:
-    flat_prompts = [prompt for concept in ALL_CONCEPTS for prompt in positive_prompts(concept)]
+def encode_prompt_ensemble(
+    model,
+    processor,
+    device: torch.device,
+    prompt_builder,
+) -> torch.Tensor:
+    flat_prompts = [prompt for concept in ALL_CONCEPTS for prompt in prompt_builder(concept)]
     inputs = processor(
         text=flat_prompts,
         padding=True,
@@ -180,7 +239,7 @@ def encode_prompt_ensemble(model, processor, device: torch.device) -> torch.Tens
         if key in {"input_ids", "attention_mask", "token_type_ids"}
     }
     features = output_value(model(**text_inputs), "text_features").float()
-    prompts_per_concept = len(positive_prompts(ALL_CONCEPTS[0]))
+    prompts_per_concept = len(prompt_builder(ALL_CONCEPTS[0]))
     features = features.view(len(ALL_CONCEPTS), prompts_per_concept, -1).mean(dim=1)
     return F.normalize(features, dim=-1)
 
@@ -286,7 +345,14 @@ def localization_loss(
         losses["concept"].append(concept_loss)
 
     if not losses["distribution"]:
-        raise RuntimeError("Batch contains no valid patch-level bbox targets")
+        zero = tokens.sum() * 0.0
+        return zero, {
+            "distribution": 0.0,
+            "ranking": 0.0,
+            "background": 0.0,
+            "concept": 0.0,
+            "localization_pairs": 0.0,
+        }
     means = {name: torch.stack(values).mean() for name, values in losses.items()}
     total = (
         args.distribution_weight * means["distribution"]
@@ -294,7 +360,85 @@ def localization_loss(
         + args.background_weight * means["background"]
         + args.concept_weight * means["concept"]
     )
-    return total, {name: float(value.detach()) for name, value in means.items()}
+    components = {name: float(value.detach()) for name, value in means.items()}
+    components["localization_pairs"] = float(valid.sum())
+    return total, components
+
+
+def concept_classification_logits(
+    image_features: torch.Tensor,
+    positive_text: torch.Tensor,
+    negative_text: torch.Tensor,
+    temperature: float,
+) -> torch.Tensor:
+    image_features = F.normalize(image_features.float(), dim=-1)
+    positive_text = F.normalize(positive_text.float(), dim=-1)
+    negative_text = F.normalize(negative_text.float(), dim=-1)
+    return (
+        image_features @ positive_text.t() - image_features @ negative_text.t()
+    ) / temperature
+
+
+def asymmetric_multilabel_loss(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    gamma_positive: float,
+    gamma_negative: float,
+    probability_clip: float,
+) -> torch.Tensor:
+    """ASL for imbalanced VinDr concepts using prompt-derived global logits."""
+    targets = targets.float()
+    positive_probability = torch.sigmoid(logits)
+    negative_probability = 1.0 - positive_probability
+    if probability_clip > 0.0:
+        negative_probability = (negative_probability + probability_clip).clamp(max=1.0)
+    log_likelihood = (
+        targets * torch.log(positive_probability.clamp_min(1e-8))
+        + (1.0 - targets) * torch.log(negative_probability.clamp_min(1e-8))
+    )
+    probability_correct = (
+        targets * positive_probability + (1.0 - targets) * negative_probability
+    )
+    gamma = targets * gamma_positive + (1.0 - targets) * gamma_negative
+    asymmetric_weight = (1.0 - probability_correct).clamp_min(0.0).pow(gamma)
+    return -(asymmetric_weight.detach() * log_likelihood).mean()
+
+
+@torch.inference_mode()
+def cache_pretrained_embeddings(
+    model,
+    processor,
+    records: Sequence[LocalizationRecord],
+    device: torch.device,
+    args: argparse.Namespace,
+) -> None:
+    """Cache the frozen starting embedding for low-memory feature preservation."""
+    model.eval()
+    loader = DataLoader(
+        VinDrLocalizationDataset(records, 0.0),
+        batch_size=args.eval_batch_size,
+        shuffle=False,
+        num_workers=args.workers,
+        pin_memory=device.type == "cuda",
+        collate_fn=collate_samples,
+    )
+    record_by_id = {record.image_id: record for record in records}
+    for batch_index, batch in enumerate(loader, start=1):
+        inputs = processor(images=batch["images"], return_tensors="pt")
+        pixel_values = inputs["pixel_values"].to(device, non_blocking=True)
+        with torch.autocast(
+            device_type=device.type,
+            dtype=torch.float16,
+            enabled=args.amp and device.type == "cuda",
+        ):
+            outputs = model(pixel_values=pixel_values)
+            embeddings = F.normalize(
+                output_value(outputs, "image_features").float(), dim=-1
+            ).cpu()
+        for image_id, embedding in zip(batch["image_ids"], embeddings):
+            record_by_id[image_id].teacher_embedding = embedding
+        if batch_index % args.print_freq == 0:
+            print(f"[preservation cache] {batch_index}/{len(loader)} batches")
 
 
 def calibrated_scores(raw_alignment: torch.Tensor, args: argparse.Namespace) -> torch.Tensor:
@@ -344,17 +488,21 @@ def evaluate_pghit(
     model,
     processor,
     loader: DataLoader,
-    all_text: torch.Tensor,
+    positive_text: torch.Tensor,
+    negative_text: torch.Tensor,
     device: torch.device,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
     model.eval()
-    all_text = F.normalize(all_text.float(), dim=-1)
+    positive_text = F.normalize(positive_text.float(), dim=-1)
+    negative_text = F.normalize(negative_text.float(), dim=-1)
     roi = anatomy_roi_mask((args.eval_heatmap_size, args.eval_heatmap_size))
     variants = {"before_calibration": [], "after_calibration": []}
     per_concept = {
         variant: {name: [] for name in LESION_CONCEPTS} for variant in variants
     }
+    classification_probabilities: list[torch.Tensor] = []
+    classification_targets: list[torch.Tensor] = []
 
     for batch_index, batch in enumerate(loader, start=1):
         inputs = processor(images=batch["images"], return_tensors="pt")
@@ -364,8 +512,19 @@ def evaluate_pghit(
             dtype=torch.float16,
             enabled=args.amp and device.type == "cuda",
         ):
-            tokens = spatial_tokens(model(pixel_values=pixel_values))
-        raw = tokens.float() @ all_text.t()
+            outputs = model(pixel_values=pixel_values)
+            tokens = spatial_tokens(outputs)
+            image_features = output_value(outputs, "image_features")
+        raw = tokens.float() @ positive_text.t()
+        if batch["labels"] is not None:
+            logits = concept_classification_logits(
+                image_features,
+                positive_text,
+                negative_text,
+                args.global_prompt_temperature,
+            )
+            classification_probabilities.append(torch.sigmoid(logits).cpu())
+            classification_targets.append(batch["labels"].cpu())
         for image_index, image_annotations in enumerate(batch["boxes"]):
             grid_height, grid_width = patch_grid(tokens.shape[1])
             calibrated = calibrated_scores(raw[image_index], args)
@@ -403,6 +562,24 @@ def evaluate_pghit(
             ) if class_metrics else None,
             "per_concept": class_metrics,
         }
+    if classification_targets:
+        probabilities = torch.cat(classification_probabilities).numpy()
+        targets = torch.cat(classification_targets).numpy()
+        result["classification"] = {
+            "at_threshold": multilabel_metrics_at_threshold(
+                probabilities,
+                targets,
+                ALL_CONCEPTS,
+                args.validation_classification_threshold,
+            ),
+            "threshold_free": threshold_free_classification_metrics(
+                probabilities,
+                targets,
+                ALL_CONCEPTS,
+            ),
+        }
+    else:
+        result["classification"] = None
     return result
 
 
@@ -478,7 +655,8 @@ def train_one_epoch(
     model,
     processor,
     loader: DataLoader,
-    lesion_text: torch.Tensor,
+    positive_text: torch.Tensor,
+    negative_text: torch.Tensor,
     optimizer,
     scheduler,
     scaler,
@@ -487,7 +665,20 @@ def train_one_epoch(
 ) -> dict[str, float]:
     model.train()
     optimizer.zero_grad(set_to_none=True)
-    totals: dict[str, float] = {name: 0.0 for name in ("total", "distribution", "ranking", "background", "concept")}
+    totals: dict[str, float] = {
+        name: 0.0
+        for name in (
+            "total",
+            "localization",
+            "global_classification",
+            "preservation",
+            "distribution",
+            "ranking",
+            "background",
+            "concept",
+            "localization_pairs",
+        )
+    }
 
     for batch_index, batch in enumerate(loader, start=1):
         inputs = processor(images=batch["images"], return_tensors="pt")
@@ -497,8 +688,48 @@ def train_one_epoch(
             dtype=torch.float16,
             enabled=args.amp and device.type == "cuda",
         ):
-            tokens = spatial_tokens(model(pixel_values=pixel_values))
-            loss, components = localization_loss(tokens, lesion_text, batch["boxes"], args)
+            outputs = model(pixel_values=pixel_values)
+            tokens = spatial_tokens(outputs)
+            image_features = output_value(outputs, "image_features")
+            localization, components = localization_loss(
+                tokens,
+                positive_text[: len(LESION_CONCEPTS)],
+                batch["boxes"],
+                args,
+            )
+            if batch["labels"] is not None:
+                global_logits = concept_classification_logits(
+                    image_features,
+                    positive_text,
+                    negative_text,
+                    args.global_prompt_temperature,
+                )
+                global_classification = asymmetric_multilabel_loss(
+                    global_logits,
+                    batch["labels"].to(device, non_blocking=True),
+                    args.global_asl_gamma_positive,
+                    args.global_asl_gamma_negative,
+                    args.global_asl_clip,
+                )
+            else:
+                global_classification = image_features.sum() * 0.0
+            if batch["teacher_embeddings"] is not None:
+                teacher = batch["teacher_embeddings"].to(device, non_blocking=True)
+                preservation = (
+                    1.0
+                    - F.cosine_similarity(
+                        F.normalize(image_features.float(), dim=-1),
+                        F.normalize(teacher.float(), dim=-1),
+                        dim=-1,
+                    )
+                ).mean()
+            else:
+                preservation = image_features.sum() * 0.0
+            loss = (
+                localization
+                + args.global_classification_weight * global_classification
+                + args.preservation_weight * preservation
+            )
             scaled_loss = loss / args.gradient_accumulation
         scaler.scale(scaled_loss).backward()
 
@@ -517,12 +748,17 @@ def train_one_epoch(
             scheduler.step()
 
         totals["total"] += float(loss.detach())
+        totals["localization"] += float(localization.detach())
+        totals["global_classification"] += float(global_classification.detach())
+        totals["preservation"] += float(preservation.detach())
         for name, value in components.items():
             totals[name] += value
         if batch_index % args.print_freq == 0:
             print(
                 f"[train] {batch_index}/{len(loader)} loss={loss.item():.4f} "
-                f"rank={components['ranking']:.4f}"
+                f"rank={components['ranking']:.4f} "
+                f"global={global_classification.item():.4f} "
+                f"preserve={preservation.item():.4f}"
             )
     return {name: value / len(loader) for name, value in totals.items()}
 
@@ -530,7 +766,12 @@ def train_one_epoch(
 def main(args: argparse.Namespace) -> None:
     named_test_files = [
         path
-        for path in (args.train_bbox_csv, args.val_bbox_csv)
+        for path in (
+            args.train_bbox_csv,
+            args.val_bbox_csv,
+            args.train_labels_csv,
+            args.val_labels_csv,
+        )
         if path and "test" in Path(path).name.casefold()
     ]
     if named_test_files and not args.allow_test_named_training_data:
@@ -552,13 +793,25 @@ def main(args: argparse.Namespace) -> None:
         raise ValueError("--flip-probability must be in [0, 1]")
     if args.spatial_temperature <= 0 or args.concept_temperature <= 0:
         raise ValueError("Loss temperatures must be positive")
+    if args.global_prompt_temperature <= 0:
+        raise ValueError("--global-prompt-temperature must be positive")
     if not 0.0 <= args.eval_activation_quantile < 1.0:
         raise ValueError("--eval-activation-quantile must be in [0, 1)")
+    if not 0.0 <= args.validation_classification_threshold <= 1.0:
+        raise ValueError("--validation-classification-threshold must be in [0, 1]")
+    if args.global_asl_gamma_positive < 0 or args.global_asl_gamma_negative < 0:
+        raise ValueError("ASL gamma values must be non-negative")
+    if not 0.0 <= args.global_asl_clip < 1.0:
+        raise ValueError("--global-asl-clip must be in [0, 1)")
+    if args.classification_selection_weight < 0 or args.maximum_pghit_drop < 0:
+        raise ValueError("Selection weight and maximum PGHit drop must be non-negative")
     loss_weights = (
         args.distribution_weight,
         args.ranking_weight,
         args.background_weight,
         args.concept_weight,
+        args.global_classification_weight,
+        args.preservation_weight,
     )
     if any(weight < 0 for weight in loss_weights) or not any(loss_weights):
         raise ValueError("Loss weights must be non-negative and at least one must be positive")
@@ -572,7 +825,10 @@ def main(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     all_records, train_stats = build_records(
-        args.train_image_dir, args.train_bbox_csv, args.bbox_coord_size
+        args.train_image_dir,
+        args.train_bbox_csv,
+        args.bbox_coord_size,
+        args.train_labels_csv,
     )
     if args.val_bbox_csv:
         train_records = all_records
@@ -580,6 +836,7 @@ def main(args: argparse.Namespace) -> None:
             args.val_image_dir or args.train_image_dir,
             args.val_bbox_csv,
             args.bbox_coord_size,
+            args.val_labels_csv,
         )
         overlap = {record.image_id for record in train_records} & {
             record.image_id for record in val_records
@@ -591,6 +848,16 @@ def main(args: argparse.Namespace) -> None:
             all_records, args.validation_fraction, args.seed
         )
         val_stats = {"source": "grouped split from training bbox CSV"}
+
+    if args.global_classification_weight > 0.0:
+        missing_train_labels = sum(record.labels is None for record in train_records)
+        missing_val_labels = sum(record.labels is None for record in val_records)
+        if missing_train_labels or missing_val_labels:
+            raise ValueError(
+                "Global classification loss requires --train-labels-csv and labels "
+                f"for every split image; missing train={missing_train_labels}, "
+                f"validation={missing_val_labels}"
+            )
 
     print(f"Device: {device}")
     print(f"Train images: {len(train_records)} | validation images: {len(val_records)}")
@@ -621,8 +888,17 @@ def main(args: argparse.Namespace) -> None:
     )
     print(f"Loading {args.conceptclip_model} at {args.conceptclip_revision}...")
     model, processor = load_conceptclip(load_args, device)
-    all_text = encode_prompt_ensemble(model, processor, device).detach()
-    lesion_text = all_text[: len(LESION_CONCEPTS)]
+    positive_text = encode_prompt_ensemble(
+        model, processor, device, positive_prompts
+    ).detach()
+    negative_text = encode_prompt_ensemble(
+        model, processor, device, negative_prompts
+    ).detach()
+    if args.preservation_weight > 0.0:
+        print("Caching pretrained global embeddings for preservation loss...")
+        cache_pretrained_embeddings(
+            model, processor, train_records, device, args
+        )
     trainable_names = configure_trainable_parameters(model, args)
     trainable_parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
     print(
@@ -651,32 +927,66 @@ def main(args: argparse.Namespace) -> None:
         "cuda", enabled=args.amp and device.type == "cuda"
     )
 
-    print("Evaluating pretrained localization baseline...")
-    baseline = evaluate_pghit(model, processor, val_loader, all_text, device, args)
+    print("Evaluating pretrained localization/classification baseline...")
+    baseline = evaluate_pghit(
+        model,
+        processor,
+        val_loader,
+        positive_text,
+        negative_text,
+        device,
+        args,
+    )
     baseline_pg = baseline["after_calibration"]["micro_pg_hit"]
-    print(f"Pretrained validation PGHit: {baseline_pg:.4f}")
+    baseline_map = baseline["classification"]["threshold_free"][
+        "macro_average_precision"
+    ]
+    print(
+        f"Pretrained validation PGHit: {baseline_pg:.4f} | "
+        f"classification macro-mAP: {baseline_map:.4f}"
+    )
     history: list[dict[str, Any]] = []
     best_pg = baseline_pg
+    best_map = baseline_map
+    best_score = baseline_pg + args.classification_selection_weight * baseline_map
     best_epoch = 0
     patience = 0
-    best_path = output_dir / "conceptclip_vindr_localization_best.pth"
+    best_path = output_dir / "conceptclip_vindr_localization_classification_best.pth"
 
     for epoch in range(1, args.epochs + 1):
         print(f"\nEpoch {epoch}/{args.epochs}")
         train_metrics = train_one_epoch(
-            model, processor, train_loader, lesion_text, optimizer, scheduler,
-            scaler, device, args
+            model, processor, train_loader, positive_text, negative_text,
+            optimizer, scheduler, scaler, device, args
         )
-        validation = evaluate_pghit(model, processor, val_loader, all_text, device, args)
+        validation = evaluate_pghit(
+            model,
+            processor,
+            val_loader,
+            positive_text,
+            negative_text,
+            device,
+            args,
+        )
         validation_pg = validation["after_calibration"]["micro_pg_hit"]
+        validation_map = validation["classification"]["threshold_free"][
+            "macro_average_precision"
+        ]
+        validation_f1 = validation["classification"]["at_threshold"]["macro_f1"]
+        selection_score = (
+            validation_pg + args.classification_selection_weight * validation_map
+        )
         row = {"epoch": epoch, "train": train_metrics, "validation": validation}
         history.append(row)
         print(
-            f"Validation PGHit: {validation_pg:.4f} | best={best_pg:.4f} | "
-            f"target>{args.target_pghit:.4f}"
+            f"Validation PGHit={validation_pg:.4f}, macro-mAP={validation_map:.4f}, "
+            f"macro-F1={validation_f1:.4f} | target PGHit>{args.target_pghit:.4f}"
         )
-        if validation_pg > best_pg:
+        pghit_is_preserved = validation_pg >= baseline_pg - args.maximum_pghit_drop
+        if selection_score > best_score and pghit_is_preserved:
+            best_score = selection_score
             best_pg = validation_pg
+            best_map = validation_map
             best_epoch = epoch
             patience = 0
             save_delta_checkpoint(
@@ -701,20 +1011,22 @@ def main(args: argparse.Namespace) -> None:
         "pretrained_validation": baseline,
         "best_epoch": best_epoch,
         "best_validation_pghit": best_pg,
+        "best_validation_classification_macro_map": best_map,
+        "best_selection_score": best_score,
         "target_pghit": args.target_pghit,
         "target_passed": bool(best_pg > args.target_pghit),
         "checkpoint": str(best_path) if best_epoch else None,
         "history": history,
         "arguments": vars(args),
     }
-    report_path = output_dir / "localization_training_report.json"
+    report_path = output_dir / "localization_classification_training_report.json"
     with report_path.open("w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2, ensure_ascii=False)
     print(f"\nBest validation PGHit: {best_pg:.4f} at epoch {best_epoch}")
     print(f"Target passed: {best_pg > args.target_pghit}")
     print(f"Saved report: {report_path}")
     if best_epoch == 0:
-        print("No checkpoint saved because fine-tuning never beat the pretrained model.")
+        print("No balanced checkpoint saved because fine-tuning never beat the pretrained score.")
     if args.require_target and best_pg <= args.target_pghit:
         raise RuntimeError(
             f"Best validation PGHit {best_pg:.4f} did not exceed target {args.target_pghit:.4f}"
@@ -727,8 +1039,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--train-image-dir", required=True)
     parser.add_argument("--train-bbox-csv", required=True)
+    parser.add_argument(
+        "--train-labels-csv",
+        default="vindr/image_labels_train.csv",
+        help="VinDr 28-label CSV used by the global multi-label loss",
+    )
     parser.add_argument("--val-image-dir", default=None)
     parser.add_argument("--val-bbox-csv", default=None)
+    parser.add_argument("--val-labels-csv", default=None)
     parser.add_argument("--bbox-coord-size", default=384.0, type=float)
     parser.add_argument("--validation-fraction", default=0.20, type=float)
     parser.add_argument("--conceptclip-model", default="JerrryNie/ConceptCLIP")
@@ -736,7 +1054,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--conceptclip-revision",
         default="8120d7f1e07b590a7dce35bd2a01126b0e42b6c3",
     )
-    parser.add_argument("--output-dir", default="./checkpoints/conceptclip_vindr_localization")
+    parser.add_argument("--output-dir", default="./checkpoints/conceptclip_vindr_balanced")
     parser.add_argument("--epochs", default=12, type=int)
     parser.add_argument("--batch-size", default=2, type=int)
     parser.add_argument("--eval-batch-size", default=4, type=int)
@@ -757,6 +1075,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ranking-weight", default=2.0, type=float)
     parser.add_argument("--background-weight", default=0.25, type=float)
     parser.add_argument("--concept-weight", default=0.25, type=float)
+    parser.add_argument("--global-classification-weight", default=2.0, type=float)
+    parser.add_argument("--preservation-weight", default=1.0, type=float)
+    parser.add_argument("--global-prompt-temperature", default=0.07, type=float)
+    parser.add_argument("--global-asl-gamma-positive", default=1.0, type=float)
+    parser.add_argument("--global-asl-gamma-negative", default=4.0, type=float)
+    parser.add_argument("--global-asl-clip", default=0.05, type=float)
     parser.add_argument("--spatial-temperature", default=0.07, type=float)
     parser.add_argument("--concept-temperature", default=0.07, type=float)
     parser.add_argument("--ranking-margin", default=0.10, type=float)
@@ -766,6 +1090,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eval-activation-quantile", default=0.75, type=float)
     parser.add_argument("--eval-heatmap-size", default=384, type=int)
     parser.add_argument("--target-pghit", default=0.25, type=float)
+    parser.add_argument("--validation-classification-threshold", default=0.50, type=float)
+    parser.add_argument(
+        "--classification-selection-weight",
+        default=0.50,
+        type=float,
+        help="Weight of validation classification macro-mAP in checkpoint selection",
+    )
+    parser.add_argument(
+        "--maximum-pghit-drop",
+        default=0.0,
+        type=float,
+        help="Maximum PGHit decrease allowed when saving a balanced checkpoint",
+    )
     parser.add_argument("--require-target", action="store_true")
     parser.add_argument("--early-stop-patience", default=4, type=int)
     parser.add_argument("--amp", action="store_true")

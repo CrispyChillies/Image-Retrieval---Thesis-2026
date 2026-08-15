@@ -3,6 +3,8 @@ Pytorch adaptation of https://omoindrot.github.io/triplet-loss
 https://github.com/omoindrot/tensorflow-triplet-loss
 """
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,6 +24,151 @@ class TripletMarginLoss(nn.Module):
 
     def forward(self, embeddings, labels):
         return self.loss_fn(labels, embeddings, self.margin, self.p)
+
+
+class RadIRImageRankingLoss(nn.Module):
+    """Image-only RadIR ranking objective adapted to class-labelled datasets.
+
+    RadIR applies a triplet ranking loss to the predicted image-image
+    similarity matrix using report-derived RaTEScore similarities as targets.
+    COVIDx has no reports, so this controlled adaptation constructs the target
+    matrix from class equality and keeps the same cosine-similarity ranking
+    objective.  It is intentionally an adaptation of the RadIR idea, not a
+    reproduction of RadIR-CXR's image-text pre-training stage.
+    """
+
+    def __init__(self, margin=0.2, eps=1e-16):
+        super().__init__()
+        self.margin = margin
+        self.eps = eps
+
+    def forward(self, embeddings, labels):
+        if isinstance(embeddings, dict):
+            embeddings = embeddings["embedding"]
+        if labels.ndim != 1:
+            raise ValueError("RadIR COVIDx adaptation requires single-class labels.")
+
+        embeddings = F.normalize(embeddings, p=2, dim=1)
+        similarity = embeddings @ embeddings.t()
+        positive_similarity = similarity.unsqueeze(2)
+        negative_similarity = similarity.unsqueeze(1)
+        losses = F.relu(self.margin - positive_similarity + negative_similarity)
+
+        mask = _get_triplet_mask(labels)
+        losses = losses * mask.float()
+        active = losses > self.eps
+        num_active = active.sum()
+        num_valid = mask.sum()
+        loss = losses.sum() / num_active.clamp_min(1)
+        fraction_active = num_active.float() / num_valid.float().clamp_min(1.0)
+        return loss, fraction_active
+
+
+class LoFiCOVIDLoss(nn.Module):
+    """Weakly supervised COVIDx adaptation of LoFi.
+
+    The original LoFi objective uses image-report sigmoid contrastive learning
+    plus captioning and box-conditioned objectives.  With class labels only,
+    this proxy preserves its two central ideas: sigmoid pairwise learning and
+    fine-grained local supervision.  Same-class image pairs replace matched
+    image-report pairs, while multiple-instance class supervision selects a
+    discriminative learned region.  Attention entropy/diversity regularizers
+    prevent the local branch from collapsing into a global pooling duplicate.
+    """
+
+    def __init__(
+        self,
+        local_weight=1.0,
+        classification_weight=1.0,
+        focus_weight=0.05,
+        diversity_weight=0.01,
+    ):
+        super().__init__()
+        self.local_weight = local_weight
+        self.classification_weight = classification_weight
+        self.focus_weight = focus_weight
+        self.diversity_weight = diversity_weight
+
+    @staticmethod
+    def _sigmoid_pair_loss(embeddings, labels, scale, bias):
+        embeddings = F.normalize(embeddings, p=2, dim=1)
+        similarity = embeddings @ embeddings.t()
+        same_class = labels[:, None].eq(labels[None, :])
+        signs = same_class.to(similarity.dtype).mul(2.0).sub(1.0)
+        diagonal = torch.eye(
+            len(labels), dtype=torch.bool, device=embeddings.device
+        )
+        logits = scale * similarity + bias
+        return F.softplus(-signs[~diagonal] * logits[~diagonal]).mean()
+
+    def forward(self, outputs, labels):
+        if not isinstance(outputs, dict):
+            raise TypeError("LoFi loss expects a model output dictionary.")
+        required = {
+            "embedding",
+            "region_embeddings",
+            "region_attention",
+            "region_logits",
+            "class_logits",
+            "logit_scale",
+            "logit_bias",
+        }
+        missing = required.difference(outputs)
+        if missing:
+            raise KeyError(f"LoFi model output is missing keys: {sorted(missing)}")
+        if labels.ndim != 1:
+            raise ValueError("LoFi COVIDx adaptation requires single-class labels.")
+        labels = labels.long()
+
+        global_loss = self._sigmoid_pair_loss(
+            outputs["embedding"], labels, outputs["logit_scale"], outputs["logit_bias"]
+        )
+
+        # Select the attention pool with the strongest evidence for the target
+        # class. This is weak multiple-instance localization: no test labels are
+        # used, and labels are only consulted while computing the train loss.
+        batch_index = torch.arange(len(labels), device=labels.device)
+        region_count = outputs["region_logits"].shape[1]
+        target_region_scores = outputs["region_logits"].gather(
+            2, labels[:, None, None].expand(-1, region_count, 1)
+        ).squeeze(2)
+        selected_region = target_region_scores.argmax(dim=1)
+        local_embeddings = outputs["region_embeddings"][batch_index, selected_region]
+        local_loss = self._sigmoid_pair_loss(
+            local_embeddings, labels, outputs["logit_scale"], outputs["logit_bias"]
+        )
+
+        classification_loss = F.cross_entropy(outputs["class_logits"], labels)
+
+        attention = outputs["region_attention"].flatten(2)
+        selected_attention = attention[batch_index, selected_region]
+        spatial_count = selected_attention.shape[1]
+        focus_loss = -(
+            selected_attention * selected_attention.clamp_min(1e-8).log()
+        ).sum(dim=1).mean() / max(math.log(float(spatial_count)), 1.0)
+
+        normalized_attention = F.normalize(attention, p=2, dim=2)
+        overlap = normalized_attention @ normalized_attention.transpose(1, 2)
+        region_count = overlap.shape[1]
+        off_diagonal = ~torch.eye(
+            region_count, dtype=torch.bool, device=overlap.device
+        )
+        diversity_loss = overlap[:, off_diagonal].pow(2).mean()
+
+        total = (
+            global_loss
+            + self.local_weight * local_loss
+            + self.classification_weight * classification_loss
+            + self.focus_weight * focus_loss
+            + self.diversity_weight * diversity_loss
+        )
+        return total, {
+            "lofi_global": global_loss.detach(),
+            "lofi_local": local_loss.detach(),
+            "lofi_ce": classification_loss.detach(),
+            "lofi_focus": focus_loss.detach(),
+            "lofi_diversity": diversity_loss.detach(),
+        }
 
 
 class SupervisedContrastiveLoss(nn.Module):
@@ -225,6 +372,63 @@ class WeightedMultiLabelTripletLoss(nn.Module):
             return embeddings.sum() * 0.0, embeddings.new_tensor(0.0)
 
         return loss / count, embeddings.new_tensor(0.0)
+
+
+class ATHTripletCrossEntropyLoss(nn.Module):
+    """Dimension-normalized ATH triplet cross-entropy objective.
+
+    ATH combines a hinge triplet objective on hash outputs with classification
+    cross-entropy.  Distances are averaged per hash dimension so the margin has
+    the same meaning for the paper's 36-bit code and the 1024-D capacity-matched
+    comparison against SRA.
+    """
+
+    def __init__(self, margin=0.5, ce_weight=1.0):
+        super().__init__()
+        self.margin = margin
+        self.ce_weight = ce_weight
+
+    def forward(self, outputs, labels):
+        if not isinstance(outputs, dict):
+            raise TypeError('ATH loss expects a model output dictionary.')
+        required = {'hash_logits', 'logits'}
+        missing = required.difference(outputs)
+        if missing:
+            raise KeyError(f'ATH model output is missing keys: {sorted(missing)}')
+        if labels.ndim != 1:
+            raise ValueError('ATH triplet cross-entropy currently requires single-class labels.')
+
+        hashes = outputs['hash_logits']
+        labels = labels.long()
+        batch_size, hash_bits = hashes.shape
+        if batch_size < 3:
+            raise ValueError('ATH loss needs at least three samples per batch.')
+
+        # Mean squared distance is the dimension-normalized form of ATH's hash
+        # distance. It prevents the margin from changing when matching SRA's
+        # 1024-dimensional descriptor capacity.
+        distances = torch.cdist(hashes, hashes, p=2).pow(2) / float(hash_bits)
+        same_class = labels[:, None].eq(labels[None, :])
+        diagonal = torch.eye(batch_size, dtype=torch.bool, device=labels.device)
+        positive_mask = same_class & ~diagonal
+        negative_mask = ~same_class
+        valid = positive_mask.any(dim=1) & negative_mask.any(dim=1)
+
+        if valid.any():
+            hardest_positive = distances.masked_fill(~positive_mask, -float('inf')).max(dim=1).values
+            hardest_negative = distances.masked_fill(~negative_mask, float('inf')).min(dim=1).values
+            triplet_loss = F.relu(
+                hardest_positive[valid] - hardest_negative[valid] + self.margin
+            ).mean()
+        else:
+            triplet_loss = hashes.sum() * 0.0
+
+        classification_loss = F.cross_entropy(outputs['logits'], labels)
+        total = triplet_loss + self.ce_weight * classification_loss
+        return total, {
+            'ath_triplet': triplet_loss.detach(),
+            'ath_ce': classification_loss.detach(),
+        }
 
 
 class JaccardSupConLoss(nn.Module):

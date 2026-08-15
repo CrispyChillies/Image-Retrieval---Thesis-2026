@@ -1,6 +1,9 @@
+import csv
+import json
 import os
 import numpy as np
 from collections import Counter
+from PIL import Image
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 
 import torch
@@ -15,7 +18,60 @@ from read_data import (
     NIHChestXrayRetrievalDataSet,
     NIH_U_LABELS,
 )
-from model import ResNet50, DenseNet121, ConvNeXtV2, ConvNeXtV2_SRA, SwinV2, DinoV2, MedSigLIP
+from model import (
+    ResNet50,
+    DenseNet121,
+    ConvNeXtV2,
+    ConvNeXtV2_SRA,
+    ConvNeXtV2_ATH,
+    ConvNeXtV2_PCAM,
+    ConvNeXtV2_LoFi,
+    SwinV2,
+    DinoV2,
+    MedSigLIP,
+)
+
+
+class MIMICIRImageDataset(torch.utils.data.Dataset):
+    """Image-only view of the official MIMIC-IR CSV.
+
+    The row order is intentionally preserved because the official RaTEScore
+    matrix uses the same order as ``val_caption.csv``.  The returned target is
+    the CSV row index, not a diagnostic label.
+    """
+
+    def __init__(self, root, csv_file, transform=None, path_column='File Path'):
+        self.root = root
+        self.transform = transform
+        with open(csv_file, 'r', encoding='utf-8-sig', newline='') as handle:
+            reader = csv.DictReader(handle)
+            if not reader.fieldnames:
+                raise ValueError(f'MIMIC-IR CSV has no header: {csv_file}')
+            by_lower = {name.strip().lower(): name for name in reader.fieldnames}
+            selected = by_lower.get(path_column.strip().lower())
+            if selected is None:
+                candidates = ('file path', 'path', 'image_path', 'img_path')
+                selected = next((by_lower[c] for c in candidates if c in by_lower), None)
+            if selected is None:
+                raise ValueError(
+                    f'Cannot find image path column {path_column!r} in {reader.fieldnames}'
+                )
+            self.image_paths = [row[selected].strip() for row in reader]
+
+        if not self.image_paths:
+            raise ValueError(f'MIMIC-IR CSV contains no samples: {csv_file}')
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, index):
+        relative_path = self.image_paths[index].replace('\\', os.sep).replace('/', os.sep)
+        image_path = relative_path if os.path.isabs(relative_path) else os.path.join(self.root, relative_path)
+        with Image.open(image_path) as image:
+            image = image.convert('RGB')
+            if self.transform is not None:
+                image = self.transform(image)
+        return image, torch.tensor(index, dtype=torch.long)
 
 def conceptclip_collate_fn(batch):
     """Custom collate function for ConceptCLIP that keeps PIL images as-is."""
@@ -996,7 +1052,29 @@ def extract_state_dict(checkpoint):
         checkpoint = checkpoint["state_dict"]
     elif "state-dict" in checkpoint:
         checkpoint = checkpoint["state-dict"]
+    if isinstance(checkpoint, dict) and checkpoint and all(key.startswith('module.') for key in checkpoint):
+        checkpoint = {key[len('module.'):]: value for key, value in checkpoint.items()}
     return checkpoint
+
+
+def load_state_dict_for_test(model, checkpoint, args, description='model'):
+    incompatible = model.load_state_dict(checkpoint, strict=False)
+    missing = list(incompatible.missing_keys)
+    unexpected = list(incompatible.unexpected_keys)
+    print(f'=> loaded {description} checkpoint (missing={len(missing)}, unexpected={len(unexpected)})')
+    fair_mode = args.fair_i2i_method != 'standard' or args.dataset == 'mimic_ir'
+    if fair_mode and (missing or unexpected) and not args.allow_checkpoint_mismatch:
+        details = []
+        if missing:
+            details.append(f'missing examples: {missing[:5]}')
+        if unexpected:
+            details.append(f'unexpected examples: {unexpected[:5]}')
+        raise RuntimeError(
+            'Checkpoint/model mismatch would invalidate the fair comparison; '
+            + '; '.join(details)
+            + '. Pass --allow-checkpoint-mismatch only after manually verifying these keys.'
+        )
+    return incompatible
 
 
 def infer_num_labels_from_checkpoint(checkpoint, default_num_labels):
@@ -1007,6 +1085,42 @@ def infer_num_labels_from_checkpoint(checkpoint, default_num_labels):
         if weight is not None and hasattr(weight, "shape") and len(weight.shape) == 2:
             return int(weight.shape[0])
     return default_num_labels
+
+
+def infer_pcam_num_classes(checkpoint, configured_num_classes=None):
+    """Infer PCAM class-map count so the evaluation model matches its checkpoint."""
+    if isinstance(checkpoint, dict):
+        weight = checkpoint.get('pcam.classifier.weight')
+        if weight is not None and hasattr(weight, 'shape') and len(weight.shape) == 4:
+            inferred = int(weight.shape[0])
+            if configured_num_classes is not None and configured_num_classes != inferred:
+                raise ValueError(
+                    f'--pcam-num-classes={configured_num_classes} but checkpoint contains '
+                    f'{inferred} PCAM classes.'
+                )
+            return inferred
+    if configured_num_classes is None:
+        raise ValueError(
+            'Cannot infer PCAM class count from checkpoint. Pass --pcam-num-classes '
+            'with the class count used during PCAM training.'
+        )
+    return configured_num_classes
+
+
+def validate_ath_checkpoint_config(checkpoint, hash_bits, num_classes):
+    if not isinstance(checkpoint, dict):
+        return
+    hash_weight = checkpoint.get('hash_layer.weight')
+    if hash_weight is not None and int(hash_weight.shape[0]) != hash_bits:
+        raise ValueError(
+            f'--ath-hash-bits={hash_bits}, but checkpoint uses {int(hash_weight.shape[0])} bits.'
+        )
+    class_weight = checkpoint.get('classification_head.weight')
+    if class_weight is not None and int(class_weight.shape[0]) != num_classes:
+        raise ValueError(
+            f'--ath-num-classes={num_classes}, but checkpoint uses '
+            f'{int(class_weight.shape[0])} classes.'
+        )
 
 @torch.no_grad()
 def evaluate_multilabels(model, loader, device, args):
@@ -1153,8 +1267,196 @@ def evaluate(model, loader, device, args):
                  **{f'classification_k{k}': np.array(list(v.values())) for k, v in classification_metrics.items()})
 
 
+def _embedding_from_output(output):
+    if isinstance(output, dict):
+        if 'embedding' in output:
+            return output['embedding']
+        if 'image_features' in output:
+            return output['image_features']
+        raise KeyError(f'Model output has no embedding key: {list(output.keys())}')
+    if isinstance(output, (tuple, list)):
+        return output[0]
+    return output
+
+
+def _label_relevance(labels):
+    """Create a shared relevance target for fair image-to-image evaluation."""
+    labels = labels.float()
+    if labels.ndim == 1 or (labels.ndim == 2 and labels.shape[1] == 1):
+        flat = labels.reshape(-1)
+        return flat[:, None].eq(flat[None, :]).float()
+
+    # Multi-label relevance is graded Jaccard similarity. This keeps evaluation
+    # independent of the model and makes NDCG meaningful for partial overlap.
+    labels = (labels > 0).float()
+    intersection = labels @ labels.t()
+    cardinality = labels.sum(dim=1)
+    union = cardinality[:, None] + cardinality[None, :] - intersection
+    return torch.where(union > 0, intersection / union.clamp_min(1.0), torch.zeros_like(union))
+
+
+def _average_precision_from_binary(binary_relevance):
+    if not np.any(binary_relevance):
+        return None
+    cumulative = np.cumsum(binary_relevance, dtype=np.float64)
+    precision = cumulative / np.arange(1, len(binary_relevance) + 1)
+    return float(np.sum(precision * binary_relevance) / np.sum(binary_relevance))
+
+
+@torch.no_grad()
+def evaluate_fair_image_to_image(model, loader, device, args):
+    """Exact image-to-image retrieval shared by SRA, RadIR-CXR and LoFi.
+
+    All methods use the same images, L2 normalization, cosine similarity,
+    exhaustive gallery and complete sorting.  With MIMIC-IR, ground truth is
+    the official graded RaTEScore matrix.  Otherwise it is derived solely from
+    dataset labels and is therefore also identical across compared methods.
+    """
+    model.eval()
+    embeddings, targets = [], []
+    for samples, target in loader:
+        samples = samples.to(device, non_blocking=True)
+        output = model(samples)
+        embedding = _embedding_from_output(output)
+        embeddings.append(embedding.detach().float().cpu())
+        targets.append(target.detach().cpu())
+
+    embeddings = torch.nn.functional.normalize(torch.cat(embeddings, dim=0), p=2, dim=1)
+    targets = torch.cat(targets, dim=0)
+    sample_indices = targets.long().numpy() if args.dataset == 'mimic_ir' else np.arange(len(targets))
+
+    relevance_path = args.i2i_relevance_npy
+    if relevance_path:
+        relevance_source = np.load(relevance_path, mmap_mode='r')
+        if relevance_source.ndim != 2 or relevance_source.shape[0] != relevance_source.shape[1]:
+            raise ValueError(f'Relevance matrix must be square, got {relevance_source.shape}')
+        if sample_indices.max(initial=-1) >= relevance_source.shape[0]:
+            raise ValueError(
+                f'Sample index {sample_indices.max()} exceeds relevance matrix size '
+                f'{relevance_source.shape[0]}'
+            )
+        relevance_kind = 'official graded RaTEScore'
+    else:
+        relevance_source = _label_relevance(targets)
+        relevance_kind = 'label-derived relevance'
+
+    ks = sorted(set(args.i2i_k))
+    if not ks or min(ks) < 1:
+        raise ValueError('--i2i-k values must be positive integers')
+    max_k = min(max(ks), len(embeddings) - 1)
+    if max_k < 1:
+        raise ValueError('Image-to-image evaluation needs at least two samples')
+
+    recall_hits = {k: [] for k in ks}
+    ndcg_values = {k: [] for k in ks}
+    average_precisions = []
+    gallery = embeddings.to(device)
+    chunk_size = max(1, args.i2i_query_chunk_size)
+
+    print('\n=== Fair exhaustive image-to-image evaluation ===')
+    print(f'Method tag: {args.fair_i2i_method}')
+    print(f'Model: {args.model} | samples: {len(embeddings)} | relevance: {relevance_kind}')
+    print('Similarity: L2-normalized cosine | self-match: excluded | ANN: disabled')
+
+    for start in range(0, len(embeddings), chunk_size):
+        stop = min(start + chunk_size, len(embeddings))
+        similarities = embeddings[start:stop].to(device) @ gallery.t()
+        local_rows = torch.arange(stop - start, device=device)
+        global_rows = torch.arange(start, stop, device=device)
+        similarities[local_rows, global_rows] = -float('inf')
+        ranking = torch.argsort(similarities, dim=1, descending=True).cpu().numpy()
+
+        for local_index, query_index in enumerate(range(start, stop)):
+            if relevance_path:
+                source_query_index = sample_indices[query_index]
+                row = np.asarray(relevance_source[source_query_index, sample_indices], dtype=np.float32)
+                if row.size and np.nanmax(row) > 1.0:
+                    row = row / 100.0
+            else:
+                row = relevance_source[query_index].cpu().numpy().astype(np.float32, copy=False)
+
+            row = np.nan_to_num(row, nan=0.0, posinf=1.0, neginf=0.0)
+            row[query_index] = 0.0
+            ordered_relevance = row[ranking[local_index]]
+            binary_ordered = ordered_relevance > args.i2i_positive_threshold
+            has_positive = bool(np.any(row > args.i2i_positive_threshold))
+
+            if has_positive:
+                ap = _average_precision_from_binary(binary_ordered)
+                if ap is not None:
+                    average_precisions.append(ap)
+                for k in ks:
+                    cutoff = min(k, len(binary_ordered))
+                    recall_hits[k].append(float(np.any(binary_ordered[:cutoff])))
+
+            ideal = np.sort(np.delete(row, query_index))[::-1]
+            for k in ks:
+                cutoff = min(k, len(ordered_relevance))
+                discounts = np.log2(np.arange(2, cutoff + 2, dtype=np.float64))
+                dcg = float(np.sum(ordered_relevance[:cutoff] / discounts))
+                idcg = float(np.sum(ideal[:cutoff] / discounts))
+                if idcg > 0:
+                    ndcg_values[k].append(dcg / idcg)
+
+    results = {
+        'method': args.fair_i2i_method,
+        'model': args.model,
+        'num_samples': len(embeddings),
+        'positive_threshold': args.i2i_positive_threshold,
+        'mAP': float(np.mean(average_precisions)) if average_precisions else float('nan'),
+        'recall_at_k': {str(k): float(np.mean(recall_hits[k])) if recall_hits[k] else float('nan') for k in ks},
+        'ndcg_at_k': {str(k): float(np.mean(ndcg_values[k])) if ndcg_values[k] else float('nan') for k in ks},
+        'valid_queries_recall': len(average_precisions),
+    }
+
+    print(f'>> mAP (relevance > {args.i2i_positive_threshold:.3f}): {results["mAP"] * 100.0:.2f}%')
+    print('>> Recall@K: ' + ', '.join(f'{k}: {results["recall_at_k"][str(k)] * 100.0:.2f}%' for k in ks))
+    print('>> NDCG@K: ' + ', '.join(f'{k}: {results["ndcg_at_k"][str(k)] * 100.0:.2f}%' for k in ks))
+    print(f'>> Valid queries with at least one positive: {len(average_precisions)}/{len(embeddings)}')
+
+    if args.save_dir:
+        os.makedirs(args.save_dir, exist_ok=True)
+        stem = f'{args.fair_i2i_method}_{args.model}_fair_i2i'
+        np.savez_compressed(
+            os.path.join(args.save_dir, stem + '.npz'),
+            embeddings=embeddings.numpy(),
+            sample_indices=sample_indices,
+        )
+        with open(os.path.join(args.save_dir, stem + '.json'), 'w', encoding='utf-8') as handle:
+            json.dump(results, handle, indent=2, ensure_ascii=False)
+        print(f'>> Saved embeddings and metrics to {args.save_dir}')
+
+    return results
+
+
 def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    fair_i2i_enabled = args.fair_i2i_method != 'standard' or args.dataset == 'mimic_ir'
+    if fair_i2i_enabled:
+        expected_models = {
+            'baseline': 'convnextv2',
+            'sra': 'convnextv2_sra',
+            'ath': 'convnextv2_ath',
+            'pcam': 'convnextv2_pcam',
+            'radir_cxr': 'convnextv2',
+            'lofi': 'convnextv2_lofi',
+        }
+        expected_model = expected_models.get(args.fair_i2i_method)
+        if expected_model is not None and args.model != expected_model:
+            raise ValueError(
+                f'Fair comparison requires --model {expected_model} for method '
+                f'{args.fair_i2i_method!r}; got {args.model!r}.'
+            )
+        if expected_model is not None and not os.path.isfile(args.resume):
+            raise FileNotFoundError(
+                f'--fair-i2i-method {args.fair_i2i_method} requires its trained ConvNeXtV2 '
+                f'checkpoint via --resume; refusing to evaluate ImageNet weights under that method name.'
+            )
+        if args.use_rerank_2models or args.use_text or args.use_concept_retrieval:
+            raise ValueError('Fair image-to-image mode cannot use text fusion or re-ranking at inference time.')
+        if args.dataset == 'mimic_ir' and not args.i2i_relevance_npy:
+            raise ValueError('--dataset mimic_ir requires --i2i-relevance-npy from the official MIMIC-IR release.')
+
     use_two_model_rerank = False
     is_conceptclip = False
     is_biomedclip = False
@@ -1174,6 +1476,13 @@ def main(args):
         if args.dataset == 'nih'
         else None
     )
+    pcam_num_classes = (
+        infer_pcam_num_classes(checkpoint, args.pcam_num_classes)
+        if args.model == 'convnextv2_pcam'
+        else None
+    )
+    if args.model == 'convnextv2_ath':
+        validate_ath_checkpoint_config(checkpoint, args.ath_hash_bits, args.ath_num_classes)
 
     # Two-model re-ranking: load both image backbone and ConceptCLIP
     if args.use_rerank_2models:
@@ -1206,6 +1515,19 @@ def main(args):
         elif args.model == 'convnextv2_sra':
             img_model = ConvNeXtV2_SRA(num_heads=args.sra_num_heads, lam=args.sra_lam, num_labels=num_labels)
             is_conceptclip_img = False
+        elif args.model == 'convnextv2_ath':
+            img_model = ConvNeXtV2_ATH(
+                hash_bits=args.ath_hash_bits,
+                num_classes=args.ath_num_classes,
+            )
+            is_conceptclip_img = False
+        elif args.model == 'convnextv2_pcam':
+            img_model = ConvNeXtV2_PCAM(
+                num_classes=pcam_num_classes,
+                lam=args.pcam_lam,
+                embedding_dim=args.embedding_dim,
+            )
+            is_conceptclip_img = False
         elif args.model == 'swinv2':
             img_model = SwinV2(embedding_dim=args.embedding_dim)
             is_conceptclip_img = False
@@ -1227,8 +1549,7 @@ def main(args):
         if not is_conceptclip_img:
             if checkpoint is not None:
                 print("=> loading image model checkpoint")
-                img_model.load_state_dict(checkpoint, strict=False)
-                print("=> loaded checkpoint")
+                load_state_dict_for_test(img_model, checkpoint, args, description='image model')
             else:
                 print("=> no checkpoint found for image model")
             img_model.to(device)
@@ -1291,6 +1612,26 @@ def main(args):
         elif args.model == 'convnextv2_sra':
             model = ConvNeXtV2_SRA(num_heads=args.sra_num_heads, lam=args.sra_lam, num_labels=num_labels)
             is_conceptclip = False
+        elif args.model == 'convnextv2_lofi':
+            model = ConvNeXtV2_LoFi(
+                num_classes=args.lofi_num_classes,
+                num_regions=args.lofi_num_regions,
+                lam=args.lofi_lam,
+            )
+            is_conceptclip = False
+        elif args.model == 'convnextv2_ath':
+            model = ConvNeXtV2_ATH(
+                hash_bits=args.ath_hash_bits,
+                num_classes=args.ath_num_classes,
+            )
+            is_conceptclip = False
+        elif args.model == 'convnextv2_pcam':
+            model = ConvNeXtV2_PCAM(
+                num_classes=pcam_num_classes,
+                lam=args.pcam_lam,
+                embedding_dim=args.embedding_dim,
+            )
+            is_conceptclip = False
         elif args.model == 'swinv2':
             model = SwinV2(embedding_dim=args.embedding_dim)
             is_conceptclip = False
@@ -1304,8 +1645,7 @@ def main(args):
         if not is_conceptclip and not is_biomedclip:
             if checkpoint is not None:
                 print("=> loading checkpoint")
-                model.load_state_dict(checkpoint, strict=False)
-                print("=> loaded checkpoint")
+                load_state_dict_for_test(model, checkpoint, args)
             else:
                 print("=> no checkpoint found")
             model.to(device)
@@ -1343,12 +1683,12 @@ def main(args):
             # Use 384x384 for ConvNeXtV2 and SwinV2, 448x448 for MedSigLIP, 224x224 for other models
             if args.model == 'medsiglip':
                 img_size = 448
-            elif args.model in ['convnextv2', 'convnextv2_sra', 'swinv2']:
+            elif args.model in ['convnextv2', 'convnextv2_sra', 'convnextv2_ath', 'convnextv2_pcam', 'convnextv2_lofi', 'swinv2']:
                 img_size = 384
             else:
                 img_size = 224
 
-            if args.dataset == 'nih' and args.model in ['convnextv2', 'convnextv2_sra', 'swinv2']:
+            if args.dataset == 'nih' and args.model in ['convnextv2', 'convnextv2_sra', 'convnextv2_ath', 'convnextv2_pcam', 'convnextv2_lofi', 'swinv2']:
                 test_transform = transforms.Compose([
                     transforms.Lambda(lambda img: img.convert('RGB')),
                     transforms.Resize(432),
@@ -1356,7 +1696,7 @@ def main(args):
                     transforms.ToTensor(),
                     normalize
                 ])
-            elif args.model in ['convnextv2', 'convnextv2_sra', 'swinv2', 'medsiglip']:
+            elif args.model in ['convnextv2', 'convnextv2_sra', 'convnextv2_ath', 'convnextv2_pcam', 'convnextv2_lofi', 'swinv2', 'medsiglip']:
                 test_transform = transforms.Compose([
                     transforms.Lambda(lambda img: img.convert('RGB')),
                     transforms.Resize((img_size, img_size)),
@@ -1390,6 +1730,15 @@ def main(args):
                                                     image_list_file=args.test_image_list,
                                                     labels_csv_file=args.nih_labels_csv,
                                                     transform=test_transform)
+    elif args.dataset == 'mimic_ir':
+        if not args.mimic_ir_csv:
+            raise ValueError('--dataset mimic_ir requires --mimic-ir-csv, e.g. val_caption.csv')
+        test_dataset = MIMICIRImageDataset(
+            root=args.test_dataset_dir,
+            csv_file=args.mimic_ir_csv,
+            transform=test_transform,
+            path_column=args.mimic_ir_path_column,
+        )
     else:
         raise NotImplementedError('Dataset not supported!')
 
@@ -1417,7 +1766,9 @@ def main(args):
 
     print('Evaluating...')
     
-    if use_two_model_rerank:
+    if fair_i2i_enabled:
+        evaluate_fair_image_to_image(model, test_loader, device, args)
+    elif use_two_model_rerank:
         # Two-model re-ranking approach - need separate loader for ConceptCLIP with PIL images
         label_names = get_dataset_label_names(args)
         
@@ -1515,17 +1866,21 @@ def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch Embedding Learning')
 
     parser.add_argument('--dataset', default='covid',
-                        help='Dataset to use (covid, isic, tbx11k, or nih)')
+                        help='Dataset to use (covid, isic, tbx11k, nih, or mimic_ir)')
     parser.add_argument('--test-dataset-dir', default='/data/brian.hu/COVID/data/test',
                         help='Test dataset directory path')
     parser.add_argument('--test-image-list', default='./test_COVIDx4.txt',
                         help='Test image list')
     parser.add_argument('--nih-labels-csv', default=None,
                         help='NIH metadata CSV with image labels, e.g. Data_Entry_2017.csv')
+    parser.add_argument('--mimic-ir-csv', default=None,
+                        help='Official MIMIC-IR caption CSV whose row order matches the relevance matrix')
+    parser.add_argument('--mimic-ir-path-column', default='File Path',
+                        help='Image path column in --mimic-ir-csv')
     parser.add_argument('--mask-dir', default=None,
                         help='Segmentation masks path (if used)')
     parser.add_argument('--model', default='densenet121',
-                        help='Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, swinv2, medsiglip, conceptclip, biomedclip, or dinov2)')
+                        help='Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, convnextv2_ath, convnextv2_pcam, convnextv2_lofi, swinv2, medsiglip, conceptclip, biomedclip, or dinov2)')
     parser.add_argument('--embedding-dim', default=None, type=int,
                         help='Embedding dimension of model')
     parser.add_argument('--dinov2-model-name', default='vit_base_patch14_dinov2.lvd142m', type=str,
@@ -1536,6 +1891,47 @@ def parse_args():
                         help='Number of attention heads for SRA (ConvNeXtV2_SRA)')
     parser.add_argument('--sra-lam', default=0.1, type=float,
                         help='Lambda for residual attention in SRA (ConvNeXtV2_SRA)')
+    parser.add_argument('--pcam-num-classes', default=None, type=int,
+                        help='Number of PCAM class maps; inferred from the checkpoint when omitted')
+    parser.add_argument('--pcam-lam', default=0.1, type=float,
+                        help='Residual PCAM feature weight (must match training)')
+    parser.add_argument('--lofi-num-classes', default=3, type=int)
+    parser.add_argument('--lofi-num-regions', default=64, type=int)
+    parser.add_argument('--lofi-lam', default=0.1, type=float,
+                        help='Residual local-feature weight; must match LoFi adaptation training')
+    parser.add_argument('--ath-hash-bits', default=1024, type=int,
+                        help='ATH hash dimension; 1024 is capacity-matched to SRA, paper default is 36')
+    parser.add_argument('--ath-num-classes', default=3, type=int,
+                        help='Number of classes used by the ATH classification head')
+
+    # Fair image-to-image comparison. RadIR-CXR and LoFi here denote the
+    # training objective used to produce a ConvNeXtV2 checkpoint; inference is
+    # deliberately identical to SRA (image embedding + exhaustive cosine).
+    parser.add_argument(
+        '--fair-i2i-method', default='standard',
+        choices=['standard', 'baseline', 'sra', 'ath', 'pcam', 'radir_cxr', 'lofi'],
+        help=(
+            'Enable the shared exact image-to-image protocol and tag the checkpoint method. '
+            'Use convnextv2 for baseline/radir_cxr, convnextv2_lofi for lofi, convnextv2_sra for sra, '
+            'convnextv2_ath for ath, and convnextv2_pcam for pcam.'
+        ),
+    )
+    parser.add_argument(
+        '--i2i-relevance-npy', '--radir-relevance-npy', dest='i2i_relevance_npy', default=None,
+        help='Square graded relevance matrix; for MIMIC-IR use the official val_ratescore.npy.',
+    )
+    parser.add_argument(
+        '--i2i-positive-threshold', default=0.9, type=float,
+        help='Binary positive threshold for Recall@K and mAP (RadIR protocol: > 0.9).',
+    )
+    parser.add_argument(
+        '--i2i-k', default=[5, 10, 50, 100], type=int, nargs='+',
+        help='Cutoffs shared by Recall@K and NDCG@K.',
+    )
+    parser.add_argument(
+        '--i2i-query-chunk-size', default=256, type=int,
+        help='Number of queries per exact cosine-ranking chunk; does not approximate ranking.',
+    )
     
     # ConceptCLIP text-enhanced retrieval options
     parser.add_argument('--use-text', action='store_true',
@@ -1573,6 +1969,8 @@ def parse_args():
                         help='Result save directory')
     parser.add_argument('--resume', default='',
                         help='Resume from checkpoint')
+    parser.add_argument('--allow-checkpoint-mismatch', action='store_true',
+                        help='Allow missing/unexpected checkpoint keys in fair I2I mode (unsafe unless audited)')
 
     return parser.parse_args()
 

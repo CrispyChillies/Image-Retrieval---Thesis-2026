@@ -3,6 +3,7 @@ import torch.nn as nn
 import torchvision.models as models
 import torch.nn.functional as F
 import timm
+import math
 from transformers import AutoConfig, AutoModel, AutoProcessor
 
 
@@ -211,6 +212,156 @@ class ConvNeXtV2_SRA(nn.Module):
         # normalize for retrieval
         x = F.normalize(x, dim=1)
         return x
+
+
+class ATHSpatialAttention(nn.Module):
+    """Spatial attention used by Attention-based Triplet Hashing (ATH).
+
+    The released ATH implementation pools a feature map along channels with
+    mean and maximum operations, concatenates the two descriptors, and learns
+    a 3x3 sigmoid spatial gate.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Conv2d(2, 1, kernel_size=3, padding=1, bias=False)
+        nn.init.xavier_normal_(self.conv.weight)
+
+    def forward(self, x):
+        avg_map = torch.mean(x, dim=1, keepdim=True)
+        max_map = torch.amax(x, dim=1, keepdim=True)
+        return torch.sigmoid(self.conv(torch.cat([avg_map, max_map], dim=1)))
+
+
+class ConvNeXtV2_ATH(nn.Module):
+    """ConvNeXtV2 adaptation of Attention-based Triplet Hashing.
+
+    For a controlled comparison with ConvNeXtV2-SRA, ATH attention is applied
+    to the same final spatial feature map. ``hash_bits=1024`` matches the SRA
+    descriptor capacity; ``hash_bits=36`` reproduces the paper's default code
+    length as a separate, non-capacity-matched experiment.
+    """
+
+    def __init__(self, pretrained=True, hash_bits=1024, num_classes=3):
+        super().__init__()
+        if hash_bits <= 0:
+            raise ValueError('hash_bits must be positive')
+        if num_classes <= 1:
+            raise ValueError('num_classes must be greater than one')
+
+        self.hash_bits = hash_bits
+        self.num_classes = num_classes
+        self.convnext = timm.create_model(
+            'convnextv2_base.fcmae_ft_in22k_in1k_384',
+            pretrained=pretrained,
+            num_classes=0,
+        )
+        feature_dim = self.convnext.num_features
+        self.attention = ATHSpatialAttention()
+        self.hash_layer = nn.Linear(feature_dim, hash_bits)
+        self.classification_head = nn.Linear(feature_dim, num_classes)
+        nn.init.xavier_normal_(self.hash_layer.weight)
+        nn.init.zeros_(self.hash_layer.bias)
+        nn.init.xavier_normal_(self.classification_head.weight)
+        nn.init.zeros_(self.classification_head.bias)
+
+    def forward(self, x):
+        feature_map = self.convnext.forward_features(x)
+        attention = self.attention(feature_map)
+        attended = feature_map * attention
+
+        # Match ConvNeXtV2's normalisation/pooling order used by the baseline.
+        attended = self.convnext.head.norm(attended)
+        pooled = torch.mean(attended, dim=(2, 3))
+        hash_logits = self.hash_layer(pooled)
+        embedding = F.normalize(hash_logits, dim=1)
+
+        if self.training:
+            return {
+                'embedding': embedding,
+                'hash_logits': hash_logits,
+                'logits': self.classification_head(pooled),
+                'attention': attention,
+            }
+        return embedding
+
+
+class ConvNeXtV2_LoFi(nn.Module):
+    """ConvNeXtV2 with weakly supervised fine-grained attention pooling.
+
+    This is a label-only COVIDx adaptation of LoFi. It follows LoFi's use of
+    multiple attention pooling modules (64 by default), but replaces unavailable
+    report/caption/box supervision with multiple-instance class supervision.
+    The final descriptor remains 1024-D for a capacity-matched SRA comparison.
+    """
+
+    def __init__(
+        self,
+        pretrained=True,
+        num_classes=3,
+        num_regions=64,
+        lam=0.1,
+    ):
+        super().__init__()
+        if num_classes <= 1:
+            raise ValueError("num_classes must be greater than one")
+        if num_regions <= 0:
+            raise ValueError("num_regions must be positive")
+        self.num_classes = num_classes
+        self.num_regions = num_regions
+        self.lam = lam
+        self.convnext = timm.create_model(
+            "convnextv2_base.fcmae_ft_in22k_in1k_384",
+            pretrained=pretrained,
+            num_classes=0,
+        )
+        feature_dim = self.convnext.num_features
+        self.region_attention = nn.Conv2d(
+            feature_dim, num_regions, kernel_size=1, bias=False
+        )
+        self.region_classifier = nn.Linear(feature_dim, num_classes)
+        self.logit_scale_parameter = nn.Parameter(torch.tensor(math.log(10.0)))
+        self.logit_bias = nn.Parameter(
+            torch.tensor(-math.log(float(max(num_classes - 1, 1))))
+        )
+        nn.init.xavier_normal_(self.region_attention.weight)
+        nn.init.xavier_normal_(self.region_classifier.weight)
+        nn.init.zeros_(self.region_classifier.bias)
+
+    def forward(self, x):
+        feature_map = self.convnext.forward_features(x)
+        feature_map = self.convnext.head.norm(feature_map)
+        batch_size, channels, height, width = feature_map.shape
+
+        global_feature = feature_map.mean(dim=(2, 3))
+        attention_logits = self.region_attention(feature_map).flatten(2)
+        region_attention = F.softmax(attention_logits, dim=2)
+        spatial_features = feature_map.flatten(2).transpose(1, 2)
+        region_features = torch.bmm(region_attention, spatial_features)
+        region_logits = self.region_classifier(region_features)
+
+        # Multiple-instance aggregation: each class may be explained by a
+        # different spatial pool. At inference, region weights depend only on
+        # predicted image evidence and never on ground-truth labels.
+        class_logits = torch.logsumexp(region_logits, dim=1) - math.log(self.num_regions)
+        region_evidence = region_logits.max(dim=2).values
+        region_weights = F.softmax(region_evidence, dim=1).unsqueeze(2)
+        local_feature = torch.sum(region_weights * region_features, dim=1)
+        embedding = F.normalize(global_feature + self.lam * local_feature, dim=1)
+
+        if self.training:
+            return {
+                "embedding": embedding,
+                "region_embeddings": F.normalize(region_features, dim=2),
+                "region_attention": region_attention.view(
+                    batch_size, self.num_regions, height, width
+                ),
+                "region_logits": region_logits,
+                "class_logits": class_logits,
+                "logit_scale": self.logit_scale_parameter.exp().clamp(max=100.0),
+                "logit_bias": self.logit_bias,
+            }
+        return embedding
 
 
 class PCAMPool(nn.Module):
