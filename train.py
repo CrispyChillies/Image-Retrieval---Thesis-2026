@@ -66,6 +66,15 @@ def has_npy_files(data_dir):
     return False
 
 
+SINGLE_LABEL_METHOD_DATASETS = {"covid", "isic", "tbx11k"}
+
+
+def require_single_label_method_dataset(dataset, method):
+    if dataset not in SINGLE_LABEL_METHOD_DATASETS:
+        supported = ", ".join(sorted(SINGLE_LABEL_METHOD_DATASETS))
+        raise ValueError(f"{method} supports single-label datasets: {supported}; got {dataset!r}.")
+
+
 def stratified_train_val_indices(labels, val_fraction, seed):
     """Deterministically split every single-label class into train/validation."""
     if not 0.0 < val_fraction < 1.0:
@@ -710,6 +719,8 @@ def save(model, epoch, save_dir, args, is_best=False):
     file_name = args.dataset + "_" + args.model
     if args.loss_name == "radir_cxr":
         file_name += "_radir_cxr"
+    elif args.loss_name == "radir":
+        file_name += "_radir"
     if args.embedding_dim:
         file_name += "_embed_" + str(args.embedding_dim)
     if args.anomaly:
@@ -858,24 +869,21 @@ def main(args):
             num_classes=args.ath_num_classes,
         )
     elif args.model == "convnextv2_lofi":
-        if args.dataset != "covid":
-            raise ValueError("ConvNeXtV2-LoFi adaptation currently supports COVIDx only.")
+        require_single_label_method_dataset(args.dataset, "ConvNeXtV2-LoFi")
         model = ConvNeXtV2_LoFi(
             num_classes=args.lofi_num_classes,
             num_regions=args.lofi_num_regions,
             lam=args.lofi_lam,
         )
     elif args.model == "convnextv2_pcam":
-        if args.dataset != "covid":
-            raise ValueError("ConvNeXtV2-PCAM training currently supports COVIDx only.")
+        require_single_label_method_dataset(args.dataset, "ConvNeXtV2-PCAM")
         model = ConvNeXtV2_PCAM(
             num_classes=args.pcam_num_classes,
             lam=args.pcam_lam,
             embedding_dim=args.embedding_dim,
         )
     elif args.model == "convnextv2_rra_vl":
-        if args.dataset != "covid":
-            raise ValueError("ConvNeXtV2-RRA-VL adaptation currently supports COVIDx only.")
+        require_single_label_method_dataset(args.dataset, "ConvNeXtV2-RRA-VL")
         model = ConvNeXtV2_RRAVL(
             num_classes=args.rra_num_classes,
             num_regions=args.rra_num_regions,
@@ -885,8 +893,7 @@ def main(args):
             lam=args.rra_lam,
         )
     elif args.model == "convnextv2_msatt":
-        if args.dataset != "covid":
-            raise ValueError("ConvNeXtV2-MSAtt currently supports COVIDx only.")
+        require_single_label_method_dataset(args.dataset, "ConvNeXtV2-MSAtt")
         model = ConvNeXtV2_MSAtt(
             bottleneck_reduction=args.msatt_bottleneck_reduction,
             se_reduction=args.msatt_se_reduction,
@@ -956,17 +963,15 @@ def main(args):
             margin=args.ath_margin,
             ce_weight=args.ath_ce_weight,
         )
-    elif args.loss_name == "radir_cxr":
-        if args.dataset != "covid" or args.model != "convnextv2":
-            raise ValueError(
-                "radir_cxr adaptation requires --dataset covid --model convnextv2"
-            )
+    elif args.loss_name in {"radir", "radir_cxr"}:
+        require_single_label_method_dataset(args.dataset, "RadIR")
+        if args.model != "convnextv2":
+            raise ValueError("RadIR adaptation requires --model convnextv2")
         criterion = RadIRImageRankingLoss(margin=args.radir_margin)
     elif args.loss_name == "lofi":
-        if args.dataset != "covid" or args.model != "convnextv2_lofi":
-            raise ValueError(
-                "lofi adaptation requires --dataset covid --model convnextv2_lofi"
-            )
+        require_single_label_method_dataset(args.dataset, "LoFi")
+        if args.model != "convnextv2_lofi":
+            raise ValueError("LoFi adaptation requires --model convnextv2_lofi")
         criterion = LoFiCOVIDLoss(
             local_weight=args.lofi_local_weight,
             classification_weight=args.lofi_classification_weight,
@@ -974,29 +979,26 @@ def main(args):
             diversity_weight=args.lofi_diversity_weight,
         )
     elif args.loss_name == "pcam":
-        if args.dataset != "covid" or args.model != "convnextv2_pcam":
-            raise ValueError(
-                "pcam loss requires --dataset covid --model convnextv2_pcam"
-            )
+        require_single_label_method_dataset(args.dataset, "PCAM")
+        if args.model != "convnextv2_pcam":
+            raise ValueError("PCAM loss requires --model convnextv2_pcam")
         criterion = PCAMRetrievalLoss(
             margin=args.margin,
             ce_weight=args.pcam_ce_weight,
         )
     elif args.loss_name == "rra_vl":
-        if args.dataset != "covid" or args.model != "convnextv2_rra_vl":
-            raise ValueError(
-                "rra_vl loss requires --dataset covid --model convnextv2_rra_vl"
-            )
+        require_single_label_method_dataset(args.dataset, "RRA-VL")
+        if args.model != "convnextv2_rra_vl":
+            raise ValueError("RRA-VL loss requires --model convnextv2_rra_vl")
         criterion = RRAVLCOVIDLoss(
             margin=args.margin,
             local_weight=args.rra_local_weight,
             classification_weight=args.rra_classification_weight,
         )
     elif args.loss_name == "multi_similarity":
-        if args.dataset != "covid" or args.model != "convnextv2_msatt":
-            raise ValueError(
-                "multi_similarity loss requires --dataset covid --model convnextv2_msatt"
-            )
+        require_single_label_method_dataset(args.dataset, "MSAtt")
+        if args.model != "convnextv2_msatt":
+            raise ValueError("Multi-similarity loss requires --model convnextv2_msatt")
         criterion = MultiSimilarityHardMiningLoss(
             alpha=args.ms_alpha,
             beta=args.ms_beta,
@@ -1615,7 +1617,7 @@ def parse_args():
     )
     parser.add_argument(
         "--radir-margin", default=0.2, type=float,
-        help="Cosine ranking margin for the image-only RadIR COVIDx adaptation.",
+        help="Cosine ranking margin for the image-only RadIR single-label adaptation.",
     )
     parser.add_argument("--lofi-num-classes", default=3, type=int)
     parser.add_argument(
@@ -1733,6 +1735,7 @@ def parse_args():
             "dual_branch",
             "ath_triplet_ce",
             "radir_cxr",
+            "radir",
             "lofi",
             "pcam",
             "rra_vl",

@@ -1441,6 +1441,7 @@ def main(args):
             'ath': 'convnextv2_ath',
             'pcam': 'convnextv2_pcam',
             'radir_cxr': 'convnextv2',
+            'radir': 'convnextv2',
             'lofi': 'convnextv2_lofi',
             'rra_vl': 'convnextv2_rra_vl',
             'msatt': 'convnextv2_msatt',
@@ -1937,10 +1938,10 @@ def parse_args():
     # deliberately identical to SRA (image embedding + exhaustive cosine).
     parser.add_argument(
         '--fair-i2i-method', default='standard',
-        choices=['standard', 'baseline', 'sra', 'ath', 'pcam', 'radir_cxr', 'lofi', 'rra_vl', 'msatt'],
+        choices=['standard', 'baseline', 'sra', 'ath', 'pcam', 'radir', 'radir_cxr', 'lofi', 'rra_vl', 'msatt'],
         help=(
             'Enable the shared exact image-to-image protocol and tag the checkpoint method. '
-            'Use convnextv2 for baseline/radir_cxr, convnextv2_lofi for lofi, '
+            'Use convnextv2 for baseline/radir/radir_cxr, convnextv2_lofi for lofi, '
             'convnextv2_rra_vl for rra_vl, convnextv2_sra for sra, '
             'convnextv2_msatt for msatt, convnextv2_ath for ath, and convnextv2_pcam for pcam.'
         ),

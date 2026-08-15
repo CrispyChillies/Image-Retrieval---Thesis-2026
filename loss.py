@@ -46,7 +46,7 @@ class RadIRImageRankingLoss(nn.Module):
         if isinstance(embeddings, dict):
             embeddings = embeddings["embedding"]
         if labels.ndim != 1:
-            raise ValueError("RadIR COVIDx adaptation requires single-class labels.")
+            raise ValueError("RadIR adaptation requires single-class labels.")
 
         embeddings = F.normalize(embeddings, p=2, dim=1)
         similarity = embeddings @ embeddings.t()
@@ -65,7 +65,7 @@ class RadIRImageRankingLoss(nn.Module):
 
 
 class LoFiCOVIDLoss(nn.Module):
-    """Weakly supervised COVIDx adaptation of LoFi.
+    """Weakly supervised single-label adaptation of LoFi.
 
     The original LoFi objective uses image-report sigmoid contrastive learning
     plus captioning and box-conditioned objectives.  With class labels only,
@@ -117,7 +117,7 @@ class LoFiCOVIDLoss(nn.Module):
         if missing:
             raise KeyError(f"LoFi model output is missing keys: {sorted(missing)}")
         if labels.ndim != 1:
-            raise ValueError("LoFi COVIDx adaptation requires single-class labels.")
+            raise ValueError("LoFi adaptation requires single-class labels.")
         labels = labels.long()
 
         global_loss = self._sigmoid_pair_loss(
@@ -188,7 +188,7 @@ class PCAMRetrievalLoss(nn.Module):
         if missing:
             raise KeyError(f"PCAM model output is missing keys: {sorted(missing)}")
         if labels.ndim != 1:
-            raise ValueError("PCAM COVIDx training requires single-class labels.")
+            raise ValueError("PCAM training requires single-class labels.")
 
         triplet_loss, active_fraction = batch_all_triplet_loss(
             labels, outputs["embedding"], self.margin, self.p
@@ -225,7 +225,7 @@ class RRAVLCOVIDLoss(nn.Module):
         if missing:
             raise KeyError(f"RRA-VL model output is missing keys: {sorted(missing)}")
         if labels.ndim != 1:
-            raise ValueError("RRA-VL COVIDx adaptation requires single-class labels.")
+            raise ValueError("RRA-VL adaptation requires single-class labels.")
         labels = labels.long()
 
         global_loss, global_active = batch_all_triplet_loss(
