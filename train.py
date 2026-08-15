@@ -27,6 +27,7 @@ from loss import (
     RadIRImageRankingLoss,
     LoFiCOVIDLoss,
     PCAMRetrievalLoss,
+    RRAVLCOVIDLoss,
     ConceptCLIPLoss,
     JaccardSupConLoss,
 )
@@ -42,6 +43,7 @@ from model import (
     ConvNeXtV2_ATH,
     ConvNeXtV2_LoFi,
     ConvNeXtV2_PCAM,
+    ConvNeXtV2_RRAVL,
     SwinV2,
     DinoV2,
     conceptCLIP,
@@ -740,6 +742,8 @@ def main(args):
             args.loss_name = "lofi"
         elif args.model == "convnextv2_pcam":
             args.loss_name = "pcam"
+        elif args.model == "convnextv2_rra_vl":
+            args.loss_name = "rra_vl"
         elif args.dataset == "nih":
             args.loss_name = "jaccard_supcon"
         elif args.dataset == "vindr":
@@ -835,6 +839,17 @@ def main(args):
             lam=args.pcam_lam,
             embedding_dim=args.embedding_dim,
         )
+    elif args.model == "convnextv2_rra_vl":
+        if args.dataset != "covid":
+            raise ValueError("ConvNeXtV2-RRA-VL adaptation currently supports COVIDx only.")
+        model = ConvNeXtV2_RRAVL(
+            num_classes=args.rra_num_classes,
+            num_regions=args.rra_num_regions,
+            context_dim=args.rra_context_dim,
+            num_heads=args.rra_num_heads,
+            depth=args.rra_depth,
+            lam=args.rra_lam,
+        )
     elif args.model == "swinv2":
         model = SwinV2(embedding_dim=args.embedding_dim)
     elif args.model == "dinov2":
@@ -926,6 +941,16 @@ def main(args):
             margin=args.margin,
             ce_weight=args.pcam_ce_weight,
         )
+    elif args.loss_name == "rra_vl":
+        if args.dataset != "covid" or args.model != "convnextv2_rra_vl":
+            raise ValueError(
+                "rra_vl loss requires --dataset covid --model convnextv2_rra_vl"
+            )
+        criterion = RRAVLCOVIDLoss(
+            margin=args.margin,
+            local_weight=args.rra_local_weight,
+            classification_weight=args.rra_classification_weight,
+        )
     elif args.loss_name == "supcon":
         criterion = SupervisedContrastiveLoss(temperature=args.supcon_temperature)
     elif args.loss_name == "jaccard_supcon":
@@ -991,7 +1016,7 @@ def main(args):
                 {"params": model_without_ddp.fc.parameters(), "lr": args.lr},
             ]
         )
-    elif args.model in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "convnextv2_pcam", "hybrid_convnext_vit"]:
+    elif args.model in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "convnextv2_pcam", "convnextv2_rra_vl", "hybrid_convnext_vit"]:
         # ConvNeXt or Hybrid model - use different LR for backbone vs head
         model_without_ddp = model.module if args.use_ddp else model
         backbone_params = []
@@ -1009,6 +1034,10 @@ def main(args):
                 or "region_classifier" in name
                 or "logit_" in name
                 or "pcam" in name
+                or "anatomical_queries" in name
+                or "context_blocks" in name
+                or "patch_projection" in name
+                or "local_projection" in name
             ):
                 head_params.append(param)
             else:
@@ -1074,7 +1103,7 @@ def main(args):
         default_img_size = (
             384
             if args.model
-            in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "convnextv2_pcam", "swinv2", "hybrid_convnext_vit"]
+            in ["convnextv2", "convnextv2_sra", "convnextv2_ath", "convnextv2_lofi", "convnextv2_pcam", "convnextv2_rra_vl", "swinv2", "hybrid_convnext_vit"]
             else 224
         )
         img_size = args.image_size or default_img_size
@@ -1485,7 +1514,7 @@ def parse_args():
     parser.add_argument(
         "--model",
         default="densenet121",
-        help="Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, convnextv2_ath, convnextv2_lofi, convnextv2_pcam, swinv2, dinov2, hybrid_convnext_vit, conceptclip, or resnet50_attention)",
+        help="Model to use (densenet121, resnet50, convnextv2, convnextv2_sra, convnextv2_ath, convnextv2_lofi, convnextv2_pcam, convnextv2_rra_vl, swinv2, dinov2, hybrid_convnext_vit, conceptclip, or resnet50_attention)",
     )
     parser.add_argument(
         "--embedding-dim", default=None, type=int, help="Embedding dimension of model"
@@ -1558,6 +1587,23 @@ def parse_args():
         "--pcam-ce-weight", default=1.0, type=float,
         help="Class-supervision weight used to learn the probability CAMs.",
     )
+    parser.add_argument("--rra-num-classes", default=3, type=int)
+    parser.add_argument("--rra-num-regions", default=8, type=int)
+    parser.add_argument(
+        "--rra-context-dim", default=64, type=int,
+        help="Compact CAA dimension chosen to keep parameter count close to SRA.",
+    )
+    parser.add_argument("--rra-num-heads", default=8, type=int)
+    parser.add_argument(
+        "--rra-depth", default=3, type=int,
+        help="Number of repeated context-aware alignment blocks (paper uses M=3).",
+    )
+    parser.add_argument("--rra-lam", default=0.1, type=float)
+    parser.add_argument(
+        "--rra-local-weight", default=0.1, type=float,
+        help="Weight of region-conditioned triplet loss (paper local beta=0.1).",
+    )
+    parser.add_argument("--rra-classification-weight", default=1.0, type=float)
     parser.add_argument(
         "--freeze-backbone",
         action="store_true",
@@ -1628,6 +1674,7 @@ def parse_args():
             "radir_cxr",
             "lofi",
             "pcam",
+            "rra_vl",
         ],
         help="Metric loss to use. Defaults to a dataset-appropriate choice when omitted.",
     )
