@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SimAtt + DenseNet121 – Interactive Demo</title>
+  <style>
+    :root {
+      --bg: #0d0f16;
+      --surface: #13161f;
+      --surface2: #1c2030;
+      --accent: #6c8ef5;
+      --accent2: #a78bfa;
+      --green: #4ade80;
+      --orange: #fb923c;
+      --red: #f87171;
+      --cyan: #38bdf8;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --border: #252a3d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    .hdr {
+      flex-shrink: 0;
+      background: linear-gradient(135deg, #0c1035 0%, #1a0c35 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 0.65rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .hdr h1 {
+      font-size: 1.2rem; font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .hdr .sub { font-size: 0.72rem; color: var(--muted); }
+    .hdr-right { display: flex; align-items: center; gap: 0.6rem; }
+    .mode-btn {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--muted); padding: 0.3rem 0.75rem; border-radius: 6px;
+      cursor: pointer; font-size: 0.75rem; transition: all 0.2s;
+    }
+    .mode-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .run-btn {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border: none; color: #fff; padding: 0.35rem 1.1rem;
+      border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: 600;
+      transition: opacity 0.2s;
+    }
+    .run-btn:hover { opacity: 0.85; }
+
+    /* ── Main 3-column layout ── */
+    .main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 220px 1fr 220px;
+      overflow: hidden;
+    }
+
+    /* ── Side image panels ── */
+    .img-panel {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; align-items: center;
+      padding: 0.9rem 0.75rem; gap: 0.55rem; overflow-y: auto;
+    }
+    .img-panel.right { border-right: none; border-left: 1px solid var(--border); }
+    .panel-title {
+      font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--muted); width: 100%; text-align: center;
+    }
+    .img-wrap {
+      position: relative; width: 184px; height: 184px;
+      border-radius: 8px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .img-wrap canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+    .img-wrap .sal-layer { opacity: 0; transition: opacity 0.7s; }
+    .img-label {
+      font-size: 0.65rem; color: var(--muted); text-align: center; width: 100%;
+    }
+    .slider-row {
+      display: flex; align-items: center; gap: 0.4rem;
+      width: 100%; font-size: 0.7rem; color: var(--muted);
+    }
+    input[type=range] { flex: 1; accent-color: var(--accent); height: 14px; }
+    .info-tile {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 7px; padding: 0.5rem 0.7rem; width: 100%;
+    }
+    .info-tile .ilabel {
+      font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--muted); margin-bottom: 0.25rem;
+    }
+    .info-tile .ivalue {
+      font-family: 'Courier New', monospace; font-size: 0.75rem; color: var(--accent);
+      white-space: pre-line;
+    }
+    .hl-green  { border-left: 3px solid var(--green); }
+    .hl-accent { border-left: 3px solid var(--accent); }
+    .hl-orange { border-left: 3px solid var(--orange); }
+    .hl-cyan   { border-left: 3px solid var(--cyan); }
+
+    /* ── Center panel ── */
+    .center {
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    /* Step bar */
+    .step-bar {
+      flex-shrink: 0;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      gap: 0; padding: 0.7rem 1rem;
+    }
+    .sdot {
+      width: 30px; height: 30px; border-radius: 50%;
+      background: var(--surface2); border: 2px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.65rem; font-weight: 700; color: var(--muted);
+      cursor: pointer; transition: all 0.25s; flex-shrink: 0;
+    }
+    .sdot.active { background: var(--accent); border-color: var(--accent); color: #fff; transform: scale(1.12); }
+    .sdot.done   { background: #1a2e1a; border-color: var(--green); color: var(--green); }
+    .sline {
+      flex: 1; height: 2px; max-width: 38px; min-width: 10px;
+      background: var(--border); transition: background 0.4s;
+    }
+    .sline.done { background: var(--green); }
+
+    /* Step content */
+    .step-body { flex: 1; overflow-y: auto; padding: 1.25rem 1.5rem; }
+    .pane { display: none; animation: fadeUp 0.35s ease; }
+    .pane.active { display: block; }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .pane-title {
+      font-size: 1rem; font-weight: 600; color: var(--accent);
+      margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.4rem;
+    }
+    .pane-desc {
+      font-size: 0.8rem; color: var(--muted); line-height: 1.65;
+      margin-bottom: 0.9rem;
+    }
+    code.il {
+      font-family: 'Courier New', monospace;
+      background: #111827; padding: 0.1rem 0.35rem;
+      border-radius: 4px; font-size: 0.78rem; color: #93c5fd;
+    }
+    .g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+    .g3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.65rem; }
+    .card {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 0.65rem 0.8rem;
+    }
+    .card .clabel {
+      font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--muted); margin-bottom: 0.3rem;
+    }
+    .card .cval {
+      font-family: 'Courier New', monospace; font-size: 0.76rem;
+      color: var(--accent); white-space: pre-line;
+    }
+    .card.cgreen { border-left: 3px solid var(--green); }
+    .card.caccent { border-left: 3px solid var(--accent); }
+    .card.corange { border-left: 3px solid var(--orange); }
+    .card.ccyan   { border-left: 3px solid var(--cyan); }
+
+    /* Feature maps grid */
+    .fm-grid {
+      display: grid; grid-template-columns: repeat(6, 1fr);
+      gap: 3px; margin: 0.5rem 0;
+    }
+    .fm-item { display: flex; flex-direction: column; gap: 2px; }
+    .fm-canvas { width: 100%; aspect-ratio: 1; border-radius: 3px; display: block; }
+    .fm-lbl { font-size: 0.5rem; color: var(--muted); text-align: center; }
+
+    /* Chart canvas */
+    .chart { width: 100%; height: 80px; border-radius: 6px; display: block; }
+
+    /* 7x7 CAM canvases */
+    .cam-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
+    .cam-lbl { font-size: 0.68rem; color: var(--muted); }
+    .cam-canvas { border-radius: 6px; border: 1px solid var(--border); display: block; width: 100%; aspect-ratio: 1; }
+
+    /* Progress bars */
+    .pbar-outer {
+      width: 100%; height: 7px; background: var(--surface2);
+      border-radius: 9999px; overflow: hidden; margin-top: 0.25rem;
+    }
+    .pbar-inner {
+      height: 100%; border-radius: 9999px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      transition: width 1.2s ease;
+    }
+
+    /* Architecture SVG */
+    .arch-wrap { width: 100%; overflow-x: auto; margin: 0.6rem 0; }
+
+    /* Status bar */
+    .ctrl-bar {
+      flex-shrink: 0;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      gap: 0.65rem; padding: 0.7rem 1rem;
+    }
+    .cbtn {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); padding: 0.4rem 1.2rem;
+      border-radius: 7px; cursor: pointer; font-size: 0.8rem;
+      transition: background 0.2s;
+    }
+    .cbtn:hover { background: var(--border); }
+    .cbtn.cprimary {
+      background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+    }
+    .cbtn.cprimary:hover { opacity: 0.85; }
+    .step-ctr { font-size: 0.75rem; color: var(--muted); min-width: 55px; text-align: center; }
+
+    /* Status in right panel */
+    .status-text { font-family: 'Courier New', monospace; font-size: 0.72rem; }
+
+    /* Colormap legend */
+    .legend-wrap { margin-top: 0.4rem; }
+    .legend-canvas { width: 100%; height: 18px; border-radius: 4px; display: block; }
+    .legend-labels {
+      display: flex; justify-content: space-between;
+      font-size: 0.62rem; color: var(--muted); margin-top: 0.2rem;
+    }
+
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<div class="hdr">
+  <div>
+    <h1>SimAtt + DenseNet121</h1>
+    <div class="sub">Interactive Saliency Map Generation · Image Retrieval XAI Demo</div>
+  </div>
+  <div class="hdr-right">
+    <span style="font-size:0.72rem;color:var(--muted)">Chế độ:</span>
+    <button class="mode-btn active" id="btnSiamese" onclick="setMode('siamese')">Siamese (+)</button>
+    <button class="mode-btn" id="btnTriplet" onclick="setMode('triplet')">Triplet</button>
+    <button class="run-btn" onclick="runAll()">▶ Chạy Tự Động</button>
+  </div>
+</div>
+
+<!-- ═══════════════ MAIN ═══════════════ -->
+<div class="main">
+
+  <!-- ── LEFT: Query image ── -->
+  <div class="img-panel">
+    <div class="panel-title">Ảnh Truy Vấn (Query)</div>
+
+    <div class="img-wrap">
+      <canvas id="qImg" width="200" height="200"></canvas>
+      <canvas id="qSal" width="200" height="200" class="sal-layer"></canvas>
+    </div>
+    <div class="img-label">Original &nbsp;|&nbsp; Saliency Overlay</div>
+
+    <div class="slider-row">
+      <span>Opacity</span>
+      <input type="range" id="alphaQ" min="20" max="90" value="65" oninput="updateOverlay()">
+      <span id="alphaQv">0.65</span>
+    </div>
+    <div class="slider-row">
+      <span>Thresh</span>
+      <input type="range" id="threshQ" min="0" max="70" value="15" oninput="updateOverlay()">
+      <span id="threshQv">0.15</span>
+    </div>
+
+    <div class="info-tile hl-accent">
+      <div class="ilabel">Input tensor</div>
+      <div class="ivalue">x_q: [1, 3, 224, 224]</div>
+    </div>
+    <div class="info-tile hl-accent">
+      <div class="ilabel">Feature map (hook)</div>
+      <div class="ivalue">A[-1][0]: [1, 1024, 7, 7]</div>
+    </div>
+    <div class="info-tile">
+      <div class="ilabel">Embedding (after GAP)</div>
+      <div class="ivalue">e_q: [1024-dim]</div>
+    </div>
+    <div class="info-tile" id="tileSalQ" style="display:none">
+      <div class="ilabel">Saliency M[0]</div>
+      <div class="ivalue" style="color:var(--green)">✓ [224, 224] – query</div>
+    </div>
+  </div>
+
+  <!-- ── CENTER: Pipeline ── -->
+  <div class="center">
+
+    <!-- Step indicator -->
+    <div class="step-bar" id="stepBar"></div>
+
+    <!-- Pane content -->
+    <div class="step-body">
+
+      <!-- Pane 0: Inputs -->
+      <div class="pane active" id="pane-0">
+        <div class="pane-title">🖼️ Bước 0 – Chuẩn bị ảnh đầu vào</div>
+        <div class="pane-desc">
+          Mô phỏng hai ảnh X-quang ngực độ phân giải 224×224 (chuẩn ImageNet cho DenseNet121).
+          Ảnh truy vấn có một tổn thương nhỏ (nodule) tại thùy phổi phải trên.
+          Ảnh truy hồi là ảnh tương tự cùng nhóm bệnh, không có tổn thương rõ ràng.
+          SimAtt <strong>concatenate</strong> cả hai thành một batch duy nhất trước khi đẩy qua backbone.
+        </div>
+        <div class="g2">
+          <div class="card caccent">
+            <div class="clabel">Query x_q</div>
+            <div class="cval">shape : [1, 3, 224, 224]
+norm  : ImageNet mean/std
+label : Nodule (right lung)</div>
+          </div>
+          <div class="card cgreen">
+            <div class="clabel">Retrieved x_p (positive)</div>
+            <div class="cval">shape : [1, 3, 224, 224]
+norm  : ImageNet mean/std
+label : Same class (lung)</div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:0.65rem">
+          <div class="clabel">SimAtt concatenation</div>
+          <div class="cval">x = cat([x_q, x_p])  →  shape [2, 3, 224, 224]</div>
+        </div>
+        <div class="card corange" id="negCard" style="margin-top:0.65rem;display:none">
+          <div class="clabel">Negative x_n (Triplet mode)</div>
+          <div class="cval">shape : [1, 3, 224, 224]
+label : Different class
+→ x = cat([x_q, x_p, x_n]) → [3, 3, 224, 224]</div>
+        </div>
+        <div style="margin-top:0.9rem;font-size:0.75rem;color:var(--muted)">
+          Forward hook được đăng ký trên <code class="il">feature_module</code> (Dense Block 4)
+          trước khi chạy forward pass.
+        </div>
+      </div>
+
+      <!-- Pane 1: Architecture -->
+      <div class="pane" id="pane-1">
+        <div class="pane-title">🏗️ Bước 1 – Kiến trúc DenseNet121</div>
+        <div class="pane-desc">
+          DenseNet121 sử dụng <strong>Dense Connections</strong>: mỗi layer kết nối trực tiếp đến tất cả
+          layer phía sau trong cùng Dense Block. Backbone xử lý batch <code class="il">[2,3,224,224]</code>
+          và SimAtt hook vào output cuối của Dense Block 4 – feature map <code class="il">[2,1024,7,7]</code>
+          – trước khi Global Average Pooling.
+        </div>
+        <div class="arch-wrap">
+          <svg viewBox="0 0 720 148" xmlns="http://www.w3.org/2000/svg" style="min-width:580px;height:148px">
+            <defs>
+              <marker id="ah" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+                <path d="M0,0 L5,2.5 L0,5 Z" fill="#252a3d"/>
+              </marker>
+              <marker id="ag" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+                <path d="M0,0 L5,2.5 L0,5 Z" fill="#4ade80"/>
+              </marker>
+            </defs>
+
+            <!-- Input -->
+            <rect x="4" y="50" width="52" height="48" rx="5" fill="#1c2030" stroke="#252a3d" stroke-width="1.2"/>
+            <text x="30" y="70" text-anchor="middle" fill="#94a3b8" font-size="8.5">Input</text>
+            <text x="30" y="83" text-anchor="middle" fill="#6c8ef5" font-size="7.5">224×224</text>
+            <text x="30" y="94" text-anchor="middle" fill="#6c8ef5" font-size="7">×3, ×2</text>
+            <line x1="56" y1="74" x2="70" y2="74" stroke="#252a3d" stroke-width="1.5" marker-end="url(#ah)"/>
+
+            <!-- Conv1+Pool -->
+            <rect x="70" y="53" width="52" height="42" rx="5" fill="#1c2030" stroke="#6c8ef5" stroke-width="1.3"/>
+            <text x="96" y="71" text-anchor="middle" fill="#e2e8f0" font-size="8">Conv 7×7</text>
+            <text x="96" y="83" text-anchor="middle" fill="#6c8ef5" font-size="7">64 ch</text>
+            <text x="96" y="92" text-anchor="middle" fill="#64748b" font-size="6.5">+ MaxPool</text>
+            <line x1="122" y1="74" x2="136" y2="74" stroke="#252a3d" stroke-width="1.5" marker-end="url(#ah)"/>
+
+            <!-- Dense Block 1 -->
+            <rect x="136" y="44" width="62" height="60" rx="5" fill="#16213a" stroke="#6c8ef5" stroke-width="1.5"/>
+            <text x="167" y="63" text-anchor="middle" fill="#e2e8f0" font-size="8.5" font-weight="600">Dense</text>
+            <text x="167" y="75" text-anchor="middle" fill="#6c8ef5" font-size="8">Block 1</text>
+            <text x="167" y="86" text-anchor="middle" fill="#64748b" font-size="7">6 layers</text>
+            <text x="167" y="97" text-anchor="middle" fill="#64748b" font-size="7">56×56</text>
+            <line x1="198" y1="74" x2="212" y2="74" stroke="#252a3d" stroke-width="1.5" marker-end="url(#ah)"/>
+
+            <!-- Trans 1 -->
+            <rect x="212" y="58" width="36" height="32" rx="4" fill="#1c2030" stroke="#252a3d"/>
+            <text x="230" y="72" text-anchor="middle" fill="#94a3b8" font-size="7">Trans 1</text>
+            <text x="230" y="82" text-anchor="middle" fill="#64748b" font-size="6.5">1×1+Pool</text>
+            <line x1="248" y1="74" x2="262" y2="74" stroke="#252a3d" stroke-width="1.5" marker-end="url(#ah)"/>
+
+            <!-- Dense Block 2 -->
+            <rect x="262" y="44" width="62" height="60" rx="5" fill="#16213a" stroke="#6c8ef5" stroke-width="1.5"/>
+            <text x="293" y="63" text-anchor="middle" fill="#e2e8f0" font-size="8.5" font-weight="600">Dense</text>
+            <text x="293" y="75" text-anchor="middle" fill="#6c8ef5" font-size="8">Block 2</text>
+            <text x="293" y="86" text-anchor="middle" fill="#64748b" font-size="7">12 layers</text>
+            <text x="293" y="97" text-anchor="middle" fill="#64748b" font-size="7">28×28</text>
+            <line x1="324" y1="74" x2="338" y2="74" stroke="#252a3d" stroke-width="1.5" marker-end="url(#ah)"/>
+
+            <!-- Trans 2 -->
+            <rect x="338" y="58" width="36" height="32" rx="4" fill="#1c2030" stroke="#252a3d"/>
+            <text x="356" y="72" text-anchor="middle" fill="#94a3b8" font-size="7">Trans 2</text>
+            <text x="356" y="82" text-anchor="middle" fill="#64748b" font-size="6.5">1×1+Pool</text>
+            <line x1="374" y1="74" x2="388" y2="74" stroke="#252a3d" stroke-width="1.5" marker-end="url(#ah)"/>
+
+            <!-- Dense Block 3 -->
+            <rect x="388" y="44" width="62" height="60" rx="5" fill="#16213a" stroke="#6c8ef5" stroke-width="1.5"/>
+            <text x="419" y="63" text-anchor="middle" fill="#e2e8f0" font-size="8.5" font-weight="600">Dense</text>
+            <text x="419" y="75" text-anchor="middle" fill="#6c8ef5" font-size="8">Block 3</text>
+            <text x="419" y="86" text-anchor="middle" fill="#64748b" font-size="7">24 layers</text>
+            <text x="419" y="97" text-anchor="middle" fill="#64748b" font-size="7">14×14</text>
+            <line x1="450" y1="74" x2="464" y2="74" stroke="#252a3d" stroke-width="1.5" marker-end="url(#ah)"/>
+
+            <!-- Trans 3 -->
+            <rect x="464" y="58" width="36" height="32" rx="4" fill="#1c2030" stroke="#252a3d"/>
+            <text x="482" y="72" text-anchor="middle" fill="#94a3b8" font-size="7">Trans 3</text>
+            <text x="482" y="82" text-anchor="middle" fill="#64748b" font-size="6.5">1×1+Pool</text>
+            <line x1="500" y1="74" x2="514" y2="74" stroke="#4ade80" stroke-width="1.8" marker-end="url(#ag)"/>
+
+            <!-- Dense Block 4 (HOOKED) -->
+            <rect x="514" y="36" width="68" height="76" rx="6" fill="#0e2318" stroke="#4ade80" stroke-width="2"/>
+            <text x="548" y="56" text-anchor="middle" fill="#e2e8f0" font-size="8.5" font-weight="700">Dense</text>
+            <text x="548" y="68" text-anchor="middle" fill="#4ade80" font-size="8.5">Block 4</text>
+            <text x="548" y="80" text-anchor="middle" fill="#64748b" font-size="7">16 layers</text>
+            <text x="548" y="91" text-anchor="middle" fill="#64748b" font-size="7">7×7×1024</text>
+            <text x="548" y="104" text-anchor="middle" fill="#4ade80" font-size="6.5" font-weight="700">▶ HOOK</text>
+            <line x1="582" y1="74" x2="596" y2="74" stroke="#4ade80" stroke-width="1.8" marker-end="url(#ag)"/>
+
+            <!-- GAP -->
+            <rect x="596" y="58" width="38" height="32" rx="4" fill="#1c2030" stroke="#64748b"/>
+            <text x="615" y="71" text-anchor="middle" fill="#94a3b8" font-size="7">GAP</text>
+            <text x="615" y="82" text-anchor="middle" fill="#64748b" font-size="6.5">1×1024</text>
+            <line x1="634" y1="74" x2="648" y2="74" stroke="#252a3d" stroke-width="1.5" marker-end="url(#ah)"/>
+
+            <!-- Embedding -->
+            <rect x="648" y="50" width="62" height="48" rx="5" fill="#1c2030" stroke="#a78bfa" stroke-width="1.5"/>
+            <text x="679" y="70" text-anchor="middle" fill="#e2e8f0" font-size="8">Embedding</text>
+            <text x="679" y="82" text-anchor="middle" fill="#a78bfa" font-size="8">1024-dim</text>
+            <text x="679" y="93" text-anchor="middle" fill="#64748b" font-size="7">L2-norm</text>
+
+            <!-- Hook annotation -->
+            <text x="548" y="128" text-anchor="middle" fill="#4ade80" font-size="7">feats = A[-1]  [2, 1024, 7, 7]</text>
+            <line x1="548" y1="112" x2="548" y2="121" stroke="#4ade80" stroke-width="1" stroke-dasharray="2,2"/>
+          </svg>
+        </div>
+        <div class="g2">
+          <div class="card caccent">
+            <div class="clabel">SimAtt hook code</div>
+            <div class="cval" style="font-size:0.7rem">feats = []
+def hook_fn(m, inp, out):
+  feats.append(out)
+handle = feature_module\
+  .register_forward_hook(hook_fn)
+_ = model(x_batch)
+handle.remove()</div>
+          </div>
+          <div class="card cgreen">
+            <div class="clabel">Dense connection pattern</div>
+            <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:0.3rem" id="denseViz"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pane 2: Feature Maps -->
+      <div class="pane" id="pane-2">
+        <div class="pane-title">🗺️ Bước 2 – Feature Maps từ Dense Block 4</div>
+        <div class="pane-desc">
+          Output của Dense Block 4: <code class="il">feats = A[-1]</code> có shape
+          <code class="il">[2, 1024, 7, 7]</code>.
+          Hiển thị 12/1024 channels đại diện (mỗi channel upscale lên 42×42 để rõ).
+          Mỗi channel encode một loại đặc trưng: texture, edges, opacity patterns…
+        </div>
+        <div style="font-size:0.72rem;color:var(--cyan);margin-bottom:0.4rem">
+          Query feature maps — <code class="il">feats[0]</code> :
+        </div>
+        <div class="fm-grid" id="fmQ"></div>
+        <div style="font-size:0.72rem;color:var(--green);margin:0.75rem 0 0.4rem">
+          Retrieved feature maps — <code class="il">feats[1]</code> :
+        </div>
+        <div class="fm-grid" id="fmR"></div>
+        <div class="card caccent" style="margin-top:0.65rem">
+          <div class="clabel">Tensor summary</div>
+          <div class="cval">feats = A[-1]       # [2, 1024, 7, 7]
+feats[0]            # query (spatial 7×7)
+feats[1]            # retrieved (spatial 7×7)</div>
+        </div>
+      </div>
+
+      <!-- Pane 3: Embeddings -->
+      <div class="pane" id="pane-3">
+        <div class="pane-title">📊 Bước 3 – Embedding Vectors (sau GAP)</div>
+        <div class="pane-desc">
+          Sau Global Average Pooling, mỗi ảnh cho ra vector 1024-dim, sau đó L2-normalize.
+          Hiển thị 64 chiều đầu. Hai embedding có cosine similarity cao vì cùng class.
+        </div>
+        <div style="font-size:0.72rem;color:var(--cyan);margin-bottom:0.3rem">
+          <code class="il">e_q</code> – Query embedding (64 / 1024 dims):
+        </div>
+        <canvas class="chart" id="chartEq" width="800" height="80"></canvas>
+        <div style="font-size:0.72rem;color:var(--green);margin:0.75rem 0 0.3rem">
+          <code class="il">e_p</code> – Retrieved embedding (64 / 1024 dims):
+        </div>
+        <canvas class="chart" id="chartEp" width="800" height="80"></canvas>
+        <div class="g3" style="margin-top:0.65rem">
+          <div class="card caccent">
+            <div class="clabel">L2 norm e_q</div>
+            <div class="cval" id="normEq">1.000</div>
+          </div>
+          <div class="card cgreen">
+            <div class="clabel">Cosine sim(q,p)</div>
+            <div class="cval" id="cosVal">—</div>
+          </div>
+          <div class="card">
+            <div class="clabel">Embed dim</div>
+            <div class="cval">1024</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pane 4: Weight vector w -->
+      <div class="pane" id="pane-4">
+        <div class="pane-title">⚖️ Bước 4 – Vector Trọng Số w</div>
+        <div class="pane-desc">
+          Vector <strong>w</strong> xác định <em>những chiều embedding nào</em> phân biệt rõ nhất
+          sự tương đồng/khác biệt. Chiều nào có <code class="il">w[d]</code> cao → chiều đó
+          "quyết định" việc truy hồi.
+        </div>
+        <div style="font-size:0.72rem;color:var(--orange);margin-bottom:0.3rem">
+          <code class="il">w = 1 − |norm(e_q) − norm(e_p)|</code>
+          &nbsp;(inverted for positive pair):
+        </div>
+        <canvas class="chart" id="chartW" width="800" height="80"></canvas>
+        <div id="negWSection" style="display:none">
+          <div style="font-size:0.72rem;color:var(--red);margin:0.65rem 0 0.3rem">
+            Triplet: nhân thêm <code class="il">|norm(e_q) − norm(e_n)|</code>:
+          </div>
+          <canvas class="chart" id="chartWn" width="800" height="80"></canvas>
+        </div>
+        <div class="g2" style="margin-top:0.65rem">
+          <div class="card corange">
+            <div class="clabel">Ý nghĩa w[d] cao</div>
+            <div class="cval" style="font-size:0.72rem;color:var(--text)">Chiều d gần nhau giữa
+query và positive
+→ phản ánh tương đồng thực</div>
+          </div>
+          <div class="card">
+            <div class="clabel">Top-5 dims (sim)</div>
+            <div class="cval" id="topDims">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pane 5: Sample scores + Gradient -->
+      <div class="pane" id="pane-5">
+        <div class="pane-title">🔄 Bước 5 – Sample Score & Gradient Flow</div>
+        <div class="pane-desc">
+          Tính scalar score <code class="il">s = |x| @ w</code> cho từng ảnh trong batch.
+          Sau đó gọi <code class="il">torch.autograd.grad(unbind(s), feats)</code>
+          để lấy gradient của score theo feature map.
+        </div>
+        <div class="g2">
+          <div class="card caccent">
+            <div class="clabel">Sample scores s</div>
+            <div class="cval" id="scoresVal">s_q = —
+s_p = —</div>
+          </div>
+          <div class="card ccyan">
+            <div class="clabel">Gradient shape</div>
+            <div class="cval">∂s/∂feats
+→ [2, 1024, 7, 7]</div>
+          </div>
+        </div>
+        <div style="font-size:0.72rem;color:var(--cyan);margin:0.75rem 0 0.3rem">
+          Channel weights <code class="il">α_c = mean(grads, dim=(2,3))</code> → [2, 1024]:
+        </div>
+        <canvas class="chart" id="chartGrad" width="800" height="80"></canvas>
+        <div class="card caccent" style="margin-top:0.65rem">
+          <div class="clabel">Global Average Pooling của gradient</div>
+          <div class="cval">weights = grads.mean(dim=(2,3))  # [2, 1024]
+weights[0]: channel weights cho query
+weights[1]: channel weights cho retrieved</div>
+        </div>
+      </div>
+
+      <!-- Pane 6: CAM -->
+      <div class="pane" id="pane-6">
+        <div class="pane-title">🎯 Bước 6 – Class Activation Map (CAM)</div>
+        <div class="pane-desc">
+          Weighted sum của feature maps theo channel weights, áp ReLU, rồi upsample bilinear
+          lên <code class="il">224×224</code>. Map 7×7 raw được hiển thị bên dưới.
+        </div>
+        <div class="g2">
+          <div class="cam-wrap">
+            <div class="cam-lbl" style="color:var(--cyan)">Query CAM (7×7 raw)</div>
+            <canvas id="camQ" width="120" height="120" class="cam-canvas"></canvas>
+          </div>
+          <div class="cam-wrap">
+            <div class="cam-lbl" style="color:var(--green)">Retrieved CAM (7×7 raw)</div>
+            <canvas id="camR" width="120" height="120" class="cam-canvas"></canvas>
+          </div>
+        </div>
+        <div class="card caccent" style="margin-top:0.65rem">
+          <div class="clabel">Công thức CAM</div>
+          <div class="cval" style="font-size:0.7rem">M = bmm(weights.unsqueeze(1),
+        feats.reshape(B, C, 49))
+M = M.reshape(B, 1, 7, 7)   # [2,1,7,7]
+M = ReLU(M)
+M = interpolate(M,(224,224)) # bilinear
+M = M.squeeze(1)             # [2,224,224]</div>
+        </div>
+        <div style="margin-top:0.65rem;font-size:0.72rem;color:var(--muted)">Top channels đóng góp nhiều nhất:</div>
+        <div id="camBars" style="margin-top:0.4rem"></div>
+      </div>
+
+      <!-- Pane 7: Final result -->
+      <div class="pane" id="pane-7">
+        <div class="pane-title">✅ Bước 7 – Kết Quả Saliency Map Cuối</div>
+        <div class="pane-desc">
+          Saliency map được overlay lên ảnh gốc với colormap <em>jet</em> (xem panel hai bên).
+          Vùng <span style="color:#ff4444">đỏ/cam</span> = ảnh hưởng lớn nhất đến quyết định truy hồi.
+          Điều chỉnh Opacity và Threshold trên mỗi panel để xem rõ hơn.
+        </div>
+        <div class="g2">
+          <div class="card caccent">
+            <div class="clabel">Query saliency M[0]</div>
+            <div class="cval" style="color:var(--text);font-size:0.72rem">Highlight thùy phổi phải trên
+→ vị trí tổn thương (nodule)
+→ lý do query này được gửi đi</div>
+          </div>
+          <div class="card cgreen">
+            <div class="clabel">Retrieved saliency M[1]</div>
+            <div class="cval" style="color:var(--text);font-size:0.72rem">Highlight vùng phổi tương ứng
+→ vị trí tương tự trên ảnh kết quả
+→ giải thích vì sao được truy hồi</div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:0.65rem">
+          <div class="clabel">Output shape</div>
+          <div class="cval">M  →  [2, 224, 224]
+M[0] : query saliency
+M[1] : retrieved saliency</div>
+        </div>
+        <div class="legend-wrap" style="margin-top:0.65rem">
+          <div style="font-size:0.68rem;color:var(--muted);margin-bottom:0.3rem">Colormap Jet (Low → High importance):</div>
+          <canvas id="legendCanvas" width="400" height="18" class="legend-canvas"></canvas>
+          <div class="legend-labels">
+            <span>0.0 · không liên quan</span>
+            <span>0.5 · trung bình</span>
+            <span>1.0 · quan trọng nhất</span>
+          </div>
+        </div>
+        <div style="margin-top:0.65rem;font-size:0.72rem;color:var(--muted)">
+          Kết luận: SimAtt thành công highlight đúng vùng phổi phải – nơi có nodule –
+          trên cả ảnh query lẫn ảnh retrieval, cho thấy mô hình đang dựa vào đặc trưng này để so sánh.
+        </div>
+      </div>
+
+    </div><!-- /step-body -->
+
+    <!-- Controls -->
+    <div class="ctrl-bar">
+      <button class="cbtn" onclick="prevStep()">◀ Trước</button>
+      <span class="step-ctr" id="stepCtr">1 / 8</span>
+      <button class="cbtn cprimary" onclick="nextStep()">Tiếp ▶</button>
+    </div>
+
+  </div><!-- /center -->
+
+  <!-- ── RIGHT: Retrieved image ── -->
+  <div class="img-panel right">
+    <div class="panel-title">Ảnh Truy Hồi (Retrieved)</div>
+
+    <div class="img-wrap">
+      <canvas id="rImg" width="200" height="200"></canvas>
+      <canvas id="rSal" width="200" height="200" class="sal-layer"></canvas>
+    </div>
+    <div class="img-label">Original &nbsp;|&nbsp; Saliency Overlay</div>
+
+    <div class="slider-row">
+      <span>Opacity</span>
+      <input type="range" id="alphaR" min="20" max="90" value="65" oninput="updateOverlay()">
+      <span id="alphaRv">0.65</span>
+    </div>
+    <div class="slider-row">
+      <span>Thresh</span>
+      <input type="range" id="threshR" min="0" max="70" value="15" oninput="updateOverlay()">
+      <span id="threshRv">0.15</span>
+    </div>
+
+    <div class="info-tile hl-green">
+      <div class="ilabel">Input tensor</div>
+      <div class="ivalue">x_p: [1, 3, 224, 224]</div>
+    </div>
+    <div class="info-tile hl-green">
+      <div class="ilabel">Feature map (hook)</div>
+      <div class="ivalue">A[-1][1]: [1, 1024, 7, 7]</div>
+    </div>
+    <div class="info-tile">
+      <div class="ilabel">Embedding (after GAP)</div>
+      <div class="ivalue">e_p: [1024-dim]</div>
+    </div>
+
+    <!-- Status -->
+    <div class="info-tile" style="margin-top:auto">
+      <div class="ilabel">Trạng thái</div>
+      <div class="ivalue status-text" id="statusTxt" style="color:var(--muted)">Chưa chạy</div>
+      <div class="pbar-outer" style="margin-top:0.4rem">
+        <div class="pbar-inner" id="progBar" style="width:0%"></div>
+      </div>
+    </div>
+    <div class="info-tile" id="tileSalR" style="display:none">
+      <div class="ilabel">Saliency M[1]</div>
+      <div class="ivalue" style="color:var(--green)">✓ [224, 224] – retrieved</div>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<!-- ═══════════════ JAVASCRIPT ═══════════════ -->
+<script>
+// ──────────────────────────────────────────
+// STATE
+// ──────────────────────────────────────────
+let curStep = 0;
+const N_STEPS = 8;
+let appMode = 'siamese';
+let salDone = false;
+let qSaliency = null, rSaliency = null;
+
+// ──────────────────────────────────────────
+// UTILITIES
+// ──────────────────────────────────────────
+function mkRng(seed) {
+  let s = (seed >>> 0) || 1;
+  return () => {
+    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+    return (s >>> 0) / 4294967295;
+  };
+}
+
+function jet(v) {
+  v = Math.max(0, Math.min(1, v));
+  const r = Math.min(Math.max(1.5 - Math.abs(4*v-3), 0), 1);
+  const g = Math.min(Math.max(1.5 - Math.abs(4*v-2), 0), 1);
+  const b = Math.min(Math.max(1.5 - Math.abs(4*v-1), 0), 1);
+  return [r*255|0, g*255|0, b*255|0];
+}
+
+function hot(v) {
+  v = Math.max(0, Math.min(1, v));
+  return [Math.min(v*3,1)*255|0, Math.min(Math.max(v*3-1,0),1)*255|0, Math.min(Math.max(v*3-2,0),1)*255|0];
+}
+
+function gauss2D(x, y, cx, cy, sx, sy) {
+  return Math.exp(-((x-cx)**2/(2*sx**2) + (y-cy)**2/(2*sy**2)));
+}
+
+function blur2D(arr, W, H, r=2) {
+  const out = new Float32Array(W*H);
+  for (let y=0;y<H;y++) for (let x=0;x<W;x++) {
+    let s=0,c=0;
+    for (let dy=-r;dy<=r;dy++) for (let dx=-r;dx<=r;dx++) {
+      const ny=y+dy,nx=x+dx;
+      if(ny>=0&&ny<H&&nx>=0&&nx<W){s+=arr[ny*W+nx];c++;}
+    }
+    out[y*W+x]=s/c;
+  }
+  return out;
+}
+
+// ──────────────────────────────────────────
+// DRAW X-RAY IMAGE
+// ──────────────────────────────────────────
+function drawXRay(canvas, seed, hasLesion=false) {
+  const ctx = canvas.getContext('2d');
+  const W=canvas.width, H=canvas.height;
+  const rng=mkRng(seed);
+  const cx=W/2, cy=H/2;
+
+  ctx.fillStyle='#090909'; ctx.fillRect(0,0,W,H);
+
+  // Chest body
+  ctx.save(); ctx.beginPath();
+  ctx.ellipse(cx,cy*1.08,W*.41,H*.46,0,0,Math.PI*2);
+  ctx.fillStyle='#191919'; ctx.fill(); ctx.restore();
+
+  // Spine
+  const spG=ctx.createLinearGradient(cx-5,0,cx+5,0);
+  spG.addColorStop(0,'rgba(0,0,0,0)'); spG.addColorStop(.5,'rgba(75,75,75,.65)'); spG.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=spG; ctx.fillRect(cx-7,H*.1,14,H*.75);
+
+  // Ribs
+  for(let i=0;i<8;i++){
+    const ry=H*.2+i*H*.083;
+    ctx.beginPath();
+    ctx.ellipse(cx,ry,W*.34+rng()*4,11+rng()*4,0,.1,.9*Math.PI);
+    ctx.strokeStyle=`rgba(50,50,50,${.4+rng()*.3})`; ctx.lineWidth=1.5+rng()*1.5; ctx.stroke();
+  }
+
+  // Left lung
+  const lgL=ctx.createRadialGradient(cx*.57,cy*.91,3,cx*.57,cy*.91,W*.21);
+  lgL.addColorStop(0,'rgba(52,52,52,.95)'); lgL.addColorStop(.65,'rgba(36,36,36,.7)'); lgL.addColorStop(1,'rgba(18,18,18,0)');
+  ctx.save(); ctx.beginPath(); ctx.ellipse(cx*.56,cy*.93,W*.19,H*.34,-.14,0,Math.PI*2); ctx.fillStyle=lgL; ctx.fill(); ctx.restore();
+
+  // Right lung
+  const lgR=ctx.createRadialGradient(cx*1.43,cy*.91,3,cx*1.43,cy*.91,W*.21);
+  lgR.addColorStop(0,'rgba(52,52,52,.95)'); lgR.addColorStop(.65,'rgba(36,36,36,.7)'); lgR.addColorStop(1,'rgba(18,18,18,0)');
+  ctx.save(); ctx.beginPath(); ctx.ellipse(cx*1.44,cy*.93,W*.19,H*.34,.14,0,Math.PI*2); ctx.fillStyle=lgR; ctx.fill(); ctx.restore();
+
+  // Heart
+  ctx.save(); ctx.beginPath();
+  ctx.ellipse(cx*.88,cy*1.05,W*.11,H*.15,.28,0,Math.PI*2);
+  ctx.fillStyle='rgba(26,26,26,.88)'; ctx.fill(); ctx.restore();
+
+  // Lung texture
+  for(let i=0;i<500;i++){
+    const nx=W*.18+rng()*W*.64, ny=H*.1+rng()*H*.75;
+    ctx.fillStyle=`rgba(${38+rng()*18|0},${38+rng()*18|0},${38+rng()*18|0},${.08+rng()*.14})`;
+    ctx.beginPath(); ctx.arc(nx,ny,.4+rng()*1.8,0,Math.PI*2); ctx.fill();
+  }
+
+  // Lesion (right lung upper)
+  if(hasLesion){
+    const lx=cx*1.38,ly=cy*.67;
+    const lG=ctx.createRadialGradient(lx,ly,0,lx,ly,W*.046);
+    lG.addColorStop(0,'rgba(118,118,118,.82)'); lG.addColorStop(.5,'rgba(78,78,78,.45)'); lG.addColorStop(1,'rgba(50,50,50,0)');
+    ctx.beginPath(); ctx.arc(lx,ly,W*.046,0,Math.PI*2); ctx.fillStyle=lG; ctx.fill();
+    ctx.beginPath(); ctx.arc(lx,ly,W*.038,0,Math.PI*2);
+    ctx.strokeStyle='rgba(95,95,95,.35)'; ctx.lineWidth=1; ctx.stroke();
+  }
+
+  // Noise
+  const id=ctx.getImageData(0,0,W,H); const d=id.data;
+  for(let i=0;i<d.length;i+=4){
+    const n=(rng()-.5)*9; d[i]=Math.max(0,Math.min(255,d[i]+n));
+    d[i+1]=Math.max(0,Math.min(255,d[i+1]+n)); d[i+2]=Math.max(0,Math.min(255,d[i+2]+n));
+  }
+  ctx.putImageData(id,0,0);
+}
+
+// ──────────────────────────────────────────
+// SALIENCY MAP GENERATION
+// ──────────────────────────────────────────
+function makeSaliency(W, H, isQuery, seed) {
+  const sal=new Float32Array(W*H);
+  const cx=W/2, cy=H/2;
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    let v=0;
+    if(isQuery){
+      v+=.92*gauss2D(x,y,cx*1.38,cy*.67,W*.065,H*.075);
+      v+=.42*gauss2D(x,y,cx*1.30,cy*.86,W*.09,H*.11);
+      v+=.13*gauss2D(x,y,cx*.60,cy*.90,W*.10,H*.14);
+    } else {
+      v+=.72*gauss2D(x,y,cx*1.40,cy*.71,W*.08,H*.09);
+      v+=.52*gauss2D(x,y,cx*1.28,cy*.89,W*.10,H*.12);
+      v+=.18*gauss2D(x,y,cx*.58,cy*.87,W*.11,H*.15);
+    }
+    sal[y*W+x]=Math.max(0,v);
+  }
+  const bl=blur2D(sal,W,H,4);
+  let mx=0; for(let i=0;i<bl.length;i++) if(bl[i]>mx)mx=bl[i];
+  if(mx>0) for(let i=0;i<bl.length;i++) bl[i]/=mx;
+  return bl;
+}
+
+function applyOverlay(imgCanvas, salCanvas, sal, alpha, thresh) {
+  const sCtx=salCanvas.getContext('2d');
+  const W=salCanvas.width,H=salCanvas.height;
+  sCtx.drawImage(imgCanvas,0,0,W,H);
+  const id=sCtx.getImageData(0,0,W,H); const d=id.data;
+  for(let i=0;i<sal.length;i++){
+    const v=sal[i]; if(v<thresh) continue;
+    const nv=(v-thresh)/(1-thresh+1e-6);
+    const [r,g,b]=jet(nv);
+    d[i*4]  =d[i*4]  *(1-alpha)+r*alpha|0;
+    d[i*4+1]=d[i*4+1]*(1-alpha)+g*alpha|0;
+    d[i*4+2]=d[i*4+2]*(1-alpha)+b*alpha|0;
+  }
+  sCtx.putImageData(id,0,0);
+}
+
+function updateOverlay() {
+  const aQ=document.getElementById('alphaQ').value/100;
+  const tQ=document.getElementById('threshQ').value/100;
+  const aR=document.getElementById('alphaR').value/100;
+  const tR=document.getElementById('threshR').value/100;
+  document.getElementById('alphaQv').textContent=aQ.toFixed(2);
+  document.getElementById('threshQv').textContent=tQ.toFixed(2);
+  document.getElementById('alphaRv').textContent=aR.toFixed(2);
+  document.getElementById('threshRv').textContent=tR.toFixed(2);
+  if(!salDone) return;
+  applyOverlay(document.getElementById('qImg'),document.getElementById('qSal'),qSaliency,aQ,tQ);
+  applyOverlay(document.getElementById('rImg'),document.getElementById('rSal'),rSaliency,aR,tR);
+}
+
+// ──────────────────────────────────────────
+// FEATURE MAP
+// ──────────────────────────────────────────
+function makeFeatureMap(seed) {
+  const rng=mkRng(seed);
+  const fm=new Float32Array(49);
+  const nb=2+Math.floor(rng()*3);
+  for(let b=0;b<nb;b++){
+    const bx=rng()*7,by=rng()*7,sx=.7+rng()*2,sy=.7+rng()*2,st=.4+rng()*.6;
+    for(let y=0;y<7;y++) for(let x=0;x<7;x++) fm[y*7+x]+=st*gauss2D(x,y,bx,by,sx,sy);
+  }
+  if(rng()>.5){const ex=Math.floor(rng()*7); for(let y=0;y<7;y++) fm[y*7+ex]+=.35+rng()*.25;}
+  let mx=0; for(let i=0;i<fm.length;i++) if(fm[i]>mx)mx=fm[i];
+  if(mx>0) for(let i=0;i<fm.length;i++) fm[i]/=mx;
+  return fm;
+}
+
+function renderFM(canvas, fm, cmap='hot') {
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height,sw=W/7,sh=H/7;
+  for(let y=0;y<7;y++) for(let x=0;x<7;x++){
+    const v=fm[y*7+x];
+    const [r,g,b]=cmap==='hot'?hot(v):jet(v);
+    ctx.fillStyle=`rgb(${r},${g},${b})`; ctx.fillRect(x*sw,y*sh,sw,sh);
+  }
+}
+
+function buildFMGrid(gridId, baseSeeds, imgOffset) {
+  const grid=document.getElementById(gridId); grid.innerHTML='';
+  baseSeeds.forEach((s,i)=>{
+    const item=document.createElement('div'); item.className='fm-item';
+    const c=document.createElement('canvas'); c.className='fm-canvas'; c.width=42; c.height=42;
+    renderFM(c,makeFeatureMap(s*(imgOffset+1)),i%2===0?'hot':'jet');
+    const lbl=document.createElement('div'); lbl.className='fm-lbl'; lbl.textContent=`ch.${s%512+12}`;
+    item.appendChild(c); item.appendChild(lbl); grid.appendChild(item);
+  });
+}
+
+// ──────────────────────────────────────────
+// BAR CHART
+// ──────────────────────────────────────────
+function mkEmbedding(seed,dims=64){
+  const rng=mkRng(seed); const e=new Float32Array(dims);
+  for(let i=0;i<dims;i++) e[i]=(rng()-.5)*2+Math.sin(i*.28)*.3;
+  let n=0; for(let i=0;i<dims;i++) n+=e[i]*e[i]; n=Math.sqrt(n);
+  for(let i=0;i<dims;i++) e[i]/=n;
+  return e;
+}
+
+function drawBar(canvas,data,posCol,negCol='#f87171'){
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  ctx.fillStyle='#0a0d14'; ctx.fillRect(0,0,W,H);
+  const n=data.length,bw=W/n,mid=H/2;
+  ctx.strokeStyle='#1c2030'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(0,mid); ctx.lineTo(W,mid); ctx.stroke();
+  for(let i=0;i<n;i++){
+    const v=data[i],bh=Math.abs(v)*(H*.44),x=i*bw;
+    ctx.fillStyle=(v>=0?posCol:negCol)+'cc';
+    ctx.fillRect(x+.5,v>=0?mid-bh:mid,Math.max(bw-1,1),bh);
+  }
+}
+
+// ──────────────────────────────────────────
+// CAM 7x7
+// ──────────────────────────────────────────
+function drawCAM7(canvas,camArr){
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height,sw=W/7,sh=H/7;
+  let mx=0; for(let i=0;i<camArr.length;i++) if(camArr[i]>mx)mx=camArr[i];
+  for(let y=0;y<7;y++) for(let x=0;x<7;x++){
+    const v=mx>0?camArr[y*7+x]/mx:0;
+    const [r,g,b]=jet(v);
+    ctx.fillStyle=`rgb(${r},${g},${b})`; ctx.fillRect(x*sw,y*sh,sw,sh);
+  }
+}
+
+// ──────────────────────────────────────────
+// STEP LOGIC
+// ──────────────────────────────────────────
+const STEP_NAMES=['Ảnh','Arch','Feats','Emb','w','Grad','CAM','Result'];
+
+function buildStepBar(){
+  const bar=document.getElementById('stepBar'); bar.innerHTML='';
+  for(let i=0;i<N_STEPS;i++){
+    if(i>0){
+      const ln=document.createElement('div');
+      ln.className='sline'+(i<=curStep?' done':'');
+      ln.id=`sl-${i}`; bar.appendChild(ln);
+    }
+    const d=document.createElement('div');
+    d.className='sdot'+(i===curStep?' active':i<curStep?' done':'');
+    d.id=`sd-${i}`; d.title=`Bước ${i+1}: ${STEP_NAMES[i]}`;
+    d.textContent=i<curStep?'✓':(i+1);
+    d.onclick=()=>goStep(i); bar.appendChild(d);
+  }
+}
+
+function syncStepBar(){
+  for(let i=0;i<N_STEPS;i++){
+    const d=document.getElementById(`sd-${i}`),l=document.getElementById(`sl-${i}`);
+    if(d){d.className='sdot'+(i===curStep?' active':i<curStep?' done':''); d.textContent=i<curStep?'✓':(i+1);}
+    if(l) l.className='sline'+(i<=curStep?' done':'');
+  }
+  document.getElementById('stepCtr').textContent=`${curStep+1} / ${N_STEPS}`;
+}
+
+function showPane(i){
+  document.querySelectorAll('.pane').forEach(p=>p.classList.remove('active'));
+  document.getElementById(`pane-${i}`).classList.add('active');
+  onEnter(i);
+}
+
+const fmSeeds=[42,137,256,512,1024,777,314,271,999,101,202,333];
+
+function onEnter(step){
+  if(step===1){
+    buildDenseViz();
+  }
+  if(step===2){
+    buildFMGrid('fmQ',fmSeeds,0);
+    buildFMGrid('fmR',fmSeeds,1);
+  }
+  if(step===3) renderEmbeddingStep();
+  if(step===4) renderWStep();
+  if(step===5) renderGradStep();
+  if(step===6) renderCAMStep();
+  if(step===7){ renderFinal(); drawLegend(); }
+}
+
+function buildDenseViz(){
+  const c=document.getElementById('denseViz'); c.innerHTML='';
+  const cols=['#6c8ef5','#a78bfa','#4ade80','#fb923c','#f87171','#38bdf8'];
+  const labels=['H_0','H_1','H_2','H_3','H_4','H_5'];
+  labels.forEach((lbl,i)=>{
+    const el=document.createElement('div');
+    el.style.cssText=`width:28px;height:20px;border-radius:4px;border:1.5px solid ${cols[i]};
+      color:${cols[i]};background:${cols[i]}18;font-size:0.55rem;display:flex;
+      align-items:center;justify-content:center;font-weight:700`;
+    el.textContent=lbl; c.appendChild(el);
+    if(i<labels.length-1){
+      const arr=document.createElement('span');
+      arr.style.cssText='font-size:0.6rem;color:#252a3d';
+      arr.textContent='→'; c.appendChild(arr);
+    }
+  });
+  const note=document.createElement('div');
+  note.style.cssText='font-size:0.65rem;color:var(--muted);margin-top:0.35rem;width:100%';
+  note.innerHTML='Mỗi H_k nhận concatenate của <strong style="color:var(--text)">tất cả</strong> H_0…H_{k−1}';
+  c.appendChild(note);
+}
+
+function renderEmbeddingStep(){
+  const eq=mkEmbedding(42,64), ep=mkEmbedding(137,64);
+  drawBar(document.getElementById('chartEq'),Array.from(eq),'#6c8ef5');
+  drawBar(document.getElementById('chartEp'),Array.from(ep),'#4ade80');
+  let dot=0; for(let i=0;i<eq.length;i++) dot+=eq[i]*ep[i];
+  document.getElementById('cosVal').textContent=Math.min(1,Math.max(-1,dot)).toFixed(4);
+  document.getElementById('normEq').textContent='1.0000 (L2-normalized)';
+}
+
+function renderWStep(){
+  const eq=mkEmbedding(42,64), ep=mkEmbedding(137,64);
+  const w=new Float32Array(64);
+  for(let i=0;i<64;i++) w[i]=1-Math.abs(eq[i]-ep[i]);
+  let mx=0; for(let i=0;i<w.length;i++) if(w[i]>mx)mx=w[i];
+  const wn=Array.from(w).map(v=>mx>0?v/mx:0);
+  drawBar(document.getElementById('chartW'),wn,'#fb923c','#64748b');
+
+  if(appMode==='triplet'){
+    document.getElementById('negWSection').style.display='block';
+    const en=mkEmbedding(999,64);
+    const wt=wn.map((v,i)=>v*Math.abs(eq[i]-en[i]));
+    let mx2=0; wt.forEach(v=>{if(v>mx2)mx2=v;});
+    drawBar(document.getElementById('chartWn'),wt.map(v=>mx2>0?v/mx2:0),'#f87171','#64748b');
+  }
+
+  const indexed=wn.map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]);
+  const top=indexed.slice(0,5).map(([,i])=>i*16+37);
+  document.getElementById('topDims').textContent=`[${top.join(', ')}]`;
+}
+
+function renderGradStep(){
+  const rng=mkRng(88);
+  const gd=Array.from({length:64},()=>(rng()-.3)*2);
+  drawBar(document.getElementById('chartGrad'),gd,'#38bdf8','#94a3b8');
+  const rng2=mkRng(55);
+  document.getElementById('scoresVal').textContent=
+    `s_q = ${(2.4+rng2()*1.4).toFixed(4)}\ns_p = ${(3.1+rng2()*1.3).toFixed(4)}`;
+}
+
+function renderCAMStep(){
+  // 7x7 CAM hotspot at upper-right (right lung)
+  const qCam=new Float32Array(49), rCam=new Float32Array(49);
+  for(let y=0;y<7;y++) for(let x=0;x<7;x++){
+    qCam[y*7+x]=gauss2D(x,y,5.2,2.0,1.3,1.5)*.92+gauss2D(x,y,4.7,3.4,1.5,1.8)*.42;
+    rCam[y*7+x]=gauss2D(x,y,5.0,2.3,1.5,1.6)*.74+gauss2D(x,y,4.4,3.7,1.6,2.0)*.52;
+  }
+  drawCAM7(document.getElementById('camQ'),qCam);
+  drawCAM7(document.getElementById('camR'),rCam);
+
+  const barsDiv=document.getElementById('camBars'); barsDiv.innerHTML='';
+  [['Dense ch.37 (texture)',82],['Dense ch.122 (nodule)',71],['Dense ch.387 (edges)',48],['Dense ch.512 (opacity)',35]]
+  .forEach(([name,pct])=>{
+    const row=document.createElement('div'); row.style.marginBottom='.45rem';
+    row.innerHTML=`
+      <div style="display:flex;justify-content:space-between;font-size:0.68rem;color:var(--muted);margin-bottom:.2rem">
+        <span>${name}</span><span>${pct}%</span>
+      </div>
+      <div class="pbar-outer">
+        <div class="pbar-inner" style="width:0%" data-target="${pct}"></div>
+      </div>`;
+    barsDiv.appendChild(row);
+  });
+  // Animate bars
+  requestAnimationFrame(()=>{
+    barsDiv.querySelectorAll('.pbar-inner[data-target]').forEach(b=>{
+      setTimeout(()=>b.style.width=b.dataset.target+'%',50);
+    });
+  });
+}
+
+function renderFinal(){
+  if(salDone) return;
+  qSaliency=makeSaliency(200,200,true,42);
+  rSaliency=makeSaliency(200,200,false,137);
+  salDone=true;
+  const aQ=document.getElementById('alphaQ').value/100;
+  const tQ=document.getElementById('threshQ').value/100;
+  const aR=document.getElementById('alphaR').value/100;
+  const tR=document.getElementById('threshR').value/100;
+  applyOverlay(document.getElementById('qImg'),document.getElementById('qSal'),qSaliency,aQ,tQ);
+  applyOverlay(document.getElementById('rImg'),document.getElementById('rSal'),rSaliency,aR,tR);
+  document.getElementById('qSal').style.opacity='1';
+  document.getElementById('rSal').style.opacity='1';
+  document.getElementById('tileSalQ').style.display='block';
+  document.getElementById('tileSalR').style.display='block';
+}
+
+function drawLegend(){
+  const c=document.getElementById('legendCanvas');
+  if(!c) return;
+  const ctx=c.getContext('2d');
+  const W=c.width,H=c.height;
+  const grd=ctx.createLinearGradient(0,0,W,0);
+  grd.addColorStop(0,'#0000ff'); grd.addColorStop(.25,'#00ffff');
+  grd.addColorStop(.5,'#00ff00'); grd.addColorStop(.75,'#ffff00');
+  grd.addColorStop(1,'#ff0000');
+  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+}
+
+// ──────────────────────────────────────────
+// NAVIGATION
+// ──────────────────────────────────────────
+function goStep(i){
+  curStep=i; syncStepBar(); showPane(i);
+}
+
+function nextStep(){
+  if(curStep<N_STEPS-1){ curStep++; syncStepBar(); showPane(curStep); }
+}
+
+function prevStep(){
+  if(curStep>0){ curStep--; syncStepBar(); showPane(curStep); }
+}
+
+function setMode(m){
+  appMode=m;
+  document.getElementById('btnSiamese').className='mode-btn'+(m==='siamese'?' active':'');
+  document.getElementById('btnTriplet').className='mode-btn'+(m==='triplet'?' active':'');
+  document.getElementById('negCard').style.display=m==='triplet'?'block':'none';
+  const ns=document.getElementById('negWSection');
+  if(ns) ns.style.display='none'; // will re-render on step enter
+  if(curStep===4) renderWStep(); // live update if on w step
+}
+
+// ──────────────────────────────────────────
+// RUN ALL (animated)
+// ──────────────────────────────────────────
+const STATUS_MSGS=['Đang tải ảnh…','Phân tích kiến trúc…','Trích xuất feature maps…',
+  'Tính embedding vectors…','Tính vector trọng số w…','Backprop gradient…',
+  'Tính Class Activation Map…','Hoàn thành! ✓'];
+const PROGS=[12,25,38,52,65,78,91,100];
+
+async function runAll(){
+  for(let i=0;i<N_STEPS;i++){
+    const s=document.getElementById('statusTxt');
+    s.style.color='var(--accent)'; s.textContent=STATUS_MSGS[i];
+    document.getElementById('progBar').style.width=PROGS[i]+'%';
+    goStep(i);
+    await new Promise(r=>setTimeout(r,750));
+  }
+  document.getElementById('statusTxt').style.color='var(--green)';
+  document.getElementById('statusTxt').textContent='Hoàn thành! ✓';
+}
+
+// ──────────────────────────────────────────
+// INIT
+// ──────────────────────────────────────────
+function init(){
+  drawXRay(document.getElementById('qImg'),42,true);
+  drawXRay(document.getElementById('rImg'),137,false);
+  // Copy to sal layers as placeholder
+  ['qSal','rSal'].forEach((id,i)=>{
+    const sc=document.getElementById(id);
+    sc.getContext('2d').drawImage(document.getElementById(i===0?'qImg':'rImg'),0,0);
+  });
+  buildStepBar();
+  showPane(0);
+}
+
+document.addEventListener('DOMContentLoaded',init);
+
+// Keyboard navigation
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight') nextStep();
+  if(e.key==='ArrowLeft') prevStep();
+});
+</script>
+</body>
+</html>

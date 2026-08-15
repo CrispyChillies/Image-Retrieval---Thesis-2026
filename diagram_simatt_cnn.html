@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #ffffff; display: flex; justify-content: center; padding: 40px 20px; }
+  svg { font-family: 'Times New Roman', Times, serif; }
+</style>
+</head>
+<body>
+<svg width="680" height="800" viewBox="0 0 680 800" xmlns="http://www.w3.org/2000/svg">
+
+  <!-- ── Styles ── -->
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#1a1a1a"/>
+    </marker>
+    <marker id="arr-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#1a3a6e"/>
+    </marker>
+  </defs>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- TITLE -->
+  <!-- ══════════════════════════════════ -->
+  <text x="340" y="36" text-anchor="middle" font-family="'Times New Roman', Times, serif"
+        font-size="17" font-weight="bold" fill="#1a1a1a">
+    Gradient-Based Saliency Map (SimAtt) — CNN Backbone
+  </text>
+  <line x1="60" y1="46" x2="620" y2="46" stroke="#1a1a1a" stroke-width="1.2"/>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- NODE 1 — Input Images -->
+  <!-- ══════════════════════════════════ -->
+  <rect x="130" y="64" width="420" height="50" rx="6" ry="6"
+        fill="#f0f4ff" stroke="#1a3a6e" stroke-width="1.6"/>
+  <text x="340" y="96" text-anchor="middle" font-size="17" font-weight="bold" fill="#1a3a6e">Input Images</text>
+
+  <!-- Arrow -->
+  <line x1="340" y1="114" x2="340" y2="142" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- NODE 2 — Forward Pass -->
+  <!-- ══════════════════════════════════ -->
+  <rect x="100" y="146" width="480" height="50" rx="6" ry="6"
+        fill="#fff8e6" stroke="#8a5a00" stroke-width="1.6"/>
+  <text x="340" y="178" text-anchor="middle" font-size="17" font-weight="bold" fill="#8a5a00">Forward Pass — DenseNet121</text>
+
+  <!-- Arrow -->
+  <line x1="340" y1="196" x2="340" y2="224" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- NODE 3 — Feature Maps + Embedding -->
+  <!-- ══════════════════════════════════ -->
+  <rect x="100" y="228" width="480" height="50" rx="6" ry="6"
+        fill="#f0fff4" stroke="#1a6e3a" stroke-width="1.6"/>
+  <text x="340" y="260" text-anchor="middle" font-size="17" font-weight="bold" fill="#1a6e3a">Extract Feature Maps &amp; Embedding</text>
+
+  <!-- Arrow -->
+  <line x1="340" y1="278" x2="340" y2="306" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- NODE 4 — Compute w -->
+  <!-- ══════════════════════════════════ -->
+  <rect x="100" y="310" width="480" height="50" rx="6" ry="6"
+        fill="#fff3f0" stroke="#8a2a00" stroke-width="1.6"/>
+  <text x="340" y="342" text-anchor="middle" font-size="17" font-weight="bold" fill="#8a2a00">Compute Weight Vector  w</text>
+
+  <!-- Arrow -->
+  <line x1="340" y1="360" x2="340" y2="388" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- NODE 5 — Sample Score -->
+  <!-- ══════════════════════════════════ -->
+  <rect x="150" y="392" width="380" height="50" rx="6" ry="6"
+        fill="#fafafa" stroke="#444" stroke-width="1.6"/>
+  <text x="340" y="424" text-anchor="middle" font-size="17" font-weight="bold" fill="#1a1a1a">Compute Sample Score  s</text>
+
+  <!-- Arrow -->
+  <line x1="340" y1="442" x2="340" y2="470" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- NODE 6 — Backpropagation -->
+  <!-- ══════════════════════════════════ -->
+  <rect x="80" y="474" width="520" height="50" rx="6" ry="6"
+        fill="#f5f0ff" stroke="#4a1a8e" stroke-width="1.6"/>
+  <text x="340" y="506" text-anchor="middle" font-size="17" font-weight="bold" fill="#4a1a8e">Backpropagation  (Gradient Flow)</text>
+
+  <!-- Arrow -->
+  <line x1="340" y1="524" x2="340" y2="552" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- NODE 7 — Channel Weights -->
+  <!-- ══════════════════════════════════ -->
+  <rect x="120" y="556" width="440" height="50" rx="6" ry="6"
+        fill="#f0faff" stroke="#005a8e" stroke-width="1.6"/>
+  <text x="340" y="588" text-anchor="middle" font-size="17" font-weight="bold" fill="#005a8e">Channel Weights  α_c</text>
+
+  <!-- Arrow -->
+  <line x1="340" y1="606" x2="340" y2="634" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- NODE 8 — Weighted CAM + ReLU -->
+  <!-- ══════════════════════════════════ -->
+  <rect x="80" y="638" width="520" height="50" rx="6" ry="6"
+        fill="#f0fff4" stroke="#1a6e3a" stroke-width="1.6"/>
+  <text x="340" y="670" text-anchor="middle" font-size="17" font-weight="bold" fill="#1a6e3a">Weighted CAM  +  ReLU</text>
+
+  <!-- Arrow -->
+  <line x1="340" y1="688" x2="340" y2="716" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ══════════════════════════════════ -->
+  <!-- NODE 9 — Output -->
+  <!-- ══════════════════════════════════ -->
+  <rect x="100" y="720" width="480" height="50" rx="6" ry="6"
+        fill="#fffbe6" stroke="#8a7000" stroke-width="2"/>
+  <text x="340" y="752" text-anchor="middle" font-size="17" font-weight="bold" fill="#8a7000">Saliency Map</text>
+
+
+
+</svg>
+</body>
+</html>

@@ -1,0 +1,1163 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Gradient Flow – SimAtt Interactive</title>
+<style>
+:root{
+  --bg:#0d0f16;--s1:#13161f;--s2:#1c2030;--s3:#232840;
+  --acc:#6c8ef5;--acc2:#a78bfa;--grn:#4ade80;--org:#fb923c;
+  --red:#f87171;--cyn:#38bdf8;--ylw:#facc15;
+  --txt:#e2e8f0;--mut:#64748b;--bdr:#252a3d;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--txt);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;padding:1.5rem;}
+h1{font-size:1.35rem;font-weight:700;background:linear-gradient(135deg,var(--acc),var(--acc2));
+   -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:.3rem;}
+.sub{font-size:.78rem;color:var(--mut);margin-bottom:1.5rem;}
+
+/* Layout */
+.layout{display:grid;grid-template-columns:1fr 420px;gap:1.25rem;align-items:start;}
+.main-col{display:flex;flex-direction:column;gap:1.1rem;}
+.side-col{display:flex;flex-direction:column;gap:1rem;position:sticky;top:1rem;}
+
+/* Cards */
+.card{background:var(--s1);border:1px solid var(--bdr);border-radius:10px;padding:1rem 1.2rem;}
+.card-title{font-size:.8rem;font-weight:600;color:var(--acc);text-transform:uppercase;
+            letter-spacing:.06em;margin-bottom:.6rem;display:flex;align-items:center;gap:.4rem;}
+.hl-acc{border-left:3px solid var(--acc);}
+.hl-grn{border-left:3px solid var(--grn);}
+.hl-org{border-left:3px solid var(--org);}
+.hl-cyn{border-left:3px solid var(--cyn);}
+
+/* Step indicator */
+.steps-row{display:flex;align-items:center;gap:0;flex-wrap:nowrap;overflow-x:auto;padding-bottom:.25rem;}
+.st{flex-shrink:0;width:36px;height:36px;border-radius:50%;
+    border:2px solid var(--bdr);background:var(--s2);
+    display:flex;align-items:center;justify-content:center;
+    font-size:.68rem;font-weight:700;color:var(--mut);
+    cursor:pointer;transition:all .25s;}
+.st.active{background:var(--acc);border-color:var(--acc);color:#fff;transform:scale(1.12);}
+.st.done{background:#162512;border-color:var(--grn);color:var(--grn);}
+.sl{flex:1;min-width:12px;max-width:48px;height:2px;background:var(--bdr);transition:background .4s;}
+.sl.done{background:var(--grn);}
+
+/* Main canvas area */
+.canvas-wrap{position:relative;background:#080b12;border-radius:10px;
+             border:1px solid var(--bdr);overflow:hidden;}
+#mainCanvas{display:block;width:100%;}
+
+/* Controls */
+.ctrl{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.7rem;}
+.btn{padding:.38rem 1rem;border-radius:7px;border:1px solid var(--bdr);
+     background:var(--s2);color:var(--txt);cursor:pointer;font-size:.8rem;transition:all .2s;}
+.btn:hover{background:var(--s3);}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600;}
+.btn.primary:hover{opacity:.85;}
+.btn.play{background:linear-gradient(135deg,var(--acc),var(--acc2));border:none;color:#fff;font-weight:700;padding:.4rem 1.3rem;}
+.speed-row{display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:var(--mut);}
+input[type=range]{accent-color:var(--acc);}
+
+/* Code block */
+pre{background:#080b12;border:1px solid var(--bdr);border-radius:7px;
+    padding:.7rem 1rem;font-family:'Courier New',monospace;font-size:.74rem;
+    overflow-x:auto;line-height:1.65;}
+.kw{color:#c084fc;}.fn{color:#60a5fa;}.cm{color:#4b5563;font-style:italic;}
+.val{color:#fb923c;}.str{color:#4ade80;}.hi{background:#2a2060;border-radius:3px;padding:0 2px;}
+
+/* Explanation box */
+.explain{background:var(--s2);border-radius:8px;padding:.75rem 1rem;
+         font-size:.8rem;line-height:1.7;color:var(--txt);}
+.explain .step-label{font-weight:700;color:var(--acc);margin-bottom:.3rem;font-size:.85rem;}
+code{background:#111827;padding:.05rem .3rem;border-radius:3px;
+     font-family:'Courier New',monospace;font-size:.76rem;color:#93c5fd;}
+
+/* Legend */
+.legend-row{display:flex;align-items:center;gap:.5rem;font-size:.7rem;color:var(--mut);flex-wrap:wrap;}
+.lg-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;}
+
+/* Value badge */
+.badge{display:inline-block;background:var(--s3);border:1px solid var(--bdr);
+       border-radius:5px;padding:.1rem .45rem;font-family:'Courier New',monospace;
+       font-size:.72rem;color:var(--acc);}
+
+/* Progress bar */
+.pbar{width:100%;height:6px;background:var(--s3);border-radius:9999px;overflow:hidden;margin-top:.3rem;}
+.pbar-in{height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2));
+         border-radius:9999px;transition:width .6s ease;width:0%;}
+
+@media(max-width:900px){.layout{grid-template-columns:1fr;}.side-col{position:static;}}
+</style>
+</head>
+<body>
+
+<h1>Gradient Flow trong SimAtt</h1>
+<div class="sub">Minh họa interactive từng bước: Forward Pass → Score → Backprop → Channel Weights → CAM</div>
+
+<div class="layout">
+
+<!-- ══════ LEFT COLUMN ══════ -->
+<div class="main-col">
+
+  <!-- Step bar -->
+  <div class="card">
+    <div class="card-title">📍 Các bước</div>
+    <div class="steps-row" id="stepBar"></div>
+    <div style="margin-top:.65rem;display:flex;align-items:center;gap:.5rem">
+      <div class="explain" id="explainBox" style="flex:1">
+        <div class="step-label" id="explainTitle">Bước 1 – Forward Pass</div>
+        <div id="explainBody">Đẩy batch ảnh qua DenseNet121. Hook tại Dense Block 4 ghi lại feature map <code>feats</code> có shape <code>[2, 1024, 7, 7]</code>. Gradient chưa được tính ở bước này.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Canvas visualization -->
+  <div class="card" style="padding:.75rem">
+    <div class="card-title">🎬 Minh họa trực quan</div>
+    <div class="canvas-wrap">
+      <canvas id="mainCanvas" width="760" height="420"></canvas>
+    </div>
+    <div class="ctrl">
+      <button class="btn play" id="playBtn" onclick="togglePlay()">▶ Play</button>
+      <button class="btn" onclick="prevStep()">◀ Trước</button>
+      <button class="btn" onclick="nextStep()">Tiếp ▶</button>
+      <button class="btn" onclick="resetAnim()">↺ Reset</button>
+      <div class="speed-row">
+        <span>Tốc độ:</span>
+        <input type="range" id="speedSlider" min="1" max="5" value="3" style="width:70px">
+        <span id="speedLbl">×3</span>
+      </div>
+      <span style="font-size:.72rem;color:var(--mut);margin-left:auto">Phím ← → để điều hướng</span>
+    </div>
+  </div>
+
+  <!-- Code highlight -->
+  <div class="card hl-acc">
+    <div class="card-title">💻 Code đang thực thi</div>
+    <pre id="codeBlock"><span class="cm"># Chọn bước để xem code tương ứng</span></pre>
+  </div>
+
+</div>
+
+<!-- ══════ RIGHT COLUMN ══════ -->
+<div class="side-col">
+
+  <!-- Formula -->
+  <div class="card hl-cyn">
+    <div class="card-title">🧮 Công thức</div>
+    <div id="formulaBox" style="font-size:.78rem;line-height:1.9;color:var(--txt)">
+      <div style="color:var(--mut);font-style:italic">Hover qua từng bước để xem công thức…</div>
+    </div>
+  </div>
+
+  <!-- Channel weights chart -->
+  <div class="card hl-org">
+    <div class="card-title">📊 Channel Weights α_c (GAP của gradient)</div>
+    <canvas id="alphaChart" width="380" height="90" style="width:100%;display:block;border-radius:5px;background:#080b12"></canvas>
+    <div style="font-size:.68rem;color:var(--mut);margin-top:.3rem">Hiển thị 32 channels đại diện. Sau bước Backprop sẽ fill.</div>
+  </div>
+
+  <!-- CAM preview -->
+  <div class="card hl-grn">
+    <div class="card-title">🎯 CAM 7×7 (raw)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem">
+      <div>
+        <div style="font-size:.66rem;color:var(--cyn);margin-bottom:.25rem">Query CAM</div>
+        <canvas id="camQ" width="100" height="100" style="width:100%;border-radius:5px;border:1px solid var(--bdr)"></canvas>
+      </div>
+      <div>
+        <div style="font-size:.66rem;color:var(--grn);margin-bottom:.25rem">Retrieved CAM</div>
+        <canvas id="camR" width="100" height="100" style="width:100%;border-radius:5px;border:1px solid var(--bdr)"></canvas>
+      </div>
+    </div>
+    <div class="pbar"><div class="pbar-in" id="camProg"></div></div>
+    <div style="font-size:.66rem;color:var(--mut);margin-top:.2rem">Sẽ cập nhật sau bước CAM Computation</div>
+  </div>
+
+  <!-- Colormap legend -->
+  <div class="card">
+    <div class="card-title">🌈 Colormap</div>
+    <canvas id="legendC" width="360" height="18" style="width:100%;border-radius:3px;display:block"></canvas>
+    <div style="display:flex;justify-content:space-between;font-size:.62rem;color:var(--mut);margin-top:.2rem">
+      <span>0 · không quan trọng</span><span>1 · quan trọng nhất</span>
+    </div>
+    <div class="legend-row" style="margin-top:.5rem">
+      <div class="lg-dot" style="background:#0000ff"></div><span>Low</span>
+      <div class="lg-dot" style="background:#00ffff"></div><span>Medium-low</span>
+      <div class="lg-dot" style="background:#00ff00"></div><span>Medium</span>
+      <div class="lg-dot" style="background:#ffff00"></div><span>Medium-high</span>
+      <div class="lg-dot" style="background:#ff0000"></div><span>High</span>
+    </div>
+  </div>
+
+</div>
+</div><!-- /layout -->
+
+<script>
+// ═══════════════════════════════════════════════
+// UTILITIES
+// ═══════════════════════════════════════════════
+function mkRng(seed){
+  let s=(seed>>>0)||1;
+  return ()=>{s^=s<<13;s^=s>>17;s^=s<<5;return(s>>>0)/4294967295;};
+}
+function lerp(a,b,t){return a+(b-a)*Math.max(0,Math.min(1,t));}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function jet(v){
+  v=clamp(v,0,1);
+  const r=clamp(1.5-Math.abs(4*v-3),0,1);
+  const g=clamp(1.5-Math.abs(4*v-2),0,1);
+  const b=clamp(1.5-Math.abs(4*v-1),0,1);
+  return[r*255|0,g*255|0,b*255|0];
+}
+function hot(v){
+  v=clamp(v,0,1);
+  return[clamp(v*3,0,1)*255|0,clamp(v*3-1,0,1)*255|0,clamp(v*3-2,0,1)*255|0];
+}
+function gauss(x,y,cx,cy,sx,sy){
+  return Math.exp(-((x-cx)**2/(2*sx*sx)+(y-cy)**2/(2*sy*sy)));
+}
+
+// ═══════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════
+let curStep=0;
+const N=6; // total steps
+let playing=false;
+let playTimer=null;
+let animT=0; // animation time 0..1
+let animRAF=null;
+let stepDone=new Array(N).fill(false);
+
+// Pre-generate data
+const rng=mkRng(42);
+const EQ=Float32Array.from({length:1024},()=>(rng()-.5)*2+Math.sin(rng()*6)*.3);
+const EP=Float32Array.from({length:1024},(_,i)=>EQ[i]*(0.85+rng()*.3)+(rng()-.5)*.2);
+// L2 normalize
+function l2norm(arr){let n=0;for(let v of arr)n+=v*v;n=Math.sqrt(n);return arr.map(v=>v/n);}
+const EQn=l2norm(EQ),EPn=l2norm(EP);
+const W_VEC=Float32Array.from({length:1024},(_, i)=>Math.max(0,1-Math.abs(EQn[i]-EPn[i])));
+// Sample scores
+const S_Q=Array.from(EQ).reduce((a,v,i)=>a+Math.abs(v)*W_VEC[i],0)/1024*8;
+const S_P=Array.from(EP).reduce((a,v,i)=>a+Math.abs(v)*W_VEC[i],0)/1024*8;
+// Channel weights (alpha_c) – simulated GAP of gradient
+const rng2=mkRng(88);
+const ALPHA_Q=Float32Array.from({length:32},()=>Math.max(0,(rng2()-.2)*2));
+const ALPHA_R=Float32Array.from({length:32},()=>Math.max(0,(rng2()-.25)*1.8));
+// Normalize
+function normArr(a){let mx=0;for(let v of a)if(v>mx)mx=v;return a.map(v=>mx>0?v/mx:0);}
+const AQ=normArr(ALPHA_Q), AR=normArr(ALPHA_R);
+
+// Feature maps seeds for 7x7 display
+function makeFM(seed){
+  const r=mkRng(seed),fm=new Float32Array(49);
+  const nb=2+Math.floor(r()*2);
+  for(let b=0;b<nb;b++){
+    const bx=r()*7,by=r()*7,sx=.8+r()*2,sy=.8+r()*2,st=.5+r()*.5;
+    for(let y=0;y<7;y++)for(let x=0;x<7;x++)fm[y*7+x]+=st*gauss(x,y,bx,by,sx,sy);
+  }
+  let mx=0;for(let v of fm)if(v>mx)mx=v;
+  return mx>0?fm.map(v=>v/mx):fm;
+}
+const FM_Q=[42,99,256,512].map(makeFM);
+const FM_R=[137,200,300,600].map(makeFM);
+
+// CAM 7x7
+function makeCAM(isQ){
+  const c=new Float32Array(49);
+  for(let y=0;y<7;y++)for(let x=0;x<7;x++){
+    c[y*7+x]=isQ
+      ?(gauss(x,y,5.2,1.9,1.3,1.5)*.9+gauss(x,y,4.7,3.4,1.5,1.8)*.4)
+      :(gauss(x,y,5.0,2.2,1.4,1.6)*.75+gauss(x,y,4.4,3.7,1.6,2)*.5);
+  }
+  let mx=0;for(let v of c)if(v>mx)mx=v;
+  return mx>0?c.map(v=>v/mx):c;
+}
+const CAM_Q=makeCAM(true),CAM_R=makeCAM(false);
+
+// ═══════════════════════════════════════════════
+// STEP DEFINITIONS
+// ═══════════════════════════════════════════════
+const STEPS=[
+  {
+    id:0,label:'Forward',icon:'▶',color:'#6c8ef5',
+    title:'Bước 1 – Forward Pass qua DenseNet121',
+    body:'Batch <code>[2,3,224,224]</code> (query + retrieved) đi qua toàn bộ backbone. Forward hook tại <strong>Dense Block 4</strong> tự động ghi lại feature map <code>feats</code> shape <code>[2,1024,7,7]</code>. Embedding shape <code>[2,1024]</code> thu được sau Global Average Pooling.',
+    formula:`<b style="color:var(--cyn)">Forward Pass:</b>
+x_batch = cat([x_q, x_p])   <span style="color:var(--mut)"># [2,3,224,224]</span>
+
+feats = []   <span style="color:var(--mut)"># captured by hook</span>
+emb = model(x_batch)         <span style="color:var(--mut)"># [2,1024]</span>
+
+<b style="color:var(--grn)">feats[0]</b> → query feature map  <span style="color:var(--mut)">[1,1024,7,7]</span>
+<b style="color:var(--org)">feats[1]</b> → retrieved feat map <span style="color:var(--mut)">[1,1024,7,7]</span>`,
+    code:`<span class="cm"># 1. Forward pass với hook</span>
+feats = []
+<span class="kw">def</span> <span class="fn">hook_fn</span>(m, inp, out):
+    feats.<span class="fn">append</span>(out)
+
+handle = feature_module.<span class="fn">register_forward_hook</span>(hook_fn)
+x_all = torch.<span class="fn">cat</span>([x_q, x_p])   <span class="cm"># [2,3,224,224]</span>
+emb = model(x_all)                <span class="cm"># [2,1024]</span>
+handle.<span class="fn">remove</span>()
+<span class="cm"># feats[0] → shape [2, 1024, 7, 7]</span>`
+  },
+  {
+    id:1,label:'Score w',icon:'⚖',color:'#fb923c',
+    title:'Bước 2 – Tính Vector Trọng Số w & Sample Score s',
+    body:'L2-normalize embedding, tính <code>w = 1 − |norm(e_q) − norm(e_p)|</code>. Chiều nào hai ảnh gần nhau → <code>w[d]</code> cao. Sau đó score <code>s = |emb| @ w</code> đo mức độ kích hoạt các chiều discriminative.',
+    formula:`<b style="color:var(--org)">Vector trọng số w:</b>
+eq = L2_norm(emb[0])   <span style="color:var(--mut)"># [1024]</span>
+ep = L2_norm(emb[1])   <span style="color:var(--mut)"># [1024]</span>
+<b>w</b> = 1 − |eq − ep|      <span style="color:var(--mut)"># [1024] ∈ [0,1]</span>
+
+<b style="color:var(--ylw)">Sample scores s:</b>
+s = |emb| @ w          <span style="color:var(--mut)"># [2] scalar/ảnh</span>
+s_q = <b style="color:var(--cyn)">${S_Q.toFixed(3)}</b>
+s_p = <b style="color:var(--cyn)">${S_P.toFixed(3)}</b>`,
+    code:`<span class="cm"># 2. Tính w và score</span>
+x_norm = nn.functional.<span class="fn">normalize</span>(emb.detach(), dim=<span class="val">1</span>)
+w = torch.<span class="fn">abs</span>(x_norm[<span class="val">0</span>] - x_norm[<span class="val">1</span>:])  <span class="cm"># [1,1024]</span>
+w[<span class="val">0</span>] = <span class="val">1</span> - w[<span class="val">0</span>]   <span class="cm"># invert for positive pair</span>
+w = torch.<span class="fn">prod</span>(w, dim=<span class="val">0</span>)          <span class="cm"># [1024]</span>
+
+s = torch.<span class="fn">matmul</span>(torch.<span class="fn">abs</span>(emb), w)  <span class="cm"># [2]</span>`
+  },
+  {
+    id:2,label:'Backprop',icon:'↩',color:'#a78bfa',
+    title:'Bước 3 – Backpropagation (Gradient Flow)',
+    body:'Đây là <strong>trái tim</strong> của gradient flow. Gọi <code>torch.autograd.grad(unbind(s), feats)</code>: PyTorch tự động chạy ngược từ <em>s</em> qua tất cả phép tính, qua GAP, qua Dense Block 4, cho đến khi tính được <code>∂s/∂feats</code> – gradient tại feature map. Gradient lớn ở kênh nào / vị trí nào → kênh/vùng đó ảnh hưởng mạnh đến score.',
+    formula:`<b style="color:var(--acc2)">Backpropagation:</b>
+
+<span style="color:var(--mut)">Chuỗi đạo hàm (chain rule):</span>
+∂s/∂feats = ∂s/∂emb · ∂emb/∂GAP · ∂GAP/∂feats
+
+<b>grads = ∂s/∂feats</b>  <span style="color:var(--mut)">[2, 1024, 7, 7]</span>
+
+grads[c, h, w] lớn
+  → feats[c, h, w] tác động mạnh lên s
+  → vùng (h,w) trong channel c QUAN TRỌNG`,
+    code:`<span class="cm"># 3. Gradient của s theo feature map</span>
+grads = torch.autograd.<span class="fn">grad</span>(
+    outputs  = torch.<span class="fn">unbind</span>(s),  <span class="cm"># [s_q, s_p]</span>
+    inputs   = feats[<span class="val">0</span>],           <span class="cm"># [2,1024,7,7]</span>
+    <span class="cm"># create_graph=False (default)</span>
+)[<span class="val">0</span>]
+<span class="cm"># grads shape: [2, 1024, 7, 7]</span>
+<span class="hi"><span class="cm"># ← gradient flow xảy ra ở đây ↑</span></span>`
+  },
+  {
+    id:3,label:'GAP Grad',icon:'∑',color:'#38bdf8',
+    title:'Bước 4 – Global Average Pooling của Gradient',
+    body:'Gradient <code>[2,1024,7,7]</code> được rút gọn bằng cách <strong>lấy trung bình theo chiều H,W</strong> (Global Average Pooling). Kết quả <code>α_c</code> là một số duy nhất cho mỗi channel – đại diện cho <em>tầm quan trọng trung bình</em> của channel đó. Channel có gradient lớn đều → <code>α_c</code> cao.',
+    formula:`<b style="color:var(--cyn)">Channel weights α_c:</b>
+
+α_c = (1/49) · ΣΣ grads[c, h, w]
+            h  w
+
+<span style="color:var(--mut)">Tức là: mean gradient của channel c
+trên toàn bộ spatial map 7×7</span>
+
+<b>weights</b> = mean(grads, dim=(2,3))
+shape: <b style="color:var(--cyn)">[2, 1024]</b>`,
+    code:`<span class="cm"># 4. Global Average Pooling của gradient</span>
+weights = torch.<span class="fn">mean</span>(grads, dim=(<span class="val">2</span>, <span class="val">3</span>))
+<span class="cm"># weights shape: [2, 1024]</span>
+<span class="cm"># weights[0] → α_c cho query</span>
+<span class="cm"># weights[1] → α_c cho retrieved</span>`
+  },
+  {
+    id:4,label:'CAM',icon:'🎯',color:'#4ade80',
+    title:'Bước 5 – Tính Weighted CAM',
+    body:'Nhân channel weights <code>α_c</code> với feature map tương ứng rồi cộng lại. Áp <strong>ReLU</strong> để giữ lại chỉ đóng góp dương (tăng score). Kết quả là <em>Class Activation Map</em> 7×7 thô, cho biết vùng không gian nào quan trọng.',
+    formula:`<b style="color:var(--grn)">Weighted sum → CAM thô:</b>
+
+M_raw = Σ_c  α_c · feats[c, :, :]
+shape: <b>[2, 1, 7, 7]</b>
+
+M = ReLU(M_raw)   <span style="color:var(--mut)"># chỉ giữ đóng góp (+)</span>
+
+<span style="color:var(--mut)">ReLU loại bỏ vùng LÀM GIẢM score
+→ chỉ highlight vùng LÀM TĂNG similarity</span>`,
+    code:`<span class="cm"># 5. Weighted CAM</span>
+M = torch.<span class="fn">bmm</span>(
+    weights.unsqueeze(<span class="val">1</span>),          <span class="cm"># [2,1,1024]</span>
+    feats[<span class="val">0</span>].reshape(<span class="val">2</span>, <span class="val">1024</span>, <span class="val">-1</span>) <span class="cm"># [2,1024,49]</span>
+)
+M = M.reshape(<span class="val">2</span>, <span class="val">1</span>, <span class="val">7</span>, <span class="val">7</span>)
+<span class="hi">M = M.<span class="fn">clamp</span>(min=<span class="val">0</span>)               <span class="cm"># ReLU ←</span></span>`
+  },
+  {
+    id:5,label:'Upsample',icon:'↑',color:'#facc15',
+    title:'Bước 6 – Upsample → Saliency Map Cuối',
+    body:'CAM 7×7 được <strong>nội suy bilinear</strong> lên <code>224×224</code> (kích thước ảnh gốc). Sau đó chuẩn hóa về [0,1] và áp colormap Jet để vẽ overlay. Mỗi pixel màu đỏ nghĩa là pixel đó trong ảnh gốc tương ứng với vùng feature map có <code>α_c · feats[c]</code> cao nhất.',
+    formula:`<b style="color:var(--ylw)">Bilinear upsample:</b>
+
+M_sal = interpolate(M, size=(224,224),
+                    mode='bilinear')
+M_sal = M_sal.squeeze(1)  <span style="color:var(--mut)"># [2,224,224]</span>
+
+<b style="color:var(--ylw)">Jet colormap mapping:</b>
+0.0 → <span style="background:#0000ff;color:#fff;padding:0 4px">xanh dương</span>  (không quan trọng)
+0.5 → <span style="background:#00aa00;color:#fff;padding:0 4px">xanh lá</span>
+1.0 → <span style="background:#ff0000;color:#fff;padding:0 4px">đỏ</span>  (quan trọng nhất)`,
+    code:`<span class="cm"># 6. Upsample về kích thước ảnh gốc</span>
+M_sal = nn.functional.<span class="fn">interpolate</span>(
+    M,
+    size    = (<span class="val">224</span>, <span class="val">224</span>),
+    mode    = <span class="str">'bilinear'</span>,
+    align_corners = <span class="val">False</span>
+)
+M_sal = M_sal.squeeze(<span class="val">1</span>)  <span class="cm"># [2, 224, 224]</span>
+<span class="cm"># return M_sal ← đây là output của SimAtt</span>`
+  }
+];
+
+// ═══════════════════════════════════════════════
+// CANVAS RENDERER
+// ═══════════════════════════════════════════════
+const canvas=document.getElementById('mainCanvas');
+const ctx=canvas.getContext('2d');
+const CW=760,CH=420;
+
+function drawRoundRect(x,y,w,h,r,fill,stroke,sw=1.5){
+  ctx.beginPath();
+  ctx.roundRect(x,y,w,h,r);
+  if(fill){ctx.fillStyle=fill;ctx.fill();}
+  if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=sw;ctx.stroke();}
+}
+
+function drawText(text,x,y,col,size=12,weight='normal',align='left'){
+  ctx.fillStyle=col;ctx.font=`${weight} ${size}px 'Segoe UI',sans-serif`;
+  ctx.textAlign=align;ctx.fillText(text,x,y);
+}
+
+function drawArrow(x1,y1,x2,y2,col,alpha=1,width=2,dashed=false){
+  ctx.save();ctx.globalAlpha=alpha;ctx.strokeStyle=col;ctx.lineWidth=width;
+  if(dashed)ctx.setLineDash([5,4]);
+  ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+  // Arrowhead
+  const ang=Math.atan2(y2-y1,x2-x1);
+  const as=8;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(x2,y2);
+  ctx.lineTo(x2-as*Math.cos(ang-0.4),y2-as*Math.sin(ang-0.4));
+  ctx.lineTo(x2-as*Math.cos(ang+0.4),y2-as*Math.sin(ang+0.4));
+  ctx.closePath();ctx.fillStyle=col;ctx.fill();
+  ctx.restore();
+}
+
+function drawGlow(x,y,r,col){
+  const g=ctx.createRadialGradient(x,y,0,x,y,r);
+  g.addColorStop(0,col+'60');g.addColorStop(1,col+'00');
+  ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+}
+
+// Draw mini feature map (7x7) at position
+function drawMiniFM(fm,x,y,size,cmap='hot'){
+  const cell=size/7;
+  for(let fy=0;fy<7;fy++)for(let fx=0;fx<7;fx++){
+    const v=fm[fy*7+fx];
+    const[r,g,b]=cmap==='hot'?hot(v):jet(v);
+    ctx.fillStyle=`rgb(${r},${g},${b})`;
+    ctx.fillRect(x+fx*cell,y+fy*cell,cell,cell);
+  }
+  ctx.strokeStyle='#252a3d';ctx.lineWidth=1;
+  ctx.strokeRect(x,y,size,size);
+}
+
+// Draw mini CAM 7x7
+function drawMiniCAM(cam,x,y,size,alpha=1){
+  ctx.save();ctx.globalAlpha=alpha;
+  const cell=size/7;
+  let mx=0;for(const v of cam)if(v>mx)mx=v;
+  for(let fy=0;fy<7;fy++)for(let fx=0;fx<7;fx++){
+    const v=mx>0?cam[fy*7+fx]/mx:0;
+    const[r,g,b]=jet(v);
+    ctx.fillStyle=`rgb(${r},${g},${b})`;
+    ctx.fillRect(x+fx*cell,y+fy*cell,cell,cell);
+  }
+  ctx.strokeStyle='#4ade80';ctx.lineWidth=1.5;ctx.strokeRect(x,y,size,size);
+  ctx.restore();
+}
+
+// Draw mini bar chart
+function drawMiniBar(data,x,y,w,h,col){
+  ctx.fillStyle='#0a0d14';ctx.fillRect(x,y,w,h);
+  ctx.strokeStyle='#1c2030';ctx.lineWidth=.5;ctx.strokeRect(x,y,w,h);
+  const n=data.length,bw=w/n,mid=y+h/2;
+  for(let i=0;i<n;i++){
+    const v=data[i],bh=Math.abs(v)*(h*.45);
+    ctx.fillStyle=v>=0?col+'bb':'#f87171bb';
+    ctx.fillRect(x+i*bw+.5,v>=0?mid-bh:mid,Math.max(bw-1,1),bh);
+  }
+}
+
+// Particle system for gradient flow
+const particles=[];
+function spawnParticles(x1,y1,x2,y2,col,n=12){
+  for(let i=0;i<n;i++){
+    particles.push({
+      x:x1,y:y1,tx:x2,ty:y2,
+      t:-(i/n)*.8,col,
+      size:2+Math.random()*2.5,
+      done:false
+    });
+  }
+}
+
+function updateParticles(dt){
+  for(const p of particles){
+    if(p.done)continue;
+    p.t+=dt*1.2;
+    if(p.t<0)continue;
+    const tt=Math.min(p.t,1);
+    p.x=lerp(particles[0]?p.x:p.tx, p.tx, tt); // simplified
+    p.cx=lerp(p.x,p.tx,tt);
+    p.cy=lerp(p.y,p.ty,tt);
+    if(p.t>=1)p.done=true;
+  }
+}
+
+// ═══════════════════════════════════════════════
+// SCENE RENDER PER STEP
+// ═══════════════════════════════════════════════
+let animRunning=false;
+let animProgress=0; // 0..1 for current step animation
+
+function renderScene(step,t){
+  ctx.clearRect(0,0,CW,CH);
+  // BG
+  ctx.fillStyle='#080b12';ctx.fillRect(0,0,CW,CH);
+
+  switch(step){
+    case 0: renderForward(t);break;
+    case 1: renderScoreW(t);break;
+    case 2: renderBackprop(t);break;
+    case 3: renderGAP(t);break;
+    case 4: renderCAMStep(t);break;
+    case 5: renderUpsample(t);break;
+  }
+}
+
+// ── Step 0: Forward Pass ──
+function renderForward(t){
+  const blocks=[
+    {label:'Input\n[2,3,224,224]',x:18,col:'#252a3d',tcol:'#94a3b8'},
+    {label:'Conv+Pool',x:108,col:'#1a2050',tcol:'#6c8ef5'},
+    {label:'Dense\nBlock 1',x:198,col:'#1a2050',tcol:'#6c8ef5'},
+    {label:'Dense\nBlock 2',x:298,col:'#1a2050',tcol:'#6c8ef5'},
+    {label:'Dense\nBlock 3',x:398,col:'#1a2050',tcol:'#6c8ef5'},
+    {label:'Dense\nBlock 4',x:498,col:'#0e2318',tcol:'#4ade80',hook:true},
+    {label:'GAP',x:610,col:'#1a2050',tcol:'#6c8ef5'},
+    {label:'Embedding\n[2,1024]',x:685,col:'#1a1a35',tcol:'#a78bfa'},
+  ];
+  const BY=160,BH=70,BW=82;
+
+  // Draw "data pulse" moving through blocks
+  const nBlocks=blocks.length;
+  const pulsePos=t*nBlocks;
+
+  blocks.forEach((b,i)=>{
+    const bw=i===0||i===nBlocks-1?82:BW;
+    const active=pulsePos>i&&pulsePos<i+1.5;
+    const passed=pulsePos>=i+1;
+    const alpha=passed?1:active?0.7+0.3*((pulsePos-i)):0.35;
+    ctx.save();ctx.globalAlpha=alpha;
+    drawRoundRect(b.x,BY,bw,BH,6,b.col,b.hook?'#4ade80':b.col==='#252a3d'?'#333':'#253060',2);
+    if(b.hook){
+      drawRoundRect(b.x,BY,bw,BH,6,null,'#4ade80',2.5);
+      if(passed||active){
+        drawGlow(b.x+bw/2,BY+BH/2,45,'#4ade80');
+        drawText('HOOK',b.x+bw/2,BY+BH-8,'#4ade80',9,'bold','center');
+      }
+    }
+    b.label.split('\n').forEach((line,li)=>{
+      drawText(line,b.x+bw/2,BY+22+li*16,b.tcol,10,'600','center');
+    });
+    ctx.restore();
+    // Arrow
+    if(i<blocks.length-1){
+      const nx=blocks[i+1].x;
+      const arAlpha=pulsePos>i+0.5?1:pulsePos>i?lerp(0.2,1,(pulsePos-i)/0.5):0.2;
+      drawArrow(b.x+bw+1,BY+BH/2,nx-2,BY+BH/2,
+        pulsePos>i+0.5?'#6c8ef5':'#252a3d',arAlpha,1.5);
+    }
+  });
+
+  // Feature map pop-out
+  if(t>0.7){
+    const fa=clamp((t-0.7)/0.3,0,1);
+    ctx.save();ctx.globalAlpha=fa;
+    const fx=480,fy=260;
+    drawRoundRect(fx-5,fy-22,170,145,6,'#0e2318','#4ade80',1.5);
+    drawText('feats = A[-1]',fx+80,fy-8,'#4ade80',10,'600','center');
+    drawText('[2, 1024, 7, 7]',fx+80,fy+5,'#64748b',9,'normal','center');
+    drawMiniFM(FM_Q[0],fx,fy+12,63,'hot');
+    drawText('query',fx+31,fy+82,'#38bdf8',9,'normal','center');
+    drawMiniFM(FM_R[0],fx+72,fy+12,63,'jet');
+    drawText('retrieved',fx+103,fy+82,'#4ade80',9,'normal','center');
+    drawArrow(540,BY+BH,540,fy-2,'#4ade80',fa,1.5,true);
+    ctx.restore();
+  }
+
+  // Labels
+  drawText('Forward Pass – data flows left → right through DenseNet121',CW/2,CH-18,'#4b5563',11,'normal','center');
+  if(t>0.4) drawText(`Gradient chưa được tính`,CW/2,CH-6,'#fb923c',10,'normal','center');
+}
+
+// ── Step 1: Score & W ──
+function renderScoreW(t){
+  const CX=CW/2,CY=CH/2;
+
+  // Draw W vector bar
+  const wSlice=Array.from(W_VEC.slice(0,48));
+  const wMax=Math.max(...wSlice);
+  const wn=wSlice.map(v=>wMax>0?v/wMax:0);
+  drawText('w vector (1024-dim, showing 48):',40,42,'#fb923c',11,'600');
+  drawMiniBar(wn,40,50,460,55,'#fb923c');
+
+  // Annotations
+  if(t>0.2){
+    const a=clamp((t-0.2)/0.3,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    drawRoundRect(515,44,220,66,7,'#1c1a08','#facc15',1.5);
+    drawText('w[d] cao khi:',525,62,'#facc15',10,'700');
+    drawText('norm(e_q)[d] ≈ norm(e_p)[d]',525,78,'#e2e8f0',9.5);
+    drawText('→ chiều d gần nhau (tương đồng)',525,94,'#4ade80',9.5);
+    ctx.restore();
+  }
+
+  // Embeddings
+  if(t>0.3){
+    const a=clamp((t-0.3)/0.3,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    const eqSlice=Array.from(EQn.slice(0,32));
+    const epSlice=Array.from(EPn.slice(0,32));
+    drawText('e_q (L2-norm, 32/1024):',40,140,'#38bdf8',10,'600');
+    drawMiniBar(eqSlice,40,148,340,44,'#38bdf8');
+    drawText('e_p (L2-norm, 32/1024):',40,208,'#4ade80',10,'600');
+    drawMiniBar(epSlice,40,216,340,44,'#4ade80');
+    ctx.restore();
+  }
+
+  // Scores
+  if(t>0.6){
+    const a=clamp((t-0.6)/0.35,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    drawGlow(540,270,60,'#facc15');
+    drawRoundRect(410,240,310,110,8,'#1a1a08','#facc15',2);
+    drawText('Sample Scores s = |emb| @ w',565,262,'#facc15',10,'700','center');
+    drawText(`s_q = ${S_Q.toFixed(4)}`,445,288,'#38bdf8',12,'700');
+    drawText(`s_p = ${S_P.toFixed(4)}`,445,312,'#4ade80',12,'700');
+    drawText('scalar / image',565,336,'#64748b',9.5,'normal','center');
+
+    // Arrow from w to score
+    drawArrow(500,75,510,245,'#facc15',a,1.5,true);
+    ctx.restore();
+  }
+
+  drawText('w encode: chiều nào quyết định sự tương đồng → score dùng để backprop',CW/2,CH-12,'#4b5563',10.5,'normal','center');
+}
+
+// ── Step 2: Backprop ──
+function renderBackprop(t){
+  // Node positions
+  const nodes=[
+    {label:'s_q, s_p\n(scores)',x:660,y:60,col:'#facc15',r:28},
+    {label:'emb\n[2,1024]',x:500,y:140,col:'#a78bfa',r:24},
+    {label:'GAP',x:380,y:210,col:'#38bdf8',r:22},
+    {label:'feats\n[2,1024,7,7]',x:250,y:300,col:'#4ade80',r:32},
+    {label:'Dense\nBlock 4',x:110,y:370,col:'#6c8ef5',r:28},
+  ];
+
+  // Forward arrows (faded, always visible)
+  for(let i=nodes.length-1;i>0;i--){
+    const a=nodes[i],b=nodes[i-1];
+    const dx=b.x-a.x,dy=b.y-a.y,dist=Math.sqrt(dx*dx+dy*dy);
+    const nx=dx/dist,ny=dy/dist;
+    drawArrow(a.x+a.r*nx,a.y+a.r*ny,b.x-b.r*nx,b.y-b.r*ny,'#252a3d',0.5,1.5);
+  }
+
+  // Gradient arrows (backwards, animated)
+  const gradPairs=[
+    [0,1],[1,2],[2,3]
+  ];
+  gradPairs.forEach(([from,to],gi)=>{
+    const startT=gi*0.28;
+    const fa=clamp((t-startT)/0.28,0,1);
+    if(fa<=0)return;
+    const a=nodes[from],b=nodes[to];
+    const dx=b.x-a.x,dy=b.y-a.y,dist=Math.sqrt(dx*dx+dy*dy);
+    const nx=dx/dist,ny=dy/dist;
+    // Animated gradient particle along the arrow
+    const px=lerp(a.x+a.r*nx,b.x-b.r*nx,fa);
+    const py=lerp(a.y+a.r*ny,b.y-b.r*ny,fa);
+    // Draw gradient line
+    ctx.save();
+    ctx.strokeStyle='#a78bfa';ctx.lineWidth=2.5;ctx.globalAlpha=fa*0.9;
+    ctx.setLineDash([]);
+    ctx.beginPath();ctx.moveTo(a.x+a.r*nx,a.y+a.r*ny);ctx.lineTo(px,py);ctx.stroke();
+    // Arrowhead at leading edge
+    const ang2=Math.atan2(b.y-a.y,b.x-a.x);
+    ctx.beginPath();
+    ctx.moveTo(px,py);
+    ctx.lineTo(px-9*Math.cos(ang2-.4),py-9*Math.sin(ang2-.4));
+    ctx.lineTo(px-9*Math.cos(ang2+.4),py-9*Math.sin(ang2+.4));
+    ctx.closePath();ctx.fillStyle='#a78bfa';ctx.fill();
+    // Glow at leading edge
+    drawGlow(px,py,18,'#a78bfa');
+    ctx.restore();
+    // Label
+    if(fa>.5){
+      ctx.save();ctx.globalAlpha=fa;
+      const lx=(a.x+b.x)/2+15,ly=(a.y+b.y)/2-10;
+      drawText('∂s/∂'+['emb','GAP','feats'][gi],lx,ly,'#c084fc',9.5,'600');
+      ctx.restore();
+    }
+  });
+
+  // Draw nodes
+  nodes.forEach((n,i)=>{
+    const lit=i<=Math.floor(t/0.28);
+    ctx.save();
+    if(lit)drawGlow(n.x,n.y,n.r+15,n.col);
+    ctx.beginPath();ctx.arc(n.x,n.y,n.r,0,Math.PI*2);
+    ctx.fillStyle=lit?n.col+'33':'#1c2030';
+    ctx.fill();
+    ctx.strokeStyle=lit?n.col:'#252a3d';ctx.lineWidth=lit?2.5:1.5;ctx.stroke();
+    n.label.split('\n').forEach((line,li)=>{
+      drawText(line,n.x,n.y-5+li*14,lit?n.col:'#64748b',9,'700','center');
+    });
+    ctx.restore();
+  });
+
+  // Final gradient box
+  if(t>0.85){
+    const a=clamp((t-0.85)/0.15,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    drawRoundRect(330,300,400,88,8,'#1a0d35','#a78bfa',2);
+    drawText('grads = ∂s/∂feats',535,322,'#a78bfa',11,'700','center');
+    drawText('shape: [2, 1024, 7, 7]',535,342,'#e2e8f0',10,'normal','center');
+    drawText('→ gradient TẠI feature map của Dense Block 4',535,362,'#4ade80',9.5,'normal','center');
+    drawGlow(535,340,55,'#a78bfa');
+    ctx.restore();
+  }
+
+  drawText('Chain rule: ∂s/∂feats = ∂s/∂emb · ∂emb/∂GAP · ∂GAP/∂feats',CW/2,CH-12,'#4b5563',10.5,'normal','center');
+}
+
+// ── Step 3: GAP of Gradient ──
+function renderGAP(t){
+  const GW=200,GH=160;
+  // Left: gradient heatmap 7x7 (for query, channel c)
+  const showCh=Math.floor(t*8)%4; // cycle through channels
+  const gradFM=FM_Q[showCh%FM_Q.length];
+
+  drawText('Gradient ∂s/∂feats[0] – channel c='+[37,122,387,512][showCh%4],40,38,'#a78bfa',11,'600');
+  drawText('(7×7 spatial gradient map):',40,52,'#64748b',10);
+
+  // Draw gradient FM as heatmap
+  ctx.save();
+  const gfx=40,gfy=62;
+  const gCell=130/7;
+  for(let y=0;y<7;y++)for(let x=0;x<7;x++){
+    const v=gradFM[y*7+x];
+    const[r,g,b]=jet(v);
+    ctx.fillStyle=`rgb(${r},${g},${b})`;
+    ctx.fillRect(gfx+x*gCell,gfy+y*gCell,gCell,gCell);
+  }
+  ctx.strokeStyle='#a78bfa';ctx.lineWidth=1.5;ctx.strokeRect(gfx,gfy,130,130);
+  ctx.restore();
+
+  // Column highlights showing mean
+  if(t>0.25){
+    const a=clamp((t-0.25)/0.4,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    const gCell2=130/7;
+    for(let x=0;x<7;x++){
+      let sum=0;for(let y=0;y<7;y++)sum+=gradFM[y*7+x];
+      const mean=sum/7;
+      const[r,g,b]=jet(mean);
+      ctx.fillStyle=`rgba(${r},${g},${b},0.3)`;
+      ctx.fillRect(gfx+x*gCell2,gfy,gCell2,130);
+    }
+    // Row highlights
+    for(let y=0;y<7;y++){
+      let sum=0;for(let x=0;x<7;x++)sum+=gradFM[y*7+x];
+      const mean=sum/7;
+      const[r,g,b]=jet(mean);
+      ctx.fillStyle=`rgba(${r},${g},${b},0.2)`;
+      ctx.fillRect(gfx,gfy+y*gCell2,130,gCell2);
+    }
+    ctx.restore();
+  }
+
+  // Arrow: GAP operation
+  if(t>0.4){
+    const a=clamp((t-0.4)/0.3,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    drawArrow(175,127,260,127,'#38bdf8',1,2);
+    drawText('mean(dim=(H,W))',215,120,'#38bdf8',9.5,'600','center');
+    drawText('Global Avg Pool',215,134,'#64748b',8.5,'normal','center');
+    ctx.restore();
+  }
+
+  // Result: alpha_c value
+  if(t>0.55){
+    const a=clamp((t-0.55)/0.3,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    let mean=0;for(const v of gradFM)mean+=v;mean/=49;
+    const[r,g,b]=jet(mean);
+    ctx.beginPath();ctx.arc(305,127,28,0,Math.PI*2);
+    ctx.fillStyle=`rgba(${r},${g},${b},0.25)`;ctx.fill();
+    ctx.strokeStyle=`rgb(${r},${g},${b})`;ctx.lineWidth=2.5;ctx.stroke();
+    drawText(`α_c`,305,123,`rgb(${r},${g},${b})`,13,'700','center');
+    drawText(`=${mean.toFixed(3)}`,305,137,'#e2e8f0',10,'normal','center');
+    ctx.restore();
+  }
+
+  // Full bar chart of all channel weights
+  if(t>0.65){
+    const a=clamp((t-0.65)/0.3,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    drawText('α_c (channel weights) cho toàn bộ channels – Query:',360,48,'#38bdf8',10,'600');
+    drawMiniBar(Array.from(AQ),360,56,360,64,'#38bdf8');
+    drawText('Retrieved:',360,138,'#4ade80',10,'600');
+    drawMiniBar(Array.from(AR),360,146,360,64,'#4ade80');
+    ctx.restore();
+  }
+
+  if(t>0.8){
+    const a=clamp((t-0.8)/0.2,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    drawRoundRect(40,220,680,110,8,'#091420','#38bdf8',1.5);
+    drawText('weights = mean(grads, dim=(2,3))   → shape [2, 1024]',370,244,'#38bdf8',10.5,'700','center');
+    drawText('weights[c] = α_c = scalar "importance" của channel c',370,264,'#e2e8f0',10,'normal','center');
+    drawText('Channel có gradient lớn trung bình → α_c cao → đóng góp nhiều vào CAM',370,284,'#4ade80',10,'normal','center');
+    drawText('Channel có gradient gần 0 → α_c ≈ 0 → gần như bị loại khỏi saliency map',370,304,'#64748b',9.5,'normal','center');
+    ctx.restore();
+  }
+}
+
+// ── Step 4: CAM Computation ──
+function renderCAMStep(t){
+  // Show feature maps + weights → weighted sum → CAM
+  const FMs=[FM_Q[0],FM_Q[1],FM_Q[2],FM_Q[3]];
+  const ws=[AQ[0],AQ[1],AQ[2],AQ[3]];
+  const fmSize=70;
+  const startX=30,fmY=60;
+
+  drawText('Weighted Sum của feature maps:',startX,48,'#4ade80',11,'600');
+
+  FMs.forEach((fm,i)=>{
+    const x=startX+i*(fmSize+50);
+    const active=t>(i*0.2+0.1);
+    const a=active?clamp((t-(i*0.2+0.1))/0.15,0,1):0.25;
+    ctx.save();ctx.globalAlpha=a;
+    drawMiniCAM(fm,x,fmY,fmSize,1);
+    // Channel label
+    drawText(`ch.${[37,122,387,512][i]}`,x+fmSize/2,fmY+fmSize+14,'#94a3b8',8.5,'normal','center');
+    // Weight badge
+    const wt=(ws[i]).toFixed(3);
+    const wc=ws[i]>0.5?'#4ade80':ws[i]>0.25?'#facc15':'#f87171';
+    drawRoundRect(x,fmY-18,fmSize,16,4,'#1c2030',wc,1.5);
+    drawText(`α=${wt}`,x+fmSize/2,fmY-7,wc,8.5,'700','center');
+    // × sign
+    if(i<FMs.length-1){
+      drawText('+',x+fmSize+22,fmY+fmSize/2+4,'#64748b',18,'700','center');
+    }
+    ctx.restore();
+  });
+
+  // ... indicator
+  if(t>0.35){
+    ctx.save();ctx.globalAlpha=clamp((t-0.35)/0.2,0,1);
+    drawText('+ … (1024 channels total)',30+4*(fmSize+50)+10,fmY+fmSize/2+4,'#4b5563',11,'normal');
+    ctx.restore();
+  }
+
+  // = Result CAM
+  if(t>0.55){
+    const a=clamp((t-0.55)/0.3,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    drawArrow(CW/2-30,fmY+fmSize+26,CW/2-30,fmY+fmSize+62,'#4ade80',1,2);
+    drawText('= M_raw (7×7)',CW/2-30,fmY+fmSize+46,'#4ade80',9.5,'600','center');
+    drawMiniCAM(CAM_Q,CW/2-80,fmY+fmSize+68,90,1);
+    drawText('Query CAM (before ReLU)',CW/2-35,fmY+fmSize+170,'#64748b',9,'normal','center');
+    ctx.restore();
+  }
+
+  // ReLU explanation
+  if(t>0.75){
+    const a=clamp((t-0.75)/0.25,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    drawRoundRect(430,200,290,130,8,'#1a0d0d','#f87171',1.5);
+    drawText('ReLU: M = clamp(M_raw, min=0)',575,222,'#f87171',10,'700','center');
+    drawText('Loại bỏ giá trị âm',575,240,'#e2e8f0',9.5,'normal','center');
+    drawText('Giá trị âm = channel này LÀM GIẢM score',575,258,'#64748b',9,'normal','center');
+    drawText('→ không liên quan đến vùng tương đồng',575,274,'#64748b',9,'normal','center');
+    drawText('Giá trị dương = LÀM TĂNG similarity',575,292,'#4ade80',9.5,'normal','center');
+    drawText('→ đây là vùng SẼ được highlight!',575,308,'#4ade80',9,'normal','center');
+    ctx.restore();
+  }
+}
+
+// ── Step 5: Upsample → final saliency ──
+function renderUpsample(t){
+  const CAM7X=60,CAM7Y=80,CAM7S=112;
+  const SAL_X=380,SAL_Y=60,SAL_S=220;
+
+  // Draw source 7x7 CAM
+  drawText('CAM 7×7 (raw):',CAM7X+CAM7S/2,68,'#4ade80',10.5,'600','center');
+  drawMiniCAM(CAM_Q,CAM7X,CAM7Y,CAM7S,1);
+  drawText(`${CAM7S}×${CAM7S}px (display) = 7×7 cells`,CAM7X+CAM7S/2,CAM7Y+CAM7S+14,'#64748b',8.5,'normal','center');
+
+  // Arrow with label
+  if(t>0.15){
+    const a=clamp((t-0.15)/0.3,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    drawArrow(CAM7X+CAM7S+12,CAM7Y+CAM7S/2,SAL_X-10,SAL_Y+SAL_S/2,'#facc15',1,2);
+    drawText('interpolate()',230,CAM7Y+CAM7S/2-14,'#facc15',10,'700','center');
+    drawText("mode='bilinear'",230,CAM7Y+CAM7S/2+2,'#64748b',9,'normal','center');
+    drawText('7×7 → 224×224',230,CAM7Y+CAM7S/2+16,'#e2e8f0',9.5,'normal','center');
+    ctx.restore();
+  }
+
+  // Draw upsampled saliency map (simulate on canvas)
+  if(t>0.35){
+    const a=clamp((t-0.35)/0.4,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    drawText('Saliency map 224×224 (query):',SAL_X+SAL_S/2,48,'#facc15',10.5,'600','center');
+
+    // Render smooth saliency
+    const imgD=ctx.createImageData(SAL_S,SAL_S);
+    for(let py=0;py<SAL_S;py++){
+      for(let px=0;px<SAL_S;px++){
+        const fx=px/SAL_S*7,fy=py/SAL_S*7;
+        // Bilinear interpolation from CAM_Q
+        const x0=Math.floor(fx),y0=Math.floor(fy);
+        const x1=Math.min(x0+1,6),y1=Math.min(y0+1,6);
+        const dx=fx-x0,dy=fy-y0;
+        const v=CAM_Q[y0*7+x0]*(1-dx)*(1-dy)+CAM_Q[y0*7+x1]*dx*(1-dy)+
+                CAM_Q[y1*7+x0]*(1-dx)*dy+CAM_Q[y1*7+x1]*dx*dy;
+        const animated=v*(t>0.5?clamp((t-0.5)/0.4,0,1):0);
+        const[r,g,b]=animated>0.15?jet(animated):[0,0,0];
+        const idx=(py*SAL_S+px)*4;
+        imgD.data[idx]=r;imgD.data[idx+1]=g;imgD.data[idx+2]=b;imgD.data[idx+3]=animated>0.15?200:40;
+      }
+    }
+    ctx.putImageData(imgD,SAL_X,SAL_Y);
+    ctx.strokeStyle='#facc15';ctx.lineWidth=1.5;ctx.strokeRect(SAL_X,SAL_Y,SAL_S,SAL_S);
+    ctx.restore();
+  }
+
+  // Annotation arrows on saliency
+  if(t>0.8){
+    const a=clamp((t-0.8)/0.2,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    // Right lung upper hotspot (approx position in 220x220)
+    const hx=SAL_X+SAL_S*0.69,hy=SAL_Y+SAL_S*0.33;
+    drawGlow(hx,hy,25,'#ff0000');
+    drawArrow(hx+35,hy-35,hx+8,hy-8,'#f87171',1,1.5,true);
+    drawRoundRect(hx+25,hy-80,175,42,6,'#1a0808','#f87171',1.5);
+    drawText('Vùng ĐỎ = phổi phải trên',hx+112,hy-62,'#f87171',9.5,'700','center');
+    drawText('→ vị trí nodule quyết định truy hồi',hx+112,hy-48,'#e2e8f0',9,'normal','center');
+    ctx.restore();
+  }
+
+  if(t>0.88){
+    const a=clamp((t-0.88)/0.12,0,1);
+    ctx.save();ctx.globalAlpha=a;
+    drawRoundRect(30,330,340,70,8,'#081408','#4ade80',1.5);
+    drawText('SimAtt output: M[0] shape [224,224]',190,352,'#4ade80',10,'700','center');
+    drawText('M[0] = query saliency',190,370,'#e2e8f0',9.5,'normal','center');
+    drawText('M[1] = retrieved saliency',190,386,'#e2e8f0',9.5,'normal','center');
+    ctx.restore();
+  }
+}
+
+// ═══════════════════════════════════════════════
+// ANIMATION LOOP
+// ═══════════════════════════════════════════════
+let lastTime=null;
+let animSpeed=3;
+
+function animate(timestamp){
+  if(!animRunning)return;
+  if(!lastTime)lastTime=timestamp;
+  const dt=(timestamp-lastTime)/1000;
+  lastTime=timestamp;
+  animProgress=Math.min(1,animProgress+dt*(animSpeed*0.28));
+  renderScene(curStep,animProgress);
+  if(animProgress<1){
+    animRAF=requestAnimationFrame(animate);
+  } else {
+    animRunning=false;
+    stepDone[curStep]=true;
+    document.getElementById('playBtn').textContent='▶ Play';
+    updateSidePanel();
+  }
+}
+
+function startAnim(){
+  animRunning=true;
+  lastTime=null;
+  animSpeed=parseInt(document.getElementById('speedSlider').value);
+  animRAF=requestAnimationFrame(animate);
+  document.getElementById('playBtn').textContent='⏸ Pause';
+}
+
+function togglePlay(){
+  if(animRunning){
+    animRunning=false;
+    if(animRAF)cancelAnimationFrame(animRAF);
+    document.getElementById('playBtn').textContent='▶ Play';
+  } else {
+    if(animProgress>=1)animProgress=0;
+    startAnim();
+  }
+}
+
+// ═══════════════════════════════════════════════
+// STEP NAVIGATION
+// ═══════════════════════════════════════════════
+function updateStepBar(){
+  const bar=document.getElementById('stepBar');bar.innerHTML='';
+  STEPS.forEach((s,i)=>{
+    if(i>0){
+      const ln=document.createElement('div');
+      ln.className='sl'+(i<=curStep?' done':'');
+      bar.appendChild(ln);
+    }
+    const d=document.createElement('div');
+    d.className='st'+(i===curStep?' active':stepDone[i]?' done':'');
+    d.title=s.title;
+    d.innerHTML=stepDone[i]?'✓':s.icon;
+    d.style.borderColor=i===curStep?s.color:stepDone[i]?'var(--grn)':'var(--bdr)';
+    if(i===curStep)d.style.background=s.color;
+    d.onclick=()=>goStep(i);
+    bar.appendChild(d);
+  });
+}
+
+function updateExplain(){
+  const s=STEPS[curStep];
+  document.getElementById('explainTitle').textContent=s.title;
+  document.getElementById('explainTitle').style.color=s.color;
+  document.getElementById('explainBody').innerHTML=s.body;
+}
+
+function updateFormula(){
+  document.getElementById('formulaBox').innerHTML=
+    `<div style="font-size:.78rem;line-height:1.85;white-space:pre-line;font-family:'Courier New',monospace">${STEPS[curStep].formula}</div>`;
+}
+
+function updateCode(){
+  document.getElementById('codeBlock').innerHTML=STEPS[curStep].code;
+}
+
+function updateSidePanel(){
+  // Alpha chart
+  const ac=document.getElementById('alphaChart');
+  const actx=ac.getContext('2d');
+  actx.fillStyle='#080b12';actx.fillRect(0,0,ac.width,ac.height);
+  if(curStep>=3&&stepDone[3]){
+    const n=32,bw=ac.width/n,mid=ac.height/2;
+    AQ.slice(0,32).forEach((v,i)=>{
+      const bh=v*ac.height*.42;
+      actx.fillStyle='#38bdf8cc';actx.fillRect(i*bw+.5,mid-bh,Math.max(bw-1,1),bh);
+    });
+    AR.slice(0,32).forEach((v,i)=>{
+      const bh=v*ac.height*.42;
+      actx.fillStyle='#4ade8066';actx.fillRect(i*bw+.5,mid,Math.max(bw-1,1),bh);
+    });
+    actx.strokeStyle='#252a3d';actx.lineWidth=.5;actx.strokeRect(0,0,ac.width,ac.height);
+  } else {
+    actx.fillStyle='#252a3d';actx.font='11px sans-serif';actx.textAlign='center';
+    actx.fillText('Sẽ hiển thị sau bước GAP Gradient',ac.width/2,ac.height/2+4);
+  }
+
+  // CAM canvases
+  if(curStep>=4&&stepDone[4]){
+    document.getElementById('camProg').style.width='100%';
+    drawSideCAM('camQ',CAM_Q);
+    drawSideCAM('camR',CAM_R);
+  }
+}
+
+function drawSideCAM(id,cam){
+  const c=document.getElementById(id),ctx2=c.getContext('2d');
+  const W=c.width,H=c.height,cell=W/7;
+  let mx=0;for(const v of cam)if(v>mx)mx=v;
+  for(let y=0;y<7;y++)for(let x=0;x<7;x++){
+    const v=mx>0?cam[y*7+x]/mx:0;
+    const[r,g,b]=jet(v);
+    ctx2.fillStyle=`rgb(${r},${g},${b})`;
+    ctx2.fillRect(x*cell,y*cell,cell,cell);
+  }
+}
+
+function goStep(i){
+  if(animRunning){animRunning=false;if(animRAF)cancelAnimationFrame(animRAF);}
+  curStep=i;
+  animProgress=0;
+  document.getElementById('playBtn').textContent='▶ Play';
+  updateStepBar();
+  updateExplain();
+  updateFormula();
+  updateCode();
+  updateSidePanel();
+  renderScene(curStep,0);
+  startAnim();
+}
+
+function nextStep(){
+  if(curStep<N-1)goStep(curStep+1);
+}
+function prevStep(){
+  if(curStep>0)goStep(curStep-1);
+}
+function resetAnim(){
+  animProgress=0;
+  renderScene(curStep,0);
+  startAnim();
+}
+
+// Legend
+function drawLegend(){
+  const c=document.getElementById('legendC'),ctx2=c.getContext('2d');
+  const grd=ctx2.createLinearGradient(0,0,c.width,0);
+  grd.addColorStop(0,'#0000ff');grd.addColorStop(.25,'#00ffff');
+  grd.addColorStop(.5,'#00ff00');grd.addColorStop(.75,'#ffff00');
+  grd.addColorStop(1,'#ff0000');
+  ctx2.fillStyle=grd;ctx2.fillRect(0,0,c.width,c.height);
+}
+
+// Speed slider
+document.getElementById('speedSlider').addEventListener('input',function(){
+  document.getElementById('speedLbl').textContent='×'+this.value;
+  animSpeed=parseInt(this.value);
+});
+
+// Keyboard nav
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight')nextStep();
+  if(e.key==='ArrowLeft')prevStep();
+  if(e.key===' '){e.preventDefault();togglePlay();}
+});
+
+// Init
+drawLegend();
+updateStepBar();
+updateExplain();
+updateFormula();
+updateCode();
+updateSidePanel();
+renderScene(0,0);
+startAnim();
+</script>
+</body>
+</html>

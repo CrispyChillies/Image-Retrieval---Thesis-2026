@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SimAtt – Phương pháp sinh Saliency Map</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #222636;
+      --accent: #6c8ef5;
+      --accent2: #a78bfa;
+      --green: #4ade80;
+      --orange: #fb923c;
+      --red: #f87171;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --border: #2d3348;
+      --code-bg: #111827;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      line-height: 1.7;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    /* ---- Header ---- */
+    header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+    header h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    header p {
+      margin-top: 0.6rem;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+    .tag {
+      display: inline-block;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      padding: 0.2rem 0.75rem;
+      margin: 0.2rem;
+      color: var(--accent);
+    }
+
+    /* ---- Sections ---- */
+    section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.75rem 2rem;
+      margin-bottom: 1.75rem;
+    }
+    section h2 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    section h2 .icon {
+      font-size: 1.2rem;
+    }
+    p { margin-bottom: 0.75rem; color: var(--text); }
+    p:last-child { margin-bottom: 0; }
+
+    /* ---- Pipeline diagram ---- */
+    .pipeline {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 1.25rem 0;
+    }
+    .box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.55rem 1rem;
+      font-size: 0.85rem;
+      text-align: center;
+      min-width: 110px;
+    }
+    .box.query  { border-color: var(--accent);  color: var(--accent); }
+    .box.pos    { border-color: var(--green);   color: var(--green); }
+    .box.neg    { border-color: var(--red);     color: var(--red); }
+    .box.model  { border-color: var(--accent2); color: var(--accent2); background: #2a1d4a; }
+    .box.weight { border-color: var(--orange);  color: var(--orange); }
+    .box.grad   { border-color: #38bdf8;        color: #38bdf8; }
+    .box.cam    { border-color: var(--green);   color: var(--green); background: #0d2b16; }
+    .arrow { color: var(--muted); font-size: 1.2rem; }
+
+    /* ---- Step list ---- */
+    .steps { counter-reset: step; list-style: none; }
+    .steps li {
+      counter-increment: step;
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+      margin-bottom: 1.1rem;
+    }
+    .steps li::before {
+      content: counter(step);
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+      font-size: 0.78rem;
+      font-weight: 700;
+      min-width: 1.6rem;
+      height: 1.6rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 0.15rem;
+    }
+    .steps li p { margin: 0; }
+
+    /* ---- Math blocks ---- */
+    .math {
+      background: var(--code-bg);
+      border-left: 3px solid var(--accent);
+      border-radius: 6px;
+      padding: 0.75rem 1.25rem;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9rem;
+      color: #93c5fd;
+      margin: 0.75rem 0;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    /* ---- Code blocks ---- */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.1rem 1.25rem;
+      overflow-x: auto;
+      margin: 0.75rem 0;
+    }
+    code {
+      font-family: 'Courier New', monospace;
+      font-size: 0.83rem;
+    }
+    .kw  { color: #c084fc; }
+    .cm  { color: #6b7280; font-style: italic; }
+    .fn  { color: #60a5fa; }
+    .str { color: #4ade80; }
+    .num { color: #fb923c; }
+    .op  { color: #94a3b8; }
+
+    /* ---- Comparison table ---- */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+    th {
+      background: var(--surface2);
+      color: var(--accent);
+      padding: 0.6rem 0.9rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 0.55rem 0.9rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--surface2); color: var(--text); }
+
+    /* ---- Note box ---- */
+    .note {
+      background: #1e293b;
+      border-left: 3px solid var(--orange);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      font-size: 0.88rem;
+      color: #fdba74;
+      margin-top: 0.75rem;
+    }
+    .note strong { color: var(--orange); }
+
+    /* ---- Footer ---- */
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-top: 2.5rem;
+    }
+
+    @media (max-width: 600px) {
+      section { padding: 1.25rem 1rem; }
+      header h1 { font-size: 1.6rem; }
+      .pipeline { flex-direction: column; align-items: flex-start; }
+      .arrow { transform: rotate(90deg); }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ===== Header ===== -->
+  <header>
+    <h1>SimAtt</h1>
+    <p>Similarity-Attention Saliency – phương pháp giải thích truy vấn ảnh bằng GradCAM hướng metric</p>
+    <div style="margin-top:0.8rem">
+      <span class="tag">Image Retrieval</span>
+      <span class="tag">Saliency / XAI</span>
+      <span class="tag">GradCAM-style</span>
+      <span class="tag">Metric Learning</span>
+    </div>
+  </header>
+
+  <!-- ===== 1. Bức tranh toàn cảnh ===== -->
+  <section>
+    <h2><span class="icon">🔭</span> Bức tranh toàn cảnh</h2>
+    <p>
+      <strong>SimAtt</strong> (Similarity Attention) là phương pháp sinh saliency map cho bài toán
+      <em>truy vấn ảnh dựa trên độ tương đồng embedding</em>. Thay vì hỏi "vùng nào khiến mô hình phân loại đúng?"
+      như GradCAM truyền thống, SimAtt hỏi:
+    </p>
+    <blockquote style="border-left:3px solid var(--accent2);padding:0.5rem 1rem;margin:0.75rem 0;color:var(--accent2);">
+      "Vùng nào trên ảnh truy vấn / ảnh kết quả <em>quyết định</em> sự giống nhau hoặc khác nhau giữa chúng trong không gian embedding?"
+    </blockquote>
+    <p>
+      Phương pháp có thể hoạt động theo cấu hình Siamese (query + positive) hoặc Triplet (query + positive + negative),
+      và sinh ra saliency map trên <strong>tất cả</strong> các ảnh đầu vào.
+    </p>
+  </section>
+
+  <!-- ===== 2. Pipeline tổng quát ===== -->
+  <section>
+    <h2><span class="icon">⚙️</span> Pipeline tổng quát</h2>
+    <div class="pipeline">
+      <div class="box query">Query<br/><small>x_q</small></div>
+      <span class="arrow">+</span>
+      <div class="box pos">Positive<br/><small>x_p (opt.)</small></div>
+      <span class="arrow">+</span>
+      <div class="box neg">Negative<br/><small>x_n (opt.)</small></div>
+      <span class="arrow">→</span>
+      <div class="box model">Backbone<br/><small>forward pass</small></div>
+      <span class="arrow">→</span>
+      <div class="box weight">Similarity<br/>Weight <em>w</em></div>
+      <span class="arrow">→</span>
+      <div class="box grad">Grad w.r.t.<br/>Feature Map</div>
+      <span class="arrow">→</span>
+      <div class="box cam">CAM + Upsample<br/><small>Saliency M</small></div>
+    </div>
+    <p style="color:var(--muted);font-size:0.85rem">
+      Các ảnh được <em>concatenate</em> thành một batch trước khi đẩy qua backbone, đảm bảo feature map
+      và embedding đều có cùng gradient context.
+    </p>
+  </section>
+
+  <!-- ===== 3. Từng bước chi tiết ===== -->
+  <section>
+    <h2><span class="icon">🔢</span> Các bước chi tiết</h2>
+    <ol class="steps">
+
+      <li>
+        <p>
+          <strong>Concatenate đầu vào.</strong>
+          Tất cả ảnh được ghép thành một batch duy nhất theo chiều batch dimension:
+          <code>x = [x_q ; x_p ; x_n]</code> (tùy cấu hình).
+          Batch duy nhất này được đẩy qua backbone một lần để tiết kiệm chi phí tính toán.
+        </p>
+      </li>
+
+      <li>
+        <p>
+          <strong>Thu thập feature map trung gian và embedding đầu ra.</strong>
+          SimAtt sử dụng một trong hai cơ chế:
+        </p>
+        <ul style="margin-left:1.2rem;color:var(--muted);font-size:0.88rem">
+          <li><em>ModelOutputs extractor</em> – hook vào module con cụ thể (target_layers).</li>
+          <li><em>Forward hook</em> – khi <code>target_layers=None</code>, hook thẳng vào <code>feature_module</code>.</li>
+        </ul>
+        <p>Kết quả: <code>A</code> (list feature map), <code>x</code> (embedding cuối).</p>
+      </li>
+
+      <li>
+        <p>
+          <strong>Tính vector trọng số <em>w</em> từ không gian embedding.</strong>
+          Đây là điểm đặc trưng cốt lõi của SimAtt.
+        </p>
+        <div class="math">x_norm = L2_normalize(x)          # shape [B_total, D]
+w = |x_norm[0] - x_norm[1:]|     # khoảng cách tuyệt đối từng chiều
+                                  # giữa query và mỗi ảnh còn lại
+if x_p is not None:
+    w[0] = 1 - w[0]              # đảo ngược chiều positive:
+                                  # chiều nào query ≈ positive → trọng số cao
+w = ∏ w[i]  (element-wise product qua tất cả i)</div>
+        <p>
+          Intuition: <code>w[d]</code> cao nghĩa là chiều <em>d</em> của embedding phân biệt mạnh
+          query vs. negative (và đồng thời gần với positive). Đây là vector "discriminative dimension".
+        </p>
+      </li>
+
+      <li>
+        <p>
+          <strong>Tính điểm số mẫu (sample score) <em>s</em>.</strong>
+        </p>
+        <div class="math">s = |x| @ w     # shape [B_total]
+              # chiều embedding nào lớn + có trọng số cao → điểm cao</div>
+        <p>
+          Mỗi ảnh trong batch nhận một scalar score. Score cao nghĩa là embedding của ảnh đó
+          "kích hoạt mạnh" các chiều phân biệt nhất.
+        </p>
+      </li>
+
+      <li>
+        <p>
+          <strong>Backprop gradient của <em>s</em> về feature map.</strong>
+          Giống GradCAM, ta tính gradient của score theo feature map cuối (không cần zero_grad
+          vì chạy trong context gradient bình thường):
+        </p>
+        <div class="math">feats  = A[-1]                         # [B_total, C, h, w]
+grads  = ∂s / ∂feats                   # [B_total, C, h, w]
+weights = mean(grads, dim=(H, W))       # [B_total, C]  – global average pooling</div>
+      </li>
+
+      <li>
+        <p>
+          <strong>Tính Class Activation Map (CAM) <em>M</em>.</strong>
+        </p>
+        <div class="math">M = weights ⊗ feats     # weighted sum over channels
+  = Σ_c weights[c] * feats[c, :, :]   # → [B_total, 1, h, w]
+
+M = ReLU(M)            # giữ lại đóng góp dương
+M = upsample(M, (H,W)) # bilinear nội suy về kích thước ảnh gốc
+M = M.squeeze(1)       # → [B_total, H, W]</div>
+      </li>
+
+      <li>
+        <p>
+          <strong>Trả về saliency map cho tất cả ảnh đầu vào.</strong>
+          Output có shape <code>[B_total, H, W]</code> trong đó:
+          <code>M[0]</code> là map của query, <code>M[1]</code> của positive, <code>M[2]</code> của negative.
+        </p>
+      </li>
+
+    </ol>
+  </section>
+
+  <!-- ===== 4. Code thực tế ===== -->
+  <section>
+    <h2><span class="icon">💻</span> Code thực tế (rút gọn, có chú thích)</h2>
+    <pre><code><span class="kw">def</span> <span class="fn">forward</span>(self, x_q, x_p=<span class="kw">None</span>, x_n=<span class="kw">None</span>):
+    _, _, H, W = x_q.size()
+
+    <span class="cm"># 1. Concatenate tất cả ảnh thành một batch</span>
+    x = x_q
+    <span class="kw">if</span> x_p <span class="kw">is not None</span>: x = torch.cat((x, x_p))
+    <span class="kw">if</span> x_n <span class="kw">is not None</span>: x = torch.cat((x, x_n))
+
+    <span class="cm"># 2. Forward pass – thu feature map + embedding</span>
+    <span class="kw">if</span> self.use_forward_hook:
+        A = []
+        handle = self.feature_module.<span class="fn">register_forward_hook</span>(hook_fn)
+        x = self.<span class="fn">model</span>(x)
+        handle.<span class="fn">remove</span>()
+    <span class="kw">else</span>:
+        A, x = self.<span class="fn">extractor</span>(x)
+
+    <span class="cm"># 3. Tính trọng số w từ khoảng cách embedding</span>
+    x_norm = nn.functional.<span class="fn">normalize</span>(x.detach(), dim=<span class="num">1</span>)
+    w = torch.<span class="fn">abs</span>(x_norm[<span class="num">0</span>] - x_norm[<span class="num">1</span>:])   <span class="cm"># [N-1, D]</span>
+    <span class="kw">if</span> x_p <span class="kw">is not None</span>:
+        w[<span class="num">0</span>] = <span class="num">1</span> - w[<span class="num">0</span>]              <span class="cm"># đảo chiều positive</span>
+    w = torch.<span class="fn">prod</span>(w, dim=<span class="num">0</span>)          <span class="cm"># [D] – product qua tất cả ảnh</span>
+
+    <span class="cm"># 4. Điểm số mẫu: s = |embedding| · w</span>
+    s = torch.<span class="fn">matmul</span>(torch.<span class="fn">abs</span>(x), w)   <span class="cm"># [B_total]</span>
+
+    <span class="cm"># 5. Gradient của s w.r.t feature map</span>
+    feats = A[-<span class="num">1</span>]
+    grads = torch.autograd.<span class="fn">grad</span>(torch.<span class="fn">unbind</span>(s), feats)[<span class="num">0</span>]
+
+    <span class="kw">with</span> torch.no_grad():
+        <span class="cm"># 6. Global Average Pooling trên gradient</span>
+        weights = torch.<span class="fn">mean</span>(grads, dim=(<span class="num">2</span>, <span class="num">3</span>))   <span class="cm"># [B, C]</span>
+
+        <span class="cm"># 7. Weighted sum → CAM</span>
+        M = torch.<span class="fn">bmm</span>(weights.unsqueeze(<span class="num">1</span>),
+                        feats.reshape(feats.shape[<span class="num">0</span>], feats.shape[<span class="num">1</span>], -<span class="num">1</span>))
+        M = M.reshape(feats.shape[<span class="num">0</span>], <span class="num">1</span>, feats.shape[<span class="num">2</span>], feats.shape[<span class="num">3</span>])
+
+        <span class="cm"># 8. ReLU + upsample</span>
+        M = M.<span class="fn">clamp</span>(min=<span class="num">0</span>)
+        M = nn.functional.<span class="fn">interpolate</span>(M, size=(H, W), mode=<span class="str">'bilinear'</span>)
+        M = M.squeeze(<span class="num">1</span>)   <span class="cm"># [B_total, H, W]</span>
+
+    <span class="kw">return</span> M
+</code></pre>
+  </section>
+
+  <!-- ===== 5. So sánh với GradCAM truyền thống ===== -->
+  <section>
+    <h2><span class="icon">📊</span> So sánh SimAtt vs. GradCAM truyền thống</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Tiêu chí</th>
+          <th>GradCAM (classification)</th>
+          <th>SimAtt (retrieval)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Mục tiêu gradient</strong></td>
+          <td>Class logit <em>y_c</em></td>
+          <td>Similarity score <em>s = |x| · w</em></td>
+        </tr>
+        <tr>
+          <td><strong>Nguồn "nhãn"</strong></td>
+          <td>Class label rời rạc</td>
+          <td>Cặp / bộ ảnh tương đồng (Siamese / Triplet)</td>
+        </tr>
+        <tr>
+          <td><strong>Số ảnh đầu vào</strong></td>
+          <td>1 ảnh</td>
+          <td>2–4 ảnh (query + pos + neg…)</td>
+        </tr>
+        <tr>
+          <td><strong>Ý nghĩa map</strong></td>
+          <td>Vùng kích hoạt lớp cuối cho class <em>c</em></td>
+          <td>Vùng quyết định sự giống / khác nhau giữa các ảnh</td>
+        </tr>
+        <tr>
+          <td><strong>Output</strong></td>
+          <td>1 map / ảnh</td>
+          <td>1 map / ảnh cho tất cả ảnh trong batch</td>
+        </tr>
+        <tr>
+          <td><strong>Cần nhãn lớp?</strong></td>
+          <td>Có</td>
+          <td>Không – chỉ cần cặp tương đồng</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ===== 6. Trực giác toán học ===== -->
+  <section>
+    <h2><span class="icon">🧮</span> Trực giác toán học</h2>
+    <p>
+      Gọi embedding query là <strong>e_q</strong>, positive là <strong>e_p</strong>, negative là <strong>e_n</strong>.
+      Sau L2-normalize:
+    </p>
+    <div class="math">w_d  =  |e_q[d] - e_p[d]|   (gần nhau → nhỏ → sau đảo: 1 - nhỏ = lớn)
+         ×  |e_q[d] - e_n[d]|   (xa nhau → lớn)
+
+⇒  w_d  lớn  khi chiều d  ĐỒng thời:
+       • gần  query–positive  (tương đồng thực sự)
+       • xa   query–negative  (phân biệt rõ)
+
+s_i  =  Σ_d |e_i[d]| · w_d
+
+⇒  s_i lớn  khi ảnh i kích hoạt mạnh các chiều discriminative</div>
+    <p>
+      Gradient <code>∂s/∂feats</code> sau đó cho biết vùng không gian nào trong feature map
+      <em>đóng góp nhiều nhất</em> vào các chiều discriminative đó.
+    </p>
+    <div class="note">
+      <strong>Lưu ý:</strong> SimAtt <em>không cần</em> threshold khoảng cách hay negative mining
+      ở thời điểm inference – toàn bộ logic phân biệt nằm trong vector <code>w</code>
+      được tính on-the-fly từ embedding.
+    </div>
+  </section>
+
+  <!-- ===== 7. Cấu hình sử dụng ===== -->
+  <section>
+    <h2><span class="icon">🛠️</span> Các chế độ sử dụng</h2>
+    <table>
+      <thead>
+        <tr><th>Cấu hình</th><th>Đầu vào</th><th>Tác dụng của <code>w</code></th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Siamese (+)</td>
+          <td>query, positive</td>
+          <td>Vùng <em>giống nhau</em> giữa cặp ảnh (w đảo ngược → chiều gần = cao)</td>
+        </tr>
+        <tr>
+          <td>Siamese (−)</td>
+          <td>query, negative</td>
+          <td>Vùng <em>khác nhau</em> giữa cặp ảnh</td>
+        </tr>
+        <tr>
+          <td>Triplet</td>
+          <td>query, positive, negative</td>
+          <td>Vùng phân biệt pos vs. neg theo quan điểm của query</td>
+        </tr>
+        <tr>
+          <td>Quadruplet</td>
+          <td>query, positive, neg1, neg2</td>
+          <td>Tổng hợp nhiều chiều phân biệt hơn (product tất cả w)</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="note">
+      <strong>Feature extraction:</strong> nếu <code>target_layers=None</code>, SimAtt dùng forward hook
+      thẳng trên <code>feature_module</code> (hỗ trợ nested backbone như ViT, DenseNet…).
+      Nếu truyền <code>target_layers</code> cụ thể, dùng <code>ModelOutputs</code> extractor.
+    </div>
+  </section>
+
+  <!-- ===== 8. Hạn chế ===== -->
+  <section>
+    <h2><span class="icon">⚠️</span> Hạn chế cần lưu ý</h2>
+    <ul style="margin-left:1.2rem;color:var(--muted)">
+      <li style="margin-bottom:0.5rem">
+        <strong style="color:var(--text)">Cần gradient thực sự:</strong>
+        SimAtt phải gọi <code>torch.autograd.grad</code> nên không chạy trong <code>torch.no_grad()</code>
+        ở bước tính score. Feature map phải có <code>requires_grad=True</code>.
+      </li>
+      <li style="margin-bottom:0.5rem">
+        <strong style="color:var(--text)">Phụ thuộc vào chất lượng embedding:</strong>
+        Nếu metric learning chưa hội tụ, vector <code>w</code> không phản ánh đúng các chiều discriminative.
+      </li>
+      <li style="margin-bottom:0.5rem">
+        <strong style="color:var(--text)">Spatial resolution thấp:</strong>
+        Như GradCAM, map được upsample từ feature map nhỏ → có thể bị mờ với ảnh độ phân giải cao.
+        Các phương pháp như GradCAM++ hoặc Score-CAM có thể cải thiện điều này.
+      </li>
+      <li>
+        <strong style="color:var(--text)">Product w dễ bị triệt tiêu:</strong>
+        Nếu nhiều ảnh negative có embedding gần query ở những chiều khác nhau,
+        product của tất cả <code>|w_i|</code> dễ ra vector gần 0.
+      </li>
+    </ul>
+  </section>
+
+  <footer>
+    <p>SimAtt · <code>explanations.py</code> · Image Retrieval Thesis 2026</p>
+  </footer>
+
+</div>
+</body>
+</html>
