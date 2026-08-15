@@ -235,29 +235,17 @@ def load_dataset(dataset: str, data_dir: str, image_list: str, transform):
     return image_paths, labels, label_names
 
 
-def pick_query_indices(labels, n_queries: int = 3):
+def select_query_indices(labels, num_queries: int = -1):
     """
-    Pick n_queries indices, preferring one per class.
-    Falls back to first n_queries images if not enough classes.
+    Select which dataset indices to use as queries.
+
+    If num_queries is None or <= 0, every image in the dataset is used as a
+    query (full-dataset retrieval evaluation). Otherwise, only the first
+    `num_queries` images are used (useful for quick smoke tests).
     """
-    class_to_idx = {}
-    for i, lbl in enumerate(labels):
-        lbl_key = int(lbl) if not isinstance(lbl, (list, np.ndarray)) else tuple(lbl.tolist())
-        if lbl_key not in class_to_idx:
-            class_to_idx[lbl_key] = i
-
-    indices = list(class_to_idx.values())[:n_queries]
-
-    # Pad with sequential indices if we have fewer classes than requested
-    if len(indices) < n_queries:
-        used = set(indices)
-        for i in range(len(labels)):
-            if i not in used:
-                indices.append(i)
-            if len(indices) == n_queries:
-                break
-
-    return indices[:n_queries]
+    if num_queries is None or num_queries <= 0:
+        return list(range(len(labels)))
+    return list(range(min(num_queries, len(labels))))
 
 
 # ---------------------------------------------------------------------------
@@ -625,8 +613,8 @@ def run_inference(args):
     print(f"  Embeddings shape: {embeddings.shape}")
 
     # ---- Query selection ----
-    query_indices = pick_query_indices(labels, n_queries=args.num_queries)
-    print(f"  Query indices: {query_indices}")
+    query_indices = select_query_indices(labels, num_queries=args.num_queries)
+    print(f"  Running inference on {len(query_indices)} / {len(image_paths)} images as queries.")
 
     # ---- Per-query inference ----
     os.makedirs(args.output_dir, exist_ok=True)
@@ -665,8 +653,10 @@ def run_inference(args):
         else:
             query_sal, ret_sals = compute_simatt(explainer, q_tensor, ret_tensors, device)
 
-        # Figure base name includes model + explainer so runs don't overwrite each other
-        base = f"{args.dataset}_{args.model_type}_{args.explainer}_query{q_rank + 1:02d}"
+        # Figure base name includes model + explainer + source image, so runs
+        # over the full dataset don't overwrite each other.
+        img_stem = os.path.splitext(os.path.basename(q_path))[0]
+        base = f"{args.dataset}_{args.model_type}_{args.explainer}_{img_stem}"
 
         # Figure 1 — retrieval grid
         plot_retrieval_figure(
@@ -749,8 +739,13 @@ def parse_args():
         help="Optional projection embedding dimension (None = backbone default)",
     )
     parser.add_argument(
-        "--num_queries", type=int, default=3,
-        help="Number of query images to run (default: 3)",
+        "--num_queries", type=int, default=-1,
+        help=(
+            "Number of query images to process. Default: -1, meaning every "
+            "image in the dataset is used as a query (full retrieval + XAI "
+            "evaluation). Set to a positive integer to limit to the first N "
+            "images (useful for quick smoke tests)."
+        ),
     )
     parser.add_argument(
         "--top_k", type=int, default=5,
