@@ -80,6 +80,13 @@ VINDR_DISEASE_COLS = [
     "Tuberculosis", "Other diseases", "No finding",
 ]
 
+# The "healthy / no-disease" label per dataset — excluded by --sick_only
+NORMAL_LABEL_BY_DATASET = {
+    "covid": 0,    # Normal
+    "tbx11k": 1,   # Healthy
+    "vindr": 5,    # No finding
+}
+
 # ---------------------------------------------------------------------------
 # Model + transform + explainer builders
 # ---------------------------------------------------------------------------
@@ -250,6 +257,27 @@ def select_query_indices(labels, num_queries: int = -1):
     if num_queries is None or num_queries <= 0:
         return list(range(len(labels)))
     return list(range(min(num_queries, len(labels))))
+
+
+def filter_sick_only(dataset: str, image_paths: list, labels: list, bboxes: list):
+    """
+    Drop images belonging to the dataset's healthy/no-disease class, so the
+    retrieval gallery (and query pool) only contains sick cases.
+    No-op for datasets not present in NORMAL_LABEL_BY_DATASET.
+    """
+    normal_label = NORMAL_LABEL_BY_DATASET.get(dataset)
+    if normal_label is None:
+        return image_paths, labels, bboxes
+
+    keep = [i for i, lbl in enumerate(labels) if int(lbl) != normal_label]
+    removed = len(labels) - len(keep)
+    print(f"  --sick_only: dropped {removed} healthy/normal images "
+          f"(label={normal_label}); {len(keep)} sick images remain.")
+
+    image_paths = [image_paths[i] for i in keep]
+    labels = [labels[i] for i in keep]
+    bboxes = [bboxes[i] for i in keep]
+    return image_paths, labels, bboxes
 
 
 # ---------------------------------------------------------------------------
@@ -488,7 +516,7 @@ def plot_retrieval_figure(
         ax.imshow(r_img)
         draw_bbox(ax, ret_bboxes[i] if ret_bboxes else None, r_img.size)
         ax.set_title(
-            f"Rank {i + 1}  {marker}\n• {label_str(rl, label_names)}\nsim={rs:.3f}",
+            f"Top-{i + 1}  {marker}\n• {label_str(rl, label_names)}\nsim={rs:.3f}",
             fontsize=9,
             color=border_color,
             fontweight="bold",
@@ -599,7 +627,7 @@ def plot_saliency_figure(
         ax.imshow(overlay_saliency(r_img, r_sal_resized))
         draw_bbox(ax, ret_bboxes[i] if ret_bboxes else None, r_img.size)
         ax.set_title(
-            f"Rank {i + 1}  {marker}  (saliency)\n• {label_str(rl, label_names)}\nsim={rs:.3f}",
+            f"Top-{i + 1}  {marker}  (saliency)\n• {label_str(rl, label_names)}\nsim={rs:.3f}",
             fontsize=9, color=border_color, fontweight="bold",
         )
         _add_border(ax, match)
@@ -636,8 +664,10 @@ def run_inference(args):
     print(f"Loading {args.model_type} from {args.model_weights}  (input={img_size}x{img_size}) ...")
     model = build_model(args.model_type, args.model_weights, args.embedding_dim, device)
     transform = build_transform(img_size)
-    print(f"Building {args.explainer.upper()} explainer ...")
-    explainer = build_explainer(model, args.model_type, args.explainer)
+    explainer = None
+    if not args.skip_saliency:
+        print(f"Building {args.explainer.upper()} explainer ...")
+        explainer = build_explainer(model, args.model_type, args.explainer)
 
     # ---- Dataset ----
     print(f"Loading dataset '{args.dataset}' ...")
@@ -645,6 +675,9 @@ def run_inference(args):
         args.dataset, args.data_dir, args.image_list, transform
     )
     print(f"  {len(image_paths)} images found.")
+
+    if args.sick_only:
+        image_paths, labels, bboxes = filter_sick_only(args.dataset, image_paths, labels, bboxes)
 
     if len(image_paths) == 0:
         print("[ERROR] No images found. Check --data_dir and --image_list.")
@@ -681,23 +714,6 @@ def run_inference(args):
 
         print(f"  Retrieved: {[os.path.basename(p) for p in ret_paths]}")
 
-        # Load tensors for saliency
-        q_tensor = transform(Image.open(q_path).convert("RGB"))
-        ret_tensors = []
-        for rp in ret_paths:
-            try:
-                ret_tensors.append(transform(Image.open(rp).convert("RGB")))
-            except Exception as exc:
-                print(f"  [WARN] {rp}: {exc}")
-                ret_tensors.append(torch.zeros(3, img_size, img_size))
-
-        # Saliency
-        print(f"  Computing {args.explainer.upper()} saliency ...")
-        if args.explainer == "simcam":
-            query_sal, ret_sals = compute_simcam(explainer, q_tensor, ret_tensors, device)
-        else:
-            query_sal, ret_sals = compute_simatt(explainer, q_tensor, ret_tensors, device)
-
         # Figure base name includes model + explainer + source image, so runs
         # over the full dataset don't overwrite each other.
         img_stem = os.path.splitext(os.path.basename(q_path))[0]
@@ -717,6 +733,26 @@ def run_inference(args):
             query_bbox=q_bbox,
             ret_bboxes=ret_bboxes,
         )
+
+        if args.skip_saliency:
+            continue
+
+        # Load tensors for saliency
+        q_tensor = transform(Image.open(q_path).convert("RGB"))
+        ret_tensors = []
+        for rp in ret_paths:
+            try:
+                ret_tensors.append(transform(Image.open(rp).convert("RGB")))
+            except Exception as exc:
+                print(f"  [WARN] {rp}: {exc}")
+                ret_tensors.append(torch.zeros(3, img_size, img_size))
+
+        # Saliency
+        print(f"  Computing {args.explainer.upper()} saliency ...")
+        if args.explainer == "simcam":
+            query_sal, ret_sals = compute_simcam(explainer, q_tensor, ret_tensors, device)
+        else:
+            query_sal, ret_sals = compute_simatt(explainer, q_tensor, ret_tensors, device)
 
         # Figure 2 — saliency grid
         plot_saliency_figure(
@@ -803,6 +839,19 @@ def parse_args():
     parser.add_argument(
         "--batch_size", type=int, default=32,
         help="Batch size for embedding extraction",
+    )
+    parser.add_argument(
+        "--sick_only", action="store_true",
+        help=(
+            "Exclude the healthy/no-disease class from both the query pool "
+            "and the retrieval gallery (Normal for covid, Healthy for tbx11k, "
+            "No finding for vindr)."
+        ),
+    )
+    parser.add_argument(
+        "--skip_saliency", action="store_true",
+        help="Only produce the retrieval grid figure; skip building the XAI "
+             "explainer and generating the saliency overlay figure.",
     )
     return parser.parse_args()
 
