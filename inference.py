@@ -3,7 +3,7 @@ inference.py — Multi-model retrieval + XAI saliency inference
 
 Supported models  : convnextv2 | convnextv2_sra | densenet121 | resnet50
 Supported XAI     : simcam | simatt
-Supported datasets: covid | tbx11k | vindr
+Supported datasets: covid | tbx11k | vindr | isic
 
 For each run:
   - Selects 3 query images (one per class when possible)
@@ -40,6 +40,15 @@ Usage examples:
       --image_list /path/to/image_labels_test_vindr.csv \
       --model_weights /path/to/convnextv2_sra.pth \
       --output_dir ./results/vindr_convnextv2sra_simatt
+
+    # ConvNeXtV2 + SimCAM on ISIC (skin lesions)
+    python inference.py \
+      --model_type convnextv2 --explainer simcam \
+      --dataset isic \
+      --data_dir /path/to/isic/images \
+      --image_list /path/to/ISIC-2017_Test_v2_Part3_GroundTruth_balanced.csv \
+      --model_weights /path/to/convnextv2.pth \
+      --output_dir ./results/isic_convnextv2_simcam
 """
 
 import argparse
@@ -59,7 +68,7 @@ import matplotlib.patches as mpatches
 
 from model import ConvNeXtV2, ConvNeXtV2_SRA, DenseNet121, ResNet50
 from explanations import SimCAM, SimAtt
-from read_data import ChestXrayDataSet, TBX11kDataSet, VINDRDataSet
+from read_data import ChestXrayDataSet, TBX11kDataSet, VINDRDataSet, ISICDataSet
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -72,6 +81,7 @@ DATASET_LABEL_NAMES = {
         0: "COPD", 1: "Lung tumor", 2: "Pneumonia",
         3: "Tuberculosis", 4: "Other diseases", 5: "No finding",
     },
+    "isic": {0: "Nevus", 1: "Seborrheic keratosis", 2: "Melanoma"},
 }
 
 # VinDR 6 disease label columns (as in VINDRDataSet)
@@ -85,6 +95,7 @@ NORMAL_LABEL_BY_DATASET = {
     "covid": 0,    # Normal
     "tbx11k": 1,   # Healthy
     "vindr": 5,    # No finding
+    "isic": 0,     # Nevus (benign)
 }
 
 # ---------------------------------------------------------------------------
@@ -238,6 +249,18 @@ def load_dataset(dataset: str, data_dir: str, image_list: str, transform):
                     break
             labels.append(lbl)
         label_names = DATASET_LABEL_NAMES["vindr"]
+        bboxes = [None] * len(image_paths)
+
+    elif dataset == "isic":
+        ds = ISICDataSet(
+            data_dir=data_dir,
+            image_list_file=image_list,
+            transform=transform,
+        )
+        # image_names are full paths; labels are ints 0=Nevus/1=SebK/2=Melanoma
+        image_paths = ds.image_names
+        labels = ds.labels
+        label_names = DATASET_LABEL_NAMES["isic"]
         bboxes = [None] * len(image_paths)
 
     else:
@@ -796,7 +819,7 @@ def parse_args():
     )
     parser.add_argument(
         "--dataset", required=True,
-        choices=["covid", "tbx11k", "vindr"],
+        choices=["covid", "tbx11k", "vindr", "isic"],
         help="Dataset to run inference on",
     )
     parser.add_argument(
@@ -808,7 +831,8 @@ def parse_args():
         help=(
             "For covid: text file with '<id> <path> <label>' lines. "
             "For tbx11k: CSV with fname/image_type columns. "
-            "For vindr: CSV with image_id and disease label columns."
+            "For vindr: CSV with image_id and disease label columns. "
+            "For isic: CSV with image_id/melanoma/seborrheic_keratosis columns."
         ),
     )
     parser.add_argument(
