@@ -15,22 +15,26 @@ thousands of PNGs):
         pattern="vindr_convnextv2_sra_simatt_*_retrieval.png",
         max_queries=5,
     )
+
+Note: this embeds the already-saved PNG files directly via IPython.display,
+rather than re-plotting them with matplotlib. That avoids a common Kaggle
+gotcha where the active matplotlib backend (e.g. the ipympl/widget backend)
+renders figures as a plain "Figure(WxH)" placeholder instead of an image.
 """
 
 import glob
 import os
 
-import matplotlib.pyplot as plt
-from PIL import Image
+from IPython.display import display, HTML, Image as IPyImage
 
 
-def show_results(output_dir, pattern="*_retrieval.png", max_queries=10, figsize_scale=3):
+def show_results(output_dir, pattern="*_retrieval.png", max_queries=10):
     """
-    Display retrieval + saliency (XAI) figure pairs produced by inference.py.
+    Display retrieval + saliency (XAI) figures produced by inference.py.
 
     For each "<base>_retrieval.png" found in `output_dir` (matching `pattern`),
     also looks for the matching "<base>_saliency.png" and displays both,
-    stacked vertically, inline in the notebook.
+    inline in the notebook.
 
     Args:
         output_dir: directory containing inference.py PNG outputs.
@@ -38,7 +42,6 @@ def show_results(output_dir, pattern="*_retrieval.png", max_queries=10, figsize_
             figures, e.g. "covid_convnextv2_simcam_*_retrieval.png" to filter
             to one dataset/model/explainer combination.
         max_queries: max number of query results to render (<=0 = no limit).
-        figsize_scale: inches of height per stacked row.
     """
     retrieval_paths = sorted(glob.glob(os.path.join(output_dir, pattern)))
     if not retrieval_paths:
@@ -53,33 +56,33 @@ def show_results(output_dir, pattern="*_retrieval.png", max_queries=10, figsize_
     for ret_path in retrieval_paths:
         sal_path = ret_path.replace("_retrieval.png", "_saliency.png")
         base_name = os.path.basename(ret_path).replace("_retrieval.png", "")
-        has_sal = os.path.isfile(sal_path)
-        n_rows = 2 if has_sal else 1
 
-        fig, axes = plt.subplots(n_rows, 1, figsize=(14, figsize_scale * n_rows))
-        axes = [axes] if n_rows == 1 else axes
+        display(HTML(f"<b>{base_name} — retrieval</b>"))
+        display(IPyImage(filename=ret_path))
 
-        axes[0].imshow(Image.open(ret_path))
-        axes[0].axis("off")
-        axes[0].set_title(f"{base_name} — retrieval", fontsize=10)
-
-        if has_sal:
-            axes[1].imshow(Image.open(sal_path))
-            axes[1].axis("off")
-            axes[1].set_title(f"{base_name} — saliency (XAI)", fontsize=10)
-        else:
-            print(f"  [WARN] No saliency figure found for {base_name}")
-
-        plt.tight_layout()
-        plt.show()
+        if os.path.isfile(sal_path):
+            display(HTML(f"<b>{base_name} — saliency (XAI)</b>"))
+            display(IPyImage(filename=sal_path))
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Display inference.py results in a notebook/CLI")
+    parser = argparse.ArgumentParser(description="List (and optionally open) inference.py result PNGs")
     parser.add_argument("output_dir", help="Directory with inference.py PNG outputs")
     parser.add_argument("--pattern", default="*_retrieval.png", help="Glob pattern for retrieval figures")
-    parser.add_argument("--max_queries", type=int, default=10, help="Max results to display (<=0 = all)")
+    parser.add_argument("--max_queries", type=int, default=10, help="Max results to list/open (<=0 = all)")
+    parser.add_argument("--open", action="store_true", help="Open each matching PNG in the system image viewer")
     args = parser.parse_args()
-    show_results(args.output_dir, pattern=args.pattern, max_queries=args.max_queries)
+
+    paths = sorted(glob.glob(os.path.join(args.output_dir, args.pattern)))
+    if args.max_queries > 0:
+        paths = paths[: args.max_queries]
+    if not paths:
+        print(f"[WARN] No files matching '{args.pattern}' found in {args.output_dir}")
+    for p in paths:
+        print(p)
+        if args.open:
+            from PIL import Image
+            Image.open(p).show()
+
