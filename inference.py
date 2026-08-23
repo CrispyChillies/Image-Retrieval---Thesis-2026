@@ -90,6 +90,22 @@ VINDR_DISEASE_COLS = [
     "Tuberculosis", "Other diseases", "No finding",
 ]
 
+# 2-character codes for VinDR's 6 disease labels — used in panel captions so a
+# multi-label image (several concurrent diseases) doesn't overflow the figure.
+VINDR_LABEL_CODES = {
+    0: "CO",  # COPD
+    1: "LT",  # Lung tumor
+    2: "PN",  # Pneumonia
+    3: "TB",  # Tuberculosis
+    4: "OD",  # Other diseases
+    5: "NF",  # No finding
+}
+
+# Per-dataset 2-char code table (only set for multi-label datasets that need it)
+DATASET_LABEL_CODES = {
+    "vindr": VINDR_LABEL_CODES,
+}
+
 # The "healthy / no-disease" label per dataset — excluded by --sick_only
 NORMAL_LABEL_BY_DATASET = {
     "covid": 0,    # Normal
@@ -233,7 +249,8 @@ def load_dataset(dataset: str, data_dir: str, image_list: str, transform):
         if "Other disease" in df.columns and "Other diseases" not in df.columns:
             df = df.rename(columns={"Other disease": "Other diseases"})
 
-        # Build image_paths and single-label (dominant disease) for display
+        # Build image_paths and full multi-hot label vectors (an image can have
+        # several concurrent diseases — this is a multi-label dataset).
         image_paths, labels = [], []
         for _, row in df.iterrows():
             img_id = row["image_id"]
@@ -241,13 +258,12 @@ def load_dataset(dataset: str, data_dir: str, image_list: str, transform):
             if not os.path.isfile(img_path):
                 continue
             image_paths.append(img_path)
-            # Dominant label = first active disease column (or "No finding")
-            lbl = 5  # default No finding
-            for idx, col in enumerate(VINDR_DISEASE_COLS):
-                if col in df.columns and row.get(col, 0) == 1:
-                    lbl = idx
-                    break
-            labels.append(lbl)
+            multi_hot = np.array(
+                [int(row.get(col, 0)) for col in VINDR_DISEASE_COLS], dtype=np.int64
+            )
+            if not multi_hot.any():
+                multi_hot[5] = 1  # No finding
+            labels.append(multi_hot)
         label_names = DATASET_LABEL_NAMES["vindr"]
         bboxes = [None] * len(image_paths)
 
@@ -292,7 +308,12 @@ def filter_sick_only(dataset: str, image_paths: list, labels: list, bboxes: list
     if normal_label is None:
         return image_paths, labels, bboxes
 
-    keep = [i for i, lbl in enumerate(labels) if int(lbl) != normal_label]
+    def _is_normal(lbl) -> bool:
+        if isinstance(lbl, (list, np.ndarray)):
+            return bool(np.asarray(lbl)[normal_label])
+        return int(lbl) == normal_label
+
+    keep = [i for i, lbl in enumerate(labels) if not _is_normal(lbl)]
     removed = len(labels) - len(keep)
     print(f"  --sick_only: dropped {removed} healthy/normal images "
           f"(label={normal_label}); {len(keep)} sick images remain.")
@@ -434,6 +455,27 @@ def label_str(lbl, label_names: dict) -> str:
     return label_names.get(int(lbl), str(lbl))
 
 
+def label_caption(lbl, label_names: dict, label_codes: dict = None) -> str:
+    """
+    Compact panel caption: "<n> label(s): CODE1+CODE2+...".
+
+    Uses 2-char codes (from `label_codes`) instead of full label names so a
+    multi-label image (several concurrent diseases, e.g. VinDR) doesn't
+    overflow the figure. Falls back to the plain label_str() when no code
+    table is given (single-label datasets never need to abbreviate).
+    """
+    if label_codes is None:
+        return label_str(lbl, label_names)
+
+    if isinstance(lbl, (list, np.ndarray)):
+        active_idx = [i for i, v in enumerate(lbl) if v]
+        codes = [label_codes.get(i, str(i)) for i in active_idx]
+        n = len(active_idx)
+        return f"{n} label{'s' if n != 1 else ''}: {'+'.join(codes)}" if codes else "0 labels"
+
+    return f"1 label: {label_codes.get(int(lbl), str(lbl))}"
+
+
 def labels_match(q_lbl, r_lbl) -> bool:
     """Return True when query and retrieved image share at least one class."""
     if isinstance(q_lbl, (list, np.ndarray)) and isinstance(r_lbl, (list, np.ndarray)):
@@ -491,10 +533,15 @@ def plot_retrieval_figure(
     query_rank: int,
     query_bbox: dict = None,
     ret_bboxes: list = None,
+    label_codes: dict = None,
 ):
     """
     Figure 1: query image (left) + 5 retrieved images.
     Layout: 1 row × 6 columns.
+
+    `label_codes` (optional): dict of 2-char abbreviations used for the panel
+    captions instead of full label names — needed for multi-label datasets
+    (e.g. VinDR) so several concurrent labels don't overflow the figure.
     """
     n_ret = len(ret_paths)
     fig, axes = plt.subplots(1, n_ret + 1, figsize=(4 * (n_ret + 1), 5.5))
@@ -509,7 +556,7 @@ def plot_retrieval_figure(
     ax.imshow(q_img)
     draw_bbox(ax, query_bbox, q_img.size)
     ax.set_title(
-        f"QUERY\n• {label_str(query_label, label_names)}",
+        f"QUERY\n• {label_caption(query_label, label_names, label_codes)}",
         fontsize=9, fontweight="bold",
     )
     # Neutral blue border for query
@@ -521,7 +568,7 @@ def plot_retrieval_figure(
 
     # Add query label as text box on the image
     ax.text(
-        0.5, 0.02, label_str(query_label, label_names),
+        0.5, 0.02, label_caption(query_label, label_names, label_codes),
         transform=ax.transAxes, fontsize=8, color="white", fontweight="bold",
         ha="center", va="bottom",
         bbox=dict(boxstyle="round,pad=0.3", facecolor="#0074d9", alpha=0.8),
@@ -532,14 +579,13 @@ def plot_retrieval_figure(
         match = labels_match(query_label, rl)
         marker = "\u2713" if match else "\u2717"   # ✓ / ✗
         border_color = "#2ecc40" if match else "#ff4136"
-        label_color = "#2ecc40" if match else "#ff4136"
 
         ax = axes[i + 1]
         r_img = load_display_image(rp)
         ax.imshow(r_img)
         draw_bbox(ax, ret_bboxes[i] if ret_bboxes else None, r_img.size)
         ax.set_title(
-            f"Top-{i + 1}  {marker}\n• {label_str(rl, label_names)}\nsim={rs:.3f}",
+            f"Top-{i + 1}  {marker}\n• {label_caption(rl, label_names, label_codes)}\nsim={rs:.3f}",
             fontsize=9,
             color=border_color,
             fontweight="bold",
@@ -549,7 +595,7 @@ def plot_retrieval_figure(
 
         # Add retrieved label as text box on the image
         ax.text(
-            0.5, 0.02, f"{marker} {label_str(rl, label_names)}",
+            0.5, 0.02, f"{marker} {label_caption(rl, label_names, label_codes)}",
             transform=ax.transAxes, fontsize=8, color="white", fontweight="bold",
             ha="center", va="bottom",
             bbox=dict(boxstyle="round,pad=0.3", facecolor=border_color, alpha=0.85),
@@ -595,6 +641,7 @@ def plot_saliency_figure(
     explainer_name: str = "SimCAM",
     query_bbox: dict = None,
     ret_bboxes: list = None,
+    label_codes: dict = None,
 ):
     """
     Figure 2: saliency overlay on query (left) + saliency overlay on each retrieved image.
@@ -619,7 +666,7 @@ def plot_saliency_figure(
     ax.imshow(overlay_saliency(q_img, q_sal_resized))
     draw_bbox(ax, query_bbox, q_img.size)
     ax.set_title(
-        f"QUERY (saliency)\n• {label_str(query_label, label_names)}",
+        f"QUERY (saliency)\n• {label_caption(query_label, label_names, label_codes)}",
         fontsize=9, fontweight="bold",
     )
     for spine in ax.spines.values():
@@ -628,7 +675,7 @@ def plot_saliency_figure(
         spine.set_linewidth(5)
     ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
     ax.text(
-        0.5, 0.02, label_str(query_label, label_names),
+        0.5, 0.02, label_caption(query_label, label_names, label_codes),
         transform=ax.transAxes, fontsize=8, color="white", fontweight="bold",
         ha="center", va="bottom",
         bbox=dict(boxstyle="round,pad=0.3", facecolor="#0074d9", alpha=0.8),
@@ -650,13 +697,13 @@ def plot_saliency_figure(
         ax.imshow(overlay_saliency(r_img, r_sal_resized))
         draw_bbox(ax, ret_bboxes[i] if ret_bboxes else None, r_img.size)
         ax.set_title(
-            f"Top-{i + 1}  {marker}  (saliency)\n• {label_str(rl, label_names)}\nsim={rs:.3f}",
+            f"Top-{i + 1}  {marker}  (saliency)\n• {label_caption(rl, label_names, label_codes)}\nsim={rs:.3f}",
             fontsize=9, color=border_color, fontweight="bold",
         )
         _add_border(ax, match)
         ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
         ax.text(
-            0.5, 0.02, f"{marker} {label_str(rl, label_names)}",
+            0.5, 0.02, f"{marker} {label_caption(rl, label_names, label_codes)}",
             transform=ax.transAxes, fontsize=8, color="white", fontweight="bold",
             ha="center", va="bottom",
             bbox=dict(boxstyle="round,pad=0.3", facecolor=border_color, alpha=0.85),
@@ -715,6 +762,10 @@ def run_inference(args):
     query_indices = select_query_indices(labels, num_queries=args.num_queries)
     print(f"  Running inference on {len(query_indices)} / {len(image_paths)} images as queries.")
 
+    # 2-char label codes (only set for multi-label datasets like VinDR) so
+    # panel captions don't overflow when several labels are active at once.
+    label_codes = DATASET_LABEL_CODES.get(args.dataset)
+
     # ---- Per-query inference ----
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -755,6 +806,7 @@ def run_inference(args):
             query_rank=q_rank,
             query_bbox=q_bbox,
             ret_bboxes=ret_bboxes,
+            label_codes=label_codes,
         )
 
         if args.skip_saliency:
@@ -794,6 +846,7 @@ def run_inference(args):
             explainer_name=args.explainer.upper(),
             query_bbox=q_bbox,
             ret_bboxes=ret_bboxes,
+            label_codes=label_codes,
         )
 
     print(f"\nDone. All results saved to: {args.output_dir}")
