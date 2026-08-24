@@ -14,10 +14,13 @@ things happen in one run:
     score (hit_rate desc, then normalized distance asc) — i.e. the queries
     whose saliency maps most reliably land on the bbox across all of their
     retrieved images — and the best --num_queries of them are rendered as
-    large, single combined figures: 1 query panel + top_k retrieved panels,
-    each retrieved panel showing the SimAtt saliency overlay, the
-    ground-truth bbox (lime/yellow), the max-saliency point (red x), and a
-    green/red border for pointing-game hit/miss.
+    large combined figures, one row per retrieved image (rank 1..top_k),
+    3 columns per row:
+      [1] query image (+ its own ground-truth bbox)
+      [2] retrieved image + ground-truth bbox + max-saliency point (no heatmap)
+      [3] retrieved image + saliency heatmap + ground-truth bbox + max-saliency point
+    Border color is green/red per pointing-game hit/miss for that retrieved
+    image. A top_k=3 run therefore produces 3 rows x 3 columns per figure.
 
 Works for --dataset tbx11k and --dataset vindr. Explainer is always SimAtt
 (the same localization metric evaluate_PG_RSME.py uses), open for reuse by
@@ -129,59 +132,81 @@ def draw_gt_bboxes(ax, item, matched_idx=None):
 
 
 def plot_query_showcase(model_type, query_item, entries, saliencies, out_path, dpi):
+    """
+    One row per retrieved image (rank 1..k), 3 columns:
+      [0] query image (+ its own GT bbox)
+      [1] retrieved image + GT bbox + max-saliency point (no heatmap)
+      [2] retrieved image + saliency heatmap + GT bbox + max-saliency point
+    """
     k = len(entries)
-    fig, axes = plt.subplots(1, k + 1, figsize=(7.5 * (k + 1), 8.5))
+    fig, axes = plt.subplots(k, 3, figsize=(21, 6.5 * k), squeeze=False)
 
-    # --- Query panel ---
-    ax = axes[0]
     q_img = Image.open(query_item["image_path"]).convert("RGB")
-    ax.imshow(q_img)
-    draw_gt_bboxes(ax, query_item)
-    draw_border(ax, q_img.size, "#0074d9")
-    ax.set_title(f"QUERY\n{query_item['fname']}", fontsize=13, fontweight="bold")
-    ax.axis("off")
 
-    # --- Retrieved panels ---
     for i, (result, saliency) in enumerate(zip(entries, saliencies)):
         retrieved_item = result["_retrieved_item"]
         r_img = Image.open(retrieved_item["image_path"]).convert("RGB")
         overlay = resize_saliency_to_image(saliency, r_img.size)
 
-        ax = axes[i + 1]
-        ax.imshow(r_img)
-        ax.imshow(overlay, cmap="jet", alpha=0.45)
-        draw_gt_bboxes(ax, retrieved_item, matched_idx=result["matched_bbox_index"])
-        ax.scatter([result["peak_x"]], [result["peak_y"]], s=140, c="red", marker="x", linewidths=3)
-
         hit = result["pg_hit"]
         marker = "✓ HIT" if hit else "✗ MISS"
         border_color = "#2ecc40" if hit else "#ff4136"
-        draw_border(ax, r_img.size, border_color)
-        ax.set_title(
-            f"Top-{result['retrieval_rank']}  {marker}\n"
-            f"sim={result['query_retrieved_similarity']:.3f}  dist={result['distance_px']:.1f}px",
-            fontsize=12, color=border_color, fontweight="bold",
+
+        # --- Column 0: query image ---
+        ax_q = axes[i][0]
+        ax_q.imshow(q_img)
+        draw_gt_bboxes(ax_q, query_item)
+        draw_border(ax_q, q_img.size, "#0074d9")
+        ax_q.set_title(
+            "Query image" if i == 0 else "", fontsize=15, fontweight="bold",
         )
-        ax.axis("off")
+        ax_q.axis("off")
+
+        # --- Column 1: retrieved image + bbox + peak (no heatmap) ---
+        ax_r = axes[i][1]
+        ax_r.imshow(r_img)
+        draw_gt_bboxes(ax_r, retrieved_item, matched_idx=result["matched_bbox_index"])
+        ax_r.scatter([result["peak_x"]], [result["peak_y"]], s=140, c="red", marker="x", linewidths=3)
+        draw_border(ax_r, r_img.size, border_color)
+        ax_r.set_title(
+            f"Retrieved image — Top-{result['retrieval_rank']}  {marker}\n"
+            f"sim={result['query_retrieved_similarity']:.3f}",
+            fontsize=13, color=border_color, fontweight="bold",
+        )
+        ax_r.axis("off")
+
+        # --- Column 2: retrieved image + saliency heatmap + bbox + peak ---
+        ax_s = axes[i][2]
+        ax_s.imshow(r_img)
+        ax_s.imshow(overlay, cmap="jet", alpha=0.5)
+        draw_gt_bboxes(ax_s, retrieved_item, matched_idx=result["matched_bbox_index"])
+        ax_s.scatter([result["peak_x"]], [result["peak_y"]], s=140, c="red", marker="x", linewidths=3)
+        draw_border(ax_s, r_img.size, border_color)
+        ax_s.set_title(
+            f"Saliency heatmap + lesion box\ndist={result['distance_px']:.1f}px",
+            fontsize=13, color=border_color, fontweight="bold",
+        )
+        ax_s.axis("off")
 
     hits = sum(1 for r in entries if r["pg_hit"])
     mean_dist = float(np.mean([r["distance_px"] for r in entries]))
     fig.suptitle(
         f"[{model_type}]  Query: {query_item['fname']}  —  {hits}/{k} PG hits  "
         f"(mean dist={mean_dist:.1f}px)",
-        fontsize=15, fontweight="bold",
+        fontsize=17, fontweight="bold",
     )
 
     legend_handles = [
         patches.Patch(edgecolor="#0074d9", facecolor="none", linewidth=3, label="Query"),
         patches.Patch(edgecolor="#2ecc40", facecolor="none", linewidth=3, label="Pointing-game HIT"),
         patches.Patch(edgecolor="#ff4136", facecolor="none", linewidth=3, label="Pointing-game MISS"),
-        patches.Patch(edgecolor="lime", facecolor="none", label="Ground-truth bbox"),
+        patches.Patch(edgecolor="lime", facecolor="none", label="Ground-truth bbox (matched)"),
+        patches.Patch(edgecolor="yellow", facecolor="none", linestyle=":", label="Ground-truth bbox (other)"),
         plt.Line2D([0], [0], color="red", marker="x", linestyle="None", markersize=10, label="Max saliency point"),
     ]
-    fig.legend(handles=legend_handles, loc="lower center", ncol=len(legend_handles), fontsize=11, framealpha=0.9)
+    fig.legend(handles=legend_handles, loc="lower center", ncol=3, fontsize=12, framealpha=0.9)
 
-    fig.tight_layout(rect=(0, 0.06, 1, 0.94))
+    fig.tight_layout(rect=(0, 0.05, 1, 0.95))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
@@ -226,6 +251,10 @@ def run(args):
     rows_by_fname = {r["fname"]: r for r in rows}
     transform = build_transform(args.img_size)
 
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    per_pair_json_path = output_dir / f"{args.dataset}_{args.model_type}_per_pair.json"
+
     print(f"Loading {args.model_type} from {args.model_weights} ...")
     model = load_model(
         args.model_type, args.model_weights, device,
@@ -233,39 +262,48 @@ def run(args):
     )
     explainer = build_simatt(model, args.model_type).to(device)
 
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    reuse_path = args.reuse_eval_json or (per_pair_json_path if per_pair_json_path.exists() and args.auto_reuse else None)
+    if reuse_path:
+        print(f"\nReusing cached per-pair evaluation from {reuse_path} (skipping the full SimAtt sweep) ...")
+        with open(reuse_path, "r", encoding="utf-8") as f:
+            per_image = json.load(f)
+    else:
+        print(f"\nEvaluating SimAtt retrieval PG-hit/RMSE across all {len(rows)} images (top_k={args.top_k}) ...")
+        per_image = evaluate_retrieval_model(
+            model_name=args.model_type, model=model, rows=rows, transform=transform, device=device,
+            top_k=args.top_k, embedding_batch_size=args.batch_size, saliency_index=-1,
+            visualization_dir=None, max_visualizations=0,
+        )
 
-    print(f"\nEvaluating SimAtt retrieval PG-hit/RMSE across all {len(rows)} images (top_k={args.top_k}) ...")
-    per_image = evaluate_retrieval_model(
-        model_name=args.model_type, model=model, rows=rows, transform=transform, device=device,
-        top_k=args.top_k, embedding_batch_size=args.batch_size, saliency_index=-1,
-        visualization_dir=None, max_visualizations=0,
-    )
+        summary = summarize_results(per_image)
+        print("\nDataset-level SimAtt localization summary:")
+        print(f"  Samples:      {summary['num_samples']}")
+        print(f"  PG hit rate:  {summary['pg_hit_rate']:.4f}")
+        print(f"  RMSE (px):    {summary['rmse_distance_px']:.2f}")
+        print(f"  RMSE (norm):  {summary['rmse_normalized_distance']:.4f}")
 
-    summary = summarize_results(per_image)
-    print("\nDataset-level SimAtt localization summary:")
-    print(f"  Samples:      {summary['num_samples']}")
-    print(f"  PG hit rate:  {summary['pg_hit_rate']:.4f}")
-    print(f"  RMSE (px):    {summary['rmse_distance_px']:.2f}")
-    print(f"  RMSE (norm):  {summary['rmse_normalized_distance']:.4f}")
-
-    save_csv(output_dir / f"{args.dataset}_{args.model_type}_pg_rmse_per_pair.csv", per_image)
-    with open(output_dir / f"{args.dataset}_{args.model_type}_summary.json", "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
-    print(f"  Saved dataset-level CSV/JSON to: {output_dir}")
+        save_csv(output_dir / f"{args.dataset}_{args.model_type}_pg_rmse_per_pair.csv", per_image)
+        with open(output_dir / f"{args.dataset}_{args.model_type}_summary.json", "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+        with open(per_pair_json_path, "w", encoding="utf-8") as f:
+            json.dump(per_image, f)
+        print(f"  Saved dataset-level CSV/JSON to: {output_dir}")
+        print(f"  Cached full per-pair results to {per_pair_json_path} "
+              f"-> pass --reuse_eval_json {per_pair_json_path} (or --auto_reuse) next time to skip re-evaluation.")
 
     groups = group_by_query(per_image)
     ranked = rank_queries(groups, top_k=args.top_k)
     print(f"\n{len(ranked)} / {len(groups)} query groups have a full top-{args.top_k} retrieval set.")
 
-    selected = ranked[: args.num_queries]
+    selected = ranked[args.offset: args.offset + args.num_queries]
     if not selected:
-        print("[WARN] No query group has enough retrieved images to build a showcase figure.")
+        print(f"[WARN] No query groups left at offset={args.offset} "
+              f"(only {len(ranked)} ranked groups available).")
         return
 
-    print(f"\nRendering {len(selected)} showcase figure(s) to {output_dir} ...")
-    for rank_pos, (hit_rate, avg_norm_dist, fname, entries) in enumerate(selected, start=1):
+    print(f"\nRendering {len(selected)} showcase figure(s) (rank {args.offset + 1}-{args.offset + len(selected)}) "
+          f"to {output_dir} ...")
+    for rank_pos, (hit_rate, avg_norm_dist, fname, entries) in enumerate(selected, start=args.offset + 1):
         query_item = rows_by_fname[fname]
         q_img = Image.open(query_item["image_path"]).convert("RGB")
         q_tensor = transform(q_img).unsqueeze(0).to(device)
@@ -281,9 +319,10 @@ def run(args):
                 sal_tensor = explainer(q_tensor, r_tensor)
             saliencies.append(select_saliency_map(sal_tensor, saliency_index=-1))
 
+        fname_stem = Path(fname).stem
         out_name = (
             f"{args.dataset}_{args.model_type}_showcase{rank_pos:02d}"
-            f"_hit{int(round(hit_rate * 100))}_{safe_stem(fname)}.png"
+            f"_hit{int(round(hit_rate * 100))}_{safe_stem(fname_stem)}.png"
         )
         plot_query_showcase(
             model_type=args.model_type,
@@ -323,6 +362,16 @@ def parse_args():
                          help="Retrieved images per query (>=3 recommended; default 3)")
     parser.add_argument("--num_queries", type=int, default=10,
                          help="Number of best-scoring queries to render as showcase figures")
+    parser.add_argument("--offset", type=int, default=0,
+                         help="Skip this many top-ranked queries before rendering the next --num_queries "
+                              "(e.g. --offset 10 to get ranks 11-20 after already rendering the top 10)")
+    parser.add_argument("--reuse_eval_json", default=None,
+                         help="Path to a previously saved '<dataset>_<model_type>_per_pair.json' "
+                              "(from an earlier run) to skip the full SimAtt sweep entirely and just "
+                              "re-rank/re-render showcase figures.")
+    parser.add_argument("--auto_reuse", action="store_true",
+                         help="If '<output_dir>/<dataset>_<model_type>_per_pair.json' from a prior run "
+                              "already exists, reuse it automatically instead of --reuse_eval_json.")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--limit", type=int, default=None, help="Optional cap on dataset size for a quick run")
     parser.add_argument("--dpi", type=int, default=200, help="DPI for showcase figures (report-quality export)")
