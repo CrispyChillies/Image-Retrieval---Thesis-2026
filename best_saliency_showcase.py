@@ -22,6 +22,12 @@ things happen in one run:
     Border color is green/red per pointing-game hit/miss for that retrieved
     image. A top_k=3 run therefore produces 3 rows x 3 columns per figure.
 
+    Use --hit_filter all_miss to instead showcase only "near-miss" cases:
+    query groups where every retrieved image technically misses the bbox
+    (red border), ranked so the smallest saliency-to-bbox distance comes
+    first — useful to argue "the map doesn't hit, but lands very close",
+    which is a case worth flagging for future research.
+
 Works for --dataset tbx11k and --dataset vindr. Explainer is always SimAtt
 (the same localization metric evaluate_PG_RSME.py uses), open for reuse by
 future research on other datasets/models via the same CLI shape.
@@ -88,16 +94,36 @@ def group_by_query(per_image):
     return groups
 
 
-def rank_queries(groups, top_k):
-    """Best queries first: highest hit_rate, then lowest normalized distance."""
+def rank_queries(groups, top_k, hit_filter="any"):
+    """
+    Rank query groups for the showcase.
+
+    hit_filter:
+      "any"      - default. Best = highest hit_rate, then lowest normalized distance.
+      "all_hit"  - only keep groups where every retrieved image is a PG hit,
+                   ranked by lowest normalized distance first.
+      "all_miss" - only keep groups where every retrieved image is a PG miss,
+                   ranked by lowest normalized distance first (i.e. the
+                   "near-miss" cases: saliency doesn't land inside the bbox,
+                   but is as close as possible to it).
+    """
     scored = []
     for fname, entries in groups.items():
         if len(entries) < top_k:
             continue  # incomplete retrieval set (near end of a small dataset)
-        hit_rate = float(np.mean([e["pg_hit"] for e in entries]))
+        hits = [bool(e["pg_hit"]) for e in entries]
+        if hit_filter == "all_hit" and not all(hits):
+            continue
+        if hit_filter == "all_miss" and any(hits):
+            continue
+        hit_rate = float(np.mean(hits))
         avg_norm_dist = float(np.mean([e["normalized_distance"] for e in entries]))
         scored.append((hit_rate, avg_norm_dist, fname, entries))
-    scored.sort(key=lambda t: (-t[0], t[1]))
+
+    if hit_filter == "all_miss" or hit_filter == "all_hit":
+        scored.sort(key=lambda t: t[1])  # nearest-to-bbox first, hit_rate is constant within the filter
+    else:
+        scored.sort(key=lambda t: (-t[0], t[1]))
     return scored
 
 
@@ -292,8 +318,9 @@ def run(args):
               f"-> pass --reuse_eval_json {per_pair_json_path} (or --auto_reuse) next time to skip re-evaluation.")
 
     groups = group_by_query(per_image)
-    ranked = rank_queries(groups, top_k=args.top_k)
-    print(f"\n{len(ranked)} / {len(groups)} query groups have a full top-{args.top_k} retrieval set.")
+    ranked = rank_queries(groups, top_k=args.top_k, hit_filter=args.hit_filter)
+    print(f"\n{len(ranked)} / {len(groups)} query groups match --hit_filter={args.hit_filter} "
+          f"with a full top-{args.top_k} retrieval set.")
 
     selected = ranked[args.offset: args.offset + args.num_queries]
     if not selected:
@@ -322,7 +349,7 @@ def run(args):
         fname_stem = Path(fname).stem
         out_name = (
             f"{args.dataset}_{args.model_type}_showcase{rank_pos:02d}"
-            f"_hit{int(round(hit_rate * 100))}_{safe_stem(fname_stem)}.png"
+            f"_hit{int(round(hit_rate * 100))}_normdist{avg_norm_dist:.3f}_{safe_stem(fname_stem)}.png"
         )
         plot_query_showcase(
             model_type=args.model_type,
@@ -351,6 +378,12 @@ def parse_args():
                          help="Set to 384 for annotations_rescaled_384.csv-style fixed-coordinate bboxes.")
     parser.add_argument("--exclude_labels_csv", default=None)
     parser.add_argument("--exclude_label", default="No finding")
+    parser.add_argument("--hit_filter", choices=["any", "all_hit", "all_miss"], default="any",
+                         help="any (default) = rank by hit rate desc, then distance asc. "
+                              "all_hit = only groups where every retrieved image is a PG hit. "
+                              "all_miss = only groups where every retrieved image is a PG miss, "
+                              "ranked nearest-miss-first (smallest normalized distance) — use this to "
+                              "showcase saliency maps that land close to the bbox without a technical hit.")
     parser.add_argument("--model_type", default="convnextv2_sra",
                          choices=["convnextv2", "convnextv2_sra", "densenet121", "resnet50"])
     parser.add_argument("--model_weights", required=True)
