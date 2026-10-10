@@ -1,0 +1,4 @@
+dataset,split,n_samples,n_classes,max_class,max_count,min_class,min_count,imbalance_ratio
+COVIDx,train,13935,3,normal,7966,COVID-19,505,15.774257425742574
+TBX11K,train,1374,3,sick_but_no_tb,600,tb,174,3.4482758620689653
+VinDr,test,3000,28,No finding,2051,Edema,0,inf
