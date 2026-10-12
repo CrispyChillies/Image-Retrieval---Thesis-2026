@@ -281,7 +281,11 @@ def compute_classwise_ap(
         ap_values = []
 
         for q in query_indices:
-            ranked_idx = rankings[q]
+            # Per-class relevance definition:
+            # rel_c(q, i) = 1 if class c is present in candidate i, else 0.
+            # Exclude the query itself from the gallery when computing AP.
+            ranked_idx_full = rankings[q]
+            ranked_idx = ranked_idx_full[ranked_idx_full != q]
             relevance = class_membership[ranked_idx, class_idx].astype(bool)
             ap_q = _average_precision_from_binary_relevance(relevance)
             if not np.isnan(ap_q):
